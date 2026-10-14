@@ -5,7 +5,8 @@ from collections import defaultdict
 from pathlib import Path
 
 from sqlalchemy import create_engine, event
-from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from autohome.items import (
@@ -16,6 +17,12 @@ from autohome.items import (
     SpecParameterItem,
 )
 from autohome.models import Base, Brand, ParameterDefinition, Series, Spec, SpecParameter
+from autohome.translator import (
+    translate_exact,
+    translate_parameter_name,
+    translate_structure,
+    translate_vehicle_name,
+)
 
 
 def json_text(value) -> str:
@@ -54,7 +61,7 @@ class SqlAlchemyPipeline:
             db_path = Path(self.database_url.removeprefix("sqlite:///"))
             db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        self.engine = create_engine(self.database_url)
+        self.engine = create_engine(self.database_url, pool_pre_ping=True)
         if self.engine.dialect.name == "sqlite":
             event.listen(self.engine, "connect", self._configure_sqlite)
         Base.metadata.create_all(self.engine)
@@ -94,7 +101,8 @@ class SqlAlchemyPipeline:
                 if not rows:
                     continue
                 model = self.model_by_item[item_type]
-                statement = insert(model).values(rows)
+                rows = self._deduplicate_rows(model, rows)
+                statement = self._insert(model).values(rows)
                 primary_keys = {column.name for column in model.__table__.primary_key}
                 update_columns = {
                     column.name: getattr(statement.excluded, column.name)
@@ -113,19 +121,56 @@ class SqlAlchemyPipeline:
         self.buffers.clear()
         self.buffered = 0
 
+    def _insert(self, model):
+        """Создать совместимый с текущей СУБД оператор INSERT с UPSERT."""
+        if self.engine.dialect.name == "postgresql":
+            return postgresql_insert(model)
+        if self.engine.dialect.name == "sqlite":
+            return sqlite_insert(model)
+        raise RuntimeError(
+            f"СУБД {self.engine.dialect.name} не поддерживается pipeline"
+        )
+
+    @staticmethod
+    def _deduplicate_rows(model, rows: list[dict]) -> list[dict]:
+        """Оставить последнюю строку для каждого конфликтного ключа пакета."""
+        if model is SpecParameter:
+            key_columns = ("spec_id", "title_id")
+        else:
+            key_columns = tuple(column.name for column in model.__table__.primary_key)
+        unique_rows = {
+            tuple(row[column] for column in key_columns): row for row in rows
+        }
+        return list(unique_rows.values())
+
     @staticmethod
     def _serialize(item):
         """Преобразовать элемент Scrapy в строку для соответствующей таблицы."""
         data = dict(item)
         raw = data.pop("raw", data)
         data["raw_json"] = json_text(raw)
+        if isinstance(item, (BrandItem, SeriesItem, SpecItem)):
+            data["name"] = translate_vehicle_name(data.get("name"))
+        if isinstance(item, SpecItem):
+            for field in ("guide_price", "dealer_price", "discount", "description"):
+                data[field] = translate_exact(data.get(field))
+        if isinstance(item, ParameterDefinitionItem):
+            data["name"] = translate_parameter_name(data.get("name"))
+            data["group_name"] = translate_exact(data.get("group_name"))
+            data["section_name"] = translate_exact(data.get("section_name"))
         if isinstance(item, SpecParameterItem):
+            data["value"] = translate_exact(data.get("value"))
+            data["option_price"] = translate_exact(data.get("option_price"))
             subitems = data.pop("subitems", None)
             color_info = data.pop("color_info", None)
             data["subitems_json"] = (
-                json_text(subitems) if subitems is not None else None
+                json_text(translate_structure(subitems))
+                if subitems is not None
+                else None
             )
             data["color_info_json"] = (
-                json_text(color_info) if color_info is not None else None
+                json_text(translate_structure(color_info))
+                if color_info is not None
+                else None
             )
         return data

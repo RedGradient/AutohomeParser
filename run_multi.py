@@ -4,6 +4,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
 import multiprocessing
+import os
 from pathlib import Path
 import re
 import socket
@@ -46,6 +47,22 @@ def parse_arguments() -> argparse.Namespace:
         type=Path,
         default=Path("data/workers"),
         help="Каталог отдельных SQLite-баз worker-процессов.",
+    )
+    parser.add_argument(
+        "--database-url",
+        default=os.getenv("DATABASE_URL"),
+        help="Общая база PostgreSQL; по умолчанию берётся из DATABASE_URL.",
+    )
+    parser.add_argument(
+        "--resume-configs",
+        action="store_true",
+        help="Дозагрузить только отсутствующие полные конфигурации из общей БД.",
+    )
+    parser.add_argument(
+        "--max-resume-specs",
+        type=int,
+        default=0,
+        help="Максимум недостающих комплектаций на worker в режиме дозагрузки.",
     )
     parser.add_argument(
         "--skip-route-check",
@@ -167,6 +184,33 @@ def worker_database_url(directory: Path, interface: str) -> str:
     return f"sqlite:///{path}"
 
 
+def database_url_for_worker(
+    configured_url: str | None, directory: Path, interface: str
+) -> str:
+    """Вернуть общую PostgreSQL либо отдельную SQLite для worker-процесса."""
+    return configured_url or worker_database_url(directory, interface)
+
+
+def database_display_name(database_url: str) -> str:
+    """Вернуть безопасное представление URL базы без пароля."""
+    from sqlalchemy.engine import make_url
+
+    return make_url(database_url).render_as_string(hide_password=True)
+
+
+def initialize_database(database_url: str) -> None:
+    """Проверить подключение и создать схему до запуска worker-процессов."""
+    from sqlalchemy import create_engine
+
+    from autohome.models import Base
+
+    engine = create_engine(database_url, pool_pre_ping=True)
+    try:
+        Base.metadata.create_all(engine)
+    finally:
+        engine.dispose()
+
+
 def worker_color(worker_index: int) -> str:
     """Выбрать постоянный цвет консольного журнала worker-процесса."""
     return LOG_COLORS[worker_index % len(LOG_COLORS)]
@@ -180,6 +224,8 @@ def run_worker(
     database_url: str,
     city_id: str,
     max_series: int,
+    resume_configs: bool,
+    max_resume_specs: int,
 ) -> None:
     """Запустить Scrapy в изолированном дочернем процессе."""
     from scrapy.crawler import CrawlerProcess
@@ -209,6 +255,8 @@ def run_worker(
         worker_index=str(worker_index),
         worker_count=str(worker_count),
         bind_address=bind_address,
+        resume_configs="1" if resume_configs else "0",
+        max_resume_specs=str(max_resume_specs),
     )
     crawler.start()
 
@@ -246,7 +294,8 @@ def main() -> int:
     if len(set(interfaces)) != len(interfaces):
         raise SystemExit("Имена сетевых интерфейсов не должны повторяться")
 
-    args.database_dir.mkdir(parents=True, exist_ok=True)
+    if not args.database_url:
+        args.database_dir.mkdir(parents=True, exist_ok=True)
     workers: list[tuple[str, str, str]] = []
     for interface in interfaces:
         address = interface_ipv4(interface)
@@ -262,16 +311,29 @@ def main() -> int:
                 check_autohome_dns(interface, address)
             except (OSError, RuntimeError) as error:
                 raise SystemExit(f"Проверка DNS завершилась ошибкой: {error}") from error
-        database_url = worker_database_url(args.database_dir, interface)
+        database_url = database_url_for_worker(
+            args.database_url,
+            args.database_dir,
+            interface,
+        )
         workers.append((interface, address, database_url))
+
+    unique_database_urls = {database_url for _, _, database_url in workers}
+    for database_url in unique_database_urls:
+        try:
+            initialize_database(database_url)
+        except Exception as error:
+            safe_url = database_display_name(database_url)
+            raise SystemExit(f"Не удалось подготовить базу {safe_url}: {error}") from error
 
     context = multiprocessing.get_context("spawn")
     processes: list[multiprocessing.Process] = []
     for index, (interface, address, database_url) in enumerate(workers):
         color = worker_color(index)
+        safe_database_url = database_display_name(database_url)
         print(
             f"{color}Worker {index}: интерфейс={interface}, IP={address}, "
-            f"БД={database_url}{LOG_COLOR_RESET}",
+            f"БД={safe_database_url}{LOG_COLOR_RESET}",
             flush=True,
         )
         process = context.Process(
@@ -285,6 +347,8 @@ def main() -> int:
                 database_url,
                 args.city_id,
                 args.max_series,
+                args.resume_configs,
+                args.max_resume_specs,
             ),
         )
         process.start()

@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 # Имя Scrapy-проекта, используемое во внутренних компонентах и логах.
@@ -57,10 +58,13 @@ DEFAULT_REQUEST_HEADERS = {
 
 # Подключить pipeline SQLAlchemy; число задаёт порядок его выполнения.
 ITEM_PIPELINES = {"autohome.pipelines.SqlAlchemyPipeline": 300}
-# Адрес SQLite-базы с абсолютным путём к файлу внутри каталога data.
-DATABASE_URL = f"sqlite:///{Path('data/autohome.sqlite3').resolve()}"
+# Адрес базы из окружения; без переменной используется локальная SQLite.
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    f"sqlite:///{Path('data/autohome.sqlite3').resolve()}",
+)
 # Количество элементов, накапливаемых перед одной пакетной записью в БД.
-DATABASE_BATCH_SIZE = 1000
+DATABASE_BATCH_SIZE = int(os.getenv("DATABASE_BATCH_SIZE", "1000"))
 
 # Минимальный уровень сообщений, выводимых в журнал Scrapy.
 LOG_LEVEL = "INFO"

@@ -2,6 +2,17 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 .ONESHELL:
 
+-include .env
+
+POSTGRES_DB ?= autohome
+POSTGRES_USER ?= autohome
+POSTGRES_PASSWORD ?= autohome
+POSTGRES_PORT ?= 5432
+AUTOHOME_INTERFACES ?= wlp0s20f3,enp0s20f0u1c4i2
+DATABASE_BATCH_SIZE ?= 1000
+SHUTDOWN_TIMEOUT ?= 120
+DATABASE_URL ?= postgresql+psycopg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@127.0.0.1:$(POSTGRES_PORT)/$(POSTGRES_DB)
+
 # Используемые по умолчанию сетевые интерфейсы.
 WIFI_IF ?= wlp0s20f3
 ETH_IF ?= enp0s20f0u1c4i2
@@ -12,7 +23,7 @@ ETH_TABLE := 10102
 WIFI_PRIORITY := 10101
 ETH_PRIORITY := 10102
 
-.PHONY: help network-up network-down network-status network-test
+.PHONY: help network-up network-down network-status network-test postgres-up parser-run parser-resume translate-db docker-down
 
 help:
 	@echo "Доступные команды:"
@@ -20,6 +31,11 @@ help:
 	@echo "  make network-down    — удалить временные правила"
 	@echo "  make network-status  — показать интерфейсы и правила"
 	@echo "  make network-test    — проверить маршруты и внешние IP"
+	@echo "  make postgres-up     — запустить PostgreSQL"
+	@echo "  make parser-run      — запустить локальный парсер"
+	@echo "  make parser-resume   — дозагрузить конфигурации"
+	@echo "  make translate-db    — перевести уже сохранённые данные"
+	@echo "  make docker-down     — остановить контейнеры"
 	@echo
 	@echo "Интерфейсы можно переопределить:"
 	@echo "  make WIFI_IF=wlan0 ETH_IF=eth0 network-up"
@@ -84,3 +100,26 @@ network-test:
 	echo "Внешний IP Ethernet:"
 	curl -4 --interface "$$eth_ip" --connect-timeout 10 --max-time 20 -fsS https://api.ipify.org
 	echo
+
+postgres-up:
+	@docker compose up -d --wait postgres
+
+parser-run: postgres-up
+	@DATABASE_URL='$(DATABASE_URL)' DATABASE_BATCH_SIZE='$(DATABASE_BATCH_SIZE)' \
+		.venv/bin/python run_multi.py \
+		--interfaces '$(AUTOHOME_INTERFACES)' \
+		--shutdown-timeout '$(SHUTDOWN_TIMEOUT)'
+
+parser-resume: postgres-up
+	@DATABASE_URL='$(DATABASE_URL)' DATABASE_BATCH_SIZE='$(DATABASE_BATCH_SIZE)' \
+		.venv/bin/python run_multi.py \
+		--interfaces '$(AUTOHOME_INTERFACES)' \
+		--shutdown-timeout '$(SHUTDOWN_TIMEOUT)' \
+		--resume-configs
+
+translate-db: postgres-up
+	@DATABASE_URL='$(DATABASE_URL)' \
+		.venv/bin/python translate_database.py
+
+docker-down:
+	@docker compose down
