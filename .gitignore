@@ -1,0 +1,50 @@
+# Виртуальные окружения
+.venv/
+venv/
+env/
+
+# Кеш и скомпилированные файлы Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Артефакты сборки и пакетов
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Настройки IDE и редакторов
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Локальные переменные окружения
+.env
+.env.*
+!.env.example
+
+# Логи и состояние заданий Scrapy
+*.log
+.scrapy/
+jobdir/
+
+# Загруженные данные и локальные базы
+/data/
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
+
+# Системные файлы
+.DS_Store
+Thumbs.db
