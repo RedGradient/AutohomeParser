@@ -17,7 +17,7 @@ TELNETCONSOLE_ENABLED = False
 # Максимальное общее количество одновременно выполняемых запросов.
 CONCURRENT_REQUESTS = 100
 # Максимальное количество одновременных запросов к одному домену.
-CONCURRENT_REQUESTS_PER_DOMAIN = 24
+CONCURRENT_REQUESTS_PER_DOMAIN = 24 # 24 - оптимальное значение
 # Минимальная задержка между запросами к одному домену в секундах.
 DOWNLOAD_DELAY = 0
 # Величина случайного отклонения задержки между запросами.
@@ -28,7 +28,7 @@ DOWNLOAD_TIMEOUT = 30
 # Автоматически регулировать скорость запросов по задержкам ответов сервера.
 AUTOTHROTTLE_ENABLED = True
 # Начальная задержка AutoThrottle в секундах.
-AUTOTHROTTLE_START_DELAY = 0.1
+AUTOTHROTTLE_START_DELAY = 0.5
 # Максимальная задержка, которую может установить AutoThrottle, в секундах.
 AUTOTHROTTLE_MAX_DELAY = 10
 # Желаемое среднее количество параллельных запросов на один сервер.

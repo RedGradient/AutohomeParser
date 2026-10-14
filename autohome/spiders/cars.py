@@ -82,6 +82,9 @@ class CarsSpider(scrapy.Spider):
         max_config_requests_per_series="0",
         resume_configs="0",
         max_resume_specs="0",
+        worker_index="0",
+        worker_count="1",
+        bind_address=None,
         *args,
         **kwargs,
     ):
@@ -95,6 +98,11 @@ class CarsSpider(scrapy.Spider):
         )
         self.resume_configs = as_bool(resume_configs)
         self.max_resume_specs = as_int(max_resume_specs) or 0
+        self.worker_index = as_int(worker_index) or 0
+        self.worker_count = as_int(worker_count) or 1
+        self.bind_address = bind_address or None
+        if not 0 <= self.worker_index < self.worker_count:
+            raise ValueError("worker_index должен находиться в диапазоне worker_count")
         self.processed_spec_ids: set[int] = set()
         self.pending_specs: dict[int, deque[int]] = {}
         self.spec_series: dict[int, int] = {}
@@ -106,6 +114,12 @@ class CarsSpider(scrapy.Spider):
             for request in self._resume_config_requests():
                 yield request
         elif self.only_series_id is not None:
+            if not self._owns_series(self.only_series_id):
+                self.logger.info(
+                    "Серия %d назначена другому worker; текущий процесс завершён",
+                    self.only_series_id,
+                )
+                return
             # Точечный запуск пропускает каталог, поэтому создаём родительскую
             # запись заранее. Последующий полный обход дополнит её данными.
             yield SeriesItem(
@@ -130,7 +144,11 @@ class CarsSpider(scrapy.Spider):
         )
         statement = (
             select(Spec.id, Spec.series_id)
-            .where(Spec.config_available.is_not(False), ~has_parameters)
+            .where(
+                Spec.config_available.is_not(False),
+                ~has_parameters,
+                Spec.series_id % self.worker_count == self.worker_index,
+            )
             .order_by(Spec.series_id, Spec.id)
         )
 
@@ -167,24 +185,27 @@ class CarsSpider(scrapy.Spider):
             body = cache_path.read_bytes()
             self.logger.info("Using cached catalog from %s", cache_path)
         else:
+            command = [
+                "curl",
+                "-fsS",
+                "--compressed",
+                "--connect-timeout",
+                "15",
+                "--max-time",
+                "300",
+                "--retry",
+                "3",
+                "--retry-all-errors",
+                "-H",
+                "Accept: application/json, text/plain, */*",
+                "-H",
+                "Referer: https://www.autohome.com.cn/price",
+            ]
+            if self.bind_address:
+                command.extend(["--interface", self.bind_address])
+            command.append(self.tree_url)
             completed = subprocess.run(
-                [
-                    "curl",
-                    "-fsS",
-                    "--compressed",
-                    "--connect-timeout",
-                    "15",
-                    "--max-time",
-                    "300",
-                    "--retry",
-                    "3",
-                    "--retry-all-errors",
-                    "-H",
-                    "Accept: application/json, text/plain, */*",
-                    "-H",
-                    "Referer: https://www.autohome.com.cn/price",
-                    self.tree_url,
-                ],
+                command,
                 check=True,
                 capture_output=True,
                 timeout=930,
@@ -261,6 +282,8 @@ class CarsSpider(scrapy.Spider):
                     # отсутствующие комплектации.
                     if as_int(series.get("speccount")) == 0:
                         continue
+                    if not self._owns_series(series_id):
+                        continue
                     yield self._spec_list_request(series_id)
                     scheduled_series += 1
                     if self.max_series and scheduled_series >= self.max_series:
@@ -284,6 +307,7 @@ class CarsSpider(scrapy.Spider):
             callback=self.parse_spec_list,
             cb_kwargs={"series_id": series_id},
             headers={"Referer": f"https://www.autohome.com.cn/{series_id}/"},
+            meta=self._network_meta(),
         )
 
     def parse_spec_list(self, response, series_id: int):
@@ -338,6 +362,7 @@ class CarsSpider(scrapy.Spider):
                 headers={
                     "Referer": f"https://www.autohome.com.cn/config/spec/{spec_id}.html"
                 },
+                meta=self._network_meta(),
             )
         self.pending_specs.pop(series_id, None)
         return None
@@ -433,3 +458,11 @@ class CarsSpider(scrapy.Spider):
             ),
             raw=obj,
         )
+
+    def _owns_series(self, series_id: int) -> bool:
+        """Проверить, назначена ли серия текущему worker-процессу."""
+        return series_id % self.worker_count == self.worker_index
+
+    def _network_meta(self) -> dict:
+        """Вернуть параметры Scrapy для привязки запроса к локальному IP."""
+        return {"bindaddress": self.bind_address} if self.bind_address else {}
