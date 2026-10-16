@@ -23,7 +23,7 @@ ETH_TABLE := 10102
 WIFI_PRIORITY := 10101
 ETH_PRIORITY := 10102
 
-.PHONY: help network-up network-down network-status network-test postgres-up parser-run parser-resume translate-db docker-down
+.PHONY: help network-up network-down network-status network-test postgres-up parser-run parser-resume database-reset parameters-reset build-modifications translate-db docker-down
 
 help:
 	@echo "Доступные команды:"
@@ -33,7 +33,10 @@ help:
 	@echo "  make network-test    — проверить маршруты и внешние IP"
 	@echo "  make postgres-up     — запустить PostgreSQL"
 	@echo "  make parser-run      — запустить локальный парсер"
-	@echo "  make parser-resume   — дозагрузить конфигурации"
+	@echo "  make parser-resume   — дозагрузить конфигурации, продажи и галереи"
+	@echo "  make database-reset  — удалить всю БД и создать актуальные таблицы"
+	@echo "  make parameters-reset — пересоздать только таблицы характеристик"
+	@echo "  make build-modifications — нормализовать параметры и собрать модификации"
 	@echo "  make translate-db    — перевести уже сохранённые данные"
 	@echo "  make docker-down     — остановить контейнеры"
 	@echo
@@ -116,6 +119,18 @@ parser-resume: postgres-up
 		--interfaces '$(AUTOHOME_INTERFACES)' \
 		--shutdown-timeout '$(SHUTDOWN_TIMEOUT)' \
 		--resume-configs
+
+database-reset: postgres-up
+	@DATABASE_URL='$(DATABASE_URL)' \
+		.venv/bin/python reset_database.py --yes
+
+parameters-reset: postgres-up
+	@DATABASE_URL='$(DATABASE_URL)' \
+		.venv/bin/python reset_parameters.py --yes
+
+build-modifications: postgres-up
+	@DATABASE_URL='$(DATABASE_URL)' \
+		.venv/bin/python build_modifications.py
 
 translate-db: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \

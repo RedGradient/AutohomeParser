@@ -65,6 +65,12 @@ DATABASE_URL = os.getenv(
 )
 # Количество элементов, накапливаемых перед одной пакетной записью в БД.
 DATABASE_BATCH_SIZE = int(os.getenv("DATABASE_BATCH_SIZE", "1000"))
+# Максимальное число повторов пакетной транзакции после deadlock PostgreSQL.
+DATABASE_DEADLOCK_RETRIES = int(os.getenv("DATABASE_DEADLOCK_RETRIES", "6"))
+# Начальная задержка между повторами транзакции в секундах.
+DATABASE_DEADLOCK_RETRY_DELAY = float(
+    os.getenv("DATABASE_DEADLOCK_RETRY_DELAY", "0.1")
+)
 
 # Минимальный уровень сообщений, выводимых в журнал Scrapy.
 LOG_LEVEL = "INFO"

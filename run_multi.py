@@ -22,7 +22,15 @@ LOG_COLORS = (
     "\033[91m",  # Ярко-красный.
 )
 LOG_COLOR_RESET = "\033[0m"
-AUTOHOME_HOSTS = ("www.autohome.com.cn", "car.app.autohome.com.cn")
+AUTOHOME_HOSTS = (
+    "www.autohome.com.cn",
+    "car.app.autohome.com.cn",
+    "car.autohome.com.cn",
+)
+TREE_URL = (
+    "https://www.autohome.com.cn/web-main/car/web/price/"
+    "treeMenu?extendseries=1"
+)
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -65,6 +73,27 @@ def parse_arguments() -> argparse.Namespace:
         help="Максимум недостающих комплектаций на worker в режиме дозагрузки.",
     )
     parser.add_argument(
+        "--sales-months",
+        type=int,
+        default=6,
+        help="Количество последних доступных месяцев рейтингов продаж.",
+    )
+    parser.add_argument(
+        "--skip-sales",
+        action="store_true",
+        help="Не загружать месячные рейтинги серий и марок.",
+    )
+    parser.add_argument(
+        "--skip-galleries",
+        action="store_true",
+        help="Не загружать фотогалереи серий.",
+    )
+    parser.add_argument(
+        "--gallery-categories",
+        default="1,10,3,12,53,51",
+        help="Идентификаторы категорий галереи через запятую.",
+    )
+    parser.add_argument(
         "--skip-route-check",
         action="store_true",
         help="Не проверять, что маршрут исходного IP проходит через его интерфейс.",
@@ -79,6 +108,12 @@ def parse_arguments() -> argparse.Namespace:
         type=float,
         default=60.0,
         help="Ожидание штатного завершения workers после Ctrl+C в секундах.",
+    )
+    parser.add_argument(
+        "--catalog-path",
+        type=Path,
+        default=Path("data/tree_menu.json"),
+        help="Общий файл дерева каталога, подготовленный мастер-процессом.",
     )
     return parser.parse_args()
 
@@ -211,6 +246,70 @@ def initialize_database(database_url: str) -> None:
         engine.dispose()
 
 
+def download_catalog(
+    catalog_path: Path,
+    source_addresses: list[str],
+    force_refresh: bool,
+) -> None:
+    """Один раз получить каталог и атомарно сохранить его до запуска workers."""
+    catalog_path = catalog_path.resolve()
+    if (
+        not force_refresh
+        and catalog_path.exists()
+        and catalog_path.stat().st_size > 100_000
+    ):
+        print(f"Мастер использует кеш каталога {catalog_path}", flush=True)
+        return
+
+    errors: list[str] = []
+    for source_address in source_addresses:
+        temporary_path = catalog_path.with_name(f".{catalog_path.name}.{os.getpid()}.tmp")
+        command = [
+            "curl",
+            "-fsS",
+            "--compressed",
+            "--connect-timeout",
+            "15",
+            "--max-time",
+            "300",
+            "--retry",
+            "3",
+            "--retry-all-errors",
+            "--interface",
+            source_address,
+            "-H",
+            "Accept: application/json, text/plain, */*",
+            "-H",
+            "Referer: https://www.autohome.com.cn/price",
+            TREE_URL,
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                timeout=930,
+            )
+            body = completed.stdout
+            if len(body) <= 100_000:
+                raise RuntimeError(f"слишком короткий ответ: {len(body)} байт")
+            json.loads(body)
+            catalog_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary_path.write_bytes(body)
+            os.replace(temporary_path, catalog_path)
+            print(
+                f"Мастер сохранил каталог: {len(body)} байт, "
+                f"источник={source_address}, файл={catalog_path}",
+                flush=True,
+            )
+            return
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            temporary_path.unlink(missing_ok=True)
+            errors.append(f"{source_address}: {error}")
+
+    raise RuntimeError("; ".join(errors) or "нет доступных исходных адресов")
+
+
 def worker_color(worker_index: int) -> str:
     """Выбрать постоянный цвет консольного журнала worker-процесса."""
     return LOG_COLORS[worker_index % len(LOG_COLORS)]
@@ -226,6 +325,11 @@ def run_worker(
     max_series: int,
     resume_configs: bool,
     max_resume_specs: int,
+    sales_months: int,
+    skip_sales: bool,
+    skip_galleries: bool,
+    gallery_categories: str,
+    catalog_path: str,
 ) -> None:
     """Запустить Scrapy в изолированном дочернем процессе."""
     from scrapy.crawler import CrawlerProcess
@@ -257,6 +361,12 @@ def run_worker(
         bind_address=bind_address,
         resume_configs="1" if resume_configs else "0",
         max_resume_specs=str(max_resume_specs),
+        sales_months=str(sales_months),
+        parse_sales="0" if skip_sales else "1",
+        parse_galleries="0" if skip_galleries else "1",
+        gallery_categories=gallery_categories,
+        catalog_path=catalog_path,
+        catalog_preloaded="1",
     )
     crawler.start()
 
@@ -326,6 +436,16 @@ def main() -> int:
             safe_url = database_display_name(database_url)
             raise SystemExit(f"Не удалось подготовить базу {safe_url}: {error}") from error
 
+    catalog_path = args.catalog_path.resolve()
+    try:
+        download_catalog(
+            catalog_path,
+            [address for _, address, _ in workers],
+            force_refresh=args.resume_configs,
+        )
+    except Exception as error:
+        raise SystemExit(f"Не удалось подготовить дерево каталога: {error}") from error
+
     context = multiprocessing.get_context("spawn")
     processes: list[multiprocessing.Process] = []
     for index, (interface, address, database_url) in enumerate(workers):
@@ -349,6 +469,11 @@ def main() -> int:
                 args.max_series,
                 args.resume_configs,
                 args.max_resume_specs,
+                args.sales_months,
+                args.skip_sales,
+                args.skip_galleries,
+                args.gallery_categories,
+                str(catalog_path),
             ),
         )
         process.start()
