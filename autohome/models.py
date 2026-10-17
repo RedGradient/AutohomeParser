@@ -558,3 +558,45 @@ class SeriesPhotoColor(Base):
     series_id: Mapped[int] = mapped_column(Integer, index=True)
     color_type: Mapped[str] = mapped_column(String(20))
     color_id: Mapped[int] = mapped_column(Integer)
+
+
+class GalleryCrawlTask(Base):
+    """Состояние загрузки одной страницы фотогалереи."""
+
+    __tablename__ = "gallery_crawl_tasks"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    series_id: Mapped[int] = mapped_column(ForeignKey("series.id"), index=True)
+    category_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    color_type: Mapped[str | None] = mapped_column(String(20))
+    color_id: Mapped[int | None] = mapped_column(Integer)
+    page_url: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    photo_count: Mapped[int | None] = mapped_column(Integer)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class ConfigCrawlTask(Base):
+    """Состояние загрузки полной конфигурации комплектации."""
+
+    __tablename__ = "config_crawl_tasks"
+
+    spec_id: Mapped[int] = mapped_column(ForeignKey("specs.id"), primary_key=True)
+    series_id: Mapped[int] = mapped_column(ForeignKey("series.id"), index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    parameter_count: Mapped[int | None] = mapped_column(Integer)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )

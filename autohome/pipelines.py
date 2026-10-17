@@ -19,8 +19,10 @@ from autohome.items import (
     AttentionRankingItem,
     BrandMonthlySaleItem,
     BrandItem,
+    ConfigCrawlTaskItem,
     BrandManufacturerItem,
     DiscountRankingItem,
+    GalleryCrawlTaskItem,
     ManufacturerItem,
     MeasuredTestRankingItem,
     NewEnergyRankingItem,
@@ -50,7 +52,9 @@ from autohome.models import (
     Brand,
     BrandMonthlySale,
     BrandManufacturer,
+    ConfigCrawlTask,
     DiscountRanking,
+    GalleryCrawlTask,
     Manufacturer,
     MeasuredTestRanking,
     Modification,
@@ -147,6 +151,8 @@ class SqlAlchemyPipeline:
         SeriesGalleryColorItem: SeriesGalleryColor,
         SeriesPhotoItem: SeriesPhoto,
         SeriesPhotoColorItem: SeriesPhotoColor,
+        GalleryCrawlTaskItem: GalleryCrawlTask,
+        ConfigCrawlTaskItem: ConfigCrawlTask,
     }
 
     reference_models = frozenset(
@@ -402,4 +408,6 @@ class SqlAlchemyPipeline:
         elif isinstance(item, TechnologyRankingItem):
             data["name"] = translate_exact(data.get("name"))
             data["fetched_at"] = datetime.now(timezone.utc)
+        elif isinstance(item, (GalleryCrawlTaskItem, ConfigCrawlTaskItem)):
+            data["updated_at"] = datetime.now(timezone.utc)
         return data

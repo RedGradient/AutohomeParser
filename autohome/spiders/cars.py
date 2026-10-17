@@ -19,7 +19,9 @@ from autohome.items import (
     BrandMonthlySaleItem,
     BrandManufacturerItem,
     BrandItem,
+    ConfigCrawlTaskItem,
     DiscountRankingItem,
+    GalleryCrawlTaskItem,
     ManufacturerItem,
     MeasuredTestRankingItem,
     NewEnergyRankingItem,
@@ -43,7 +45,14 @@ from autohome.items import (
     ResaleValueRankingItem,
     TechnologyRankingItem,
 )
-from autohome.models import Series, Spec, SpecParameter, SpecPowertrain
+from autohome.models import (
+    ConfigCrawlTask,
+    GalleryCrawlTask,
+    Series,
+    Spec,
+    SpecParameter,
+    SpecPowertrain,
+)
 from autohome.powertrain_normalizer import (
     PATH_TO_FIELD,
     SUBITEM_FIELDS,
@@ -231,12 +240,19 @@ class CarsSpider(scrapy.Spider):
         self.spec_years: dict[int, int | None] = {}
         self.config_request_counts: dict[int, int] = {}
         self.completed_config_spec_ids: set[int] = set()
+        self.scheduled_config_spec_ids: set[int] = set()
+        self.config_task_attempts: dict[int, int] = {}
         self.resume_specs_scheduled = 0
+        self.completed_gallery_task_ids: set[int] = set()
+        self.scheduled_gallery_task_ids: set[int] = set()
+        self.gallery_task_attempts: dict[int, int] = {}
+        self.pending_gallery_tasks: list[dict] = []
 
     async def start(self):
         """Запустить полный, точечный или возобновляемый обход."""
         if self.resume_configs:
             self.completed_config_spec_ids = self._load_completed_config_spec_ids()
+            self._load_gallery_tasks()
             if self.parse_sales and self.worker_index == 0 and self.sales_months:
                 for request in self._ranking_start_requests():
                     yield request
@@ -271,7 +287,10 @@ class CarsSpider(scrapy.Spider):
             yield self._spec_list_request(self.only_series_id)
             if self.parse_galleries:
                 for category_id in self.gallery_categories:
-                    yield self._gallery_request(self.only_series_id, category_id)
+                    for output in self._schedule_gallery_request(
+                        self.only_series_id, category_id
+                    ):
+                        yield output
         else:
             if self.parse_sales and self.worker_index == 0 and self.sales_months:
                 for request in self._ranking_start_requests():
@@ -309,7 +328,7 @@ class CarsSpider(scrapy.Spider):
             .where(SpecPowertrain.spec_id == Spec.id)
             .exists()
         )
-        statement = (
+        legacy_statement = (
             select(Spec.id)
             .where(
                 has_parameters,
@@ -318,10 +337,19 @@ class CarsSpider(scrapy.Spider):
                 Spec.series_id % self.worker_count == self.worker_index,
             )
         )
+        task_statement = select(
+            ConfigCrawlTask.spec_id,
+            ConfigCrawlTask.status,
+            ConfigCrawlTask.attempts,
+        ).where(ConfigCrawlTask.series_id % self.worker_count == self.worker_index)
         completed: set[int] = set()
         try:
             with engine.connect() as connection:
-                completed.update(connection.scalars(statement))
+                completed.update(connection.scalars(legacy_statement))
+                for spec_id, status, attempts in connection.execute(task_statement):
+                    self.config_task_attempts[spec_id] = attempts
+                    if status in {"complete", "empty"}:
+                        completed.add(spec_id)
         finally:
             engine.dispose()
         self.logger.info(
@@ -332,7 +360,17 @@ class CarsSpider(scrapy.Spider):
         return completed
 
     def _resume_gallery_requests(self):
-        """Повторно запланировать галереи серий для безопасной дозагрузки."""
+        """Запланировать незавершённые страницы и новые корни галерей."""
+        for task in self.pending_gallery_tasks:
+            yield from self._schedule_gallery_request(
+                task["series_id"],
+                task["category_id"],
+                task["page_url"],
+                task["color_type"],
+                task["color_id"],
+                task_id=task["id"],
+            )
+
         engine = create_engine(self.settings.get("DATABASE_URL"))
         statement = (
             select(Series.id)
@@ -355,7 +393,38 @@ class CarsSpider(scrapy.Spider):
         )
         for series_id in series_ids:
             for category_id in self.gallery_categories:
-                yield self._gallery_request(series_id, category_id)
+                yield from self._schedule_gallery_request(series_id, category_id)
+
+    def _load_gallery_tasks(self) -> None:
+        """Загрузить завершённые и требующие повтора задачи галерей."""
+        engine = create_engine(self.settings.get("DATABASE_URL"))
+        statement = select(
+            GalleryCrawlTask.id,
+            GalleryCrawlTask.series_id,
+            GalleryCrawlTask.category_id,
+            GalleryCrawlTask.color_type,
+            GalleryCrawlTask.color_id,
+            GalleryCrawlTask.page_url,
+            GalleryCrawlTask.status,
+            GalleryCrawlTask.attempts,
+        ).where(GalleryCrawlTask.series_id % self.worker_count == self.worker_index)
+        try:
+            with engine.connect() as connection:
+                for row in connection.execute(statement).mappings():
+                    task_id = row["id"]
+                    self.gallery_task_attempts[task_id] = row["attempts"]
+                    if row["status"] in {"complete", "empty"}:
+                        self.completed_gallery_task_ids.add(task_id)
+                    else:
+                        self.pending_gallery_tasks.append(dict(row))
+        finally:
+            engine.dispose()
+        self.logger.info(
+            "Режим дозагрузки: завершённых страниц галерей %d, "
+            "ожидают повтора %d",
+            len(self.completed_gallery_task_ids),
+            len(self.pending_gallery_tasks),
+        )
 
     def _download_tree(self, force_refresh: bool = False):
         """Получить дерево каталога через curl либо прочитать его из кеша."""
@@ -503,7 +572,9 @@ class CarsSpider(scrapy.Spider):
 
                     if self._owns_series(series_id) and self.parse_galleries:
                         for category_id in self.gallery_categories:
-                            yield self._gallery_request(series_id, category_id)
+                            yield from self._schedule_gallery_request(
+                                series_id, category_id
+                            )
 
                     # Пустые серии сохраняем в БД, но не запрашиваем для них
                     # отсутствующие комплектации.
@@ -827,24 +898,104 @@ class CarsSpider(scrapy.Spider):
         self,
         series_id: int,
         category_id: int,
-        url: str | None = None,
+        url: str,
         color_type: str | None = None,
         color_id: int | None = None,
+        task_id: int | None = None,
+        attempts: int = 1,
     ):
         """Создать запрос страницы галереи с контекстом категории и цвета."""
         return scrapy.Request(
-            url or self.gallery_url.format(
-                series_id=series_id, category_id=category_id
-            ),
+            url,
             callback=self.parse_gallery,
+            errback=self.gallery_error,
             cb_kwargs={
                 "series_id": series_id,
                 "category_id": category_id,
                 "color_type": color_type,
                 "color_id": color_id,
+                "task_id": task_id,
+                "attempts": attempts,
             },
             headers={"Referer": f"https://www.autohome.com.cn/{series_id}/"},
             meta=self._network_meta(),
+        )
+
+    def _schedule_gallery_request(
+        self,
+        series_id: int,
+        category_id: int,
+        url: str | None = None,
+        color_type: str | None = None,
+        color_id: int | None = None,
+        task_id: int | None = None,
+    ):
+        """Зарегистрировать ожидающую задачу и затем отправить её запрос."""
+        page_url = (url or self.gallery_url.format(
+            series_id=series_id,
+            category_id=category_id,
+        )).split("#", 1)[0]
+        if task_id is None:
+            task_id = stable_id(
+                "gallery-page",
+                series_id,
+                category_id,
+                color_type,
+                color_id,
+                page_url,
+            )
+        if task_id in self.completed_gallery_task_ids:
+            return
+        if task_id in self.scheduled_gallery_task_ids:
+            return
+        self.scheduled_gallery_task_ids.add(task_id)
+        attempts = self.gallery_task_attempts.get(task_id, 0) + 1
+        self.gallery_task_attempts[task_id] = attempts
+        yield self._gallery_task_item(
+            task_id,
+            series_id,
+            category_id,
+            color_type,
+            color_id,
+            page_url,
+            "pending",
+            attempts,
+        )
+        yield self._gallery_request(
+            series_id,
+            category_id,
+            page_url,
+            color_type,
+            color_id,
+            task_id,
+            attempts,
+        )
+
+    @staticmethod
+    def _gallery_task_item(
+        task_id: int,
+        series_id: int,
+        category_id: int,
+        color_type: str | None,
+        color_id: int | None,
+        page_url: str,
+        status: str,
+        attempts: int,
+        photo_count: int | None = None,
+        last_error: str | None = None,
+    ) -> GalleryCrawlTaskItem:
+        """Создать строку состояния страницы фотогалереи."""
+        return GalleryCrawlTaskItem(
+            id=task_id,
+            series_id=series_id,
+            category_id=category_id,
+            color_type=color_type,
+            color_id=color_id,
+            page_url=page_url,
+            status=status,
+            photo_count=photo_count,
+            attempts=attempts,
+            last_error=last_error,
         )
 
     def parse_gallery(
@@ -854,8 +1005,11 @@ class CarsSpider(scrapy.Spider):
         category_id: int,
         color_type: str | None,
         color_id: int | None,
+        task_id: int,
+        attempts: int,
     ):
         """Сохранить фото, цвета и пагинацию одной галереи серии."""
+        photo_count = 0
         for block in response.css(".search-pic"):
             label = "".join(block.css(".search-pic-left::text").getall()).strip()
             block_color_type = "interior" if "内饰" in label else "exterior"
@@ -887,7 +1041,7 @@ class CarsSpider(scrapy.Spider):
                     gallery_url=gallery_url,
                     raw={"href": href, "label": label, "colors": colors},
                 )
-                yield self._gallery_request(
+                yield from self._schedule_gallery_request(
                     series_id,
                     discovered_category,
                     gallery_url,
@@ -904,6 +1058,7 @@ class CarsSpider(scrapy.Spider):
             photo_id = as_int(photo_match.group(1)) if photo_match else None
             if photo_id is None:
                 continue
+            photo_count += 1
             thumbnail = node.css("img::attr(data-webp)").get() or node.css(
                 "img::attr(src)"
             ).get()
@@ -920,7 +1075,9 @@ class CarsSpider(scrapy.Spider):
                 series_id=series_id,
                 spec_id=as_int(spec_match.group(1)) if spec_match else None,
                 category_id=category_id,
-                category_name=self.gallery_category_names[category_id],
+                category_name=self.gallery_category_names.get(
+                    category_id, str(category_id)
+                ),
                 title=title,
                 image_url=image_url,
                 thumbnail_url=thumbnail,
@@ -937,13 +1094,45 @@ class CarsSpider(scrapy.Spider):
 
         next_href = response.css(".page a.page-item-next::attr(href)").get()
         if next_href and not next_href.startswith("javascript:"):
-            yield self._gallery_request(
+            yield from self._schedule_gallery_request(
                 series_id,
                 category_id,
                 response.urljoin(next_href),
                 color_type,
                 color_id,
             )
+        self.completed_gallery_task_ids.add(task_id)
+        yield self._gallery_task_item(
+            task_id,
+            series_id,
+            category_id,
+            color_type,
+            color_id,
+            response.url.split("#", 1)[0],
+            "complete" if photo_count else "empty",
+            attempts,
+            photo_count=photo_count,
+        )
+
+    def gallery_error(self, failure):
+        """Сохранить неудачную страницу галереи для следующей дозагрузки."""
+        context = failure.request.cb_kwargs
+        self.logger.error(
+            "Страница галереи %s не загружена: %s",
+            failure.request.url,
+            failure.getErrorMessage(),
+        )
+        yield self._gallery_task_item(
+            context["task_id"],
+            context["series_id"],
+            context["category_id"],
+            context["color_type"],
+            context["color_id"],
+            failure.request.url.split("#", 1)[0],
+            "failed",
+            context["attempts"],
+            last_error=failure.getErrorMessage(),
+        )
 
     @staticmethod
     def _absolute_url(url: str | None) -> str | None:
@@ -990,6 +1179,8 @@ class CarsSpider(scrapy.Spider):
                 continue
             if self.resume_configs and spec_id in self.completed_config_spec_ids:
                 continue
+            if spec_id in self.scheduled_config_spec_ids:
+                continue
             if (
                 self.resume_configs
                 and self.max_resume_specs
@@ -1000,12 +1191,10 @@ class CarsSpider(scrapy.Spider):
             if self.resume_configs:
                 self.resume_specs_scheduled += 1
         self.pending_specs[series_id] = deque(configurable)
-        request = self._next_config_request(series_id)
-        if request:
-            yield request
+        yield from self._next_config_outputs(series_id)
 
-    def _next_config_request(self, series_id: int):
-        """Создать следующий запрос полной конфигурации для серии."""
+    def _next_config_outputs(self, series_id: int):
+        """Зарегистрировать и создать следующий запрос конфигурации серии."""
         pending = self.pending_specs.get(series_id)
         if (
             self.max_config_requests_per_series
@@ -1013,31 +1202,81 @@ class CarsSpider(scrapy.Spider):
             >= self.max_config_requests_per_series
         ):
             self.pending_specs.pop(series_id, None)
-            return None
+            return
         while pending:
             spec_id = pending.popleft()
-            if spec_id in self.processed_spec_ids:
+            if (
+                spec_id in self.processed_spec_ids
+                or spec_id in self.scheduled_config_spec_ids
+            ):
                 continue
+            self.scheduled_config_spec_ids.add(spec_id)
             self.config_request_counts[series_id] = (
                 self.config_request_counts.get(series_id, 0) + 1
             )
-            return scrapy.Request(
+            attempts = self.config_task_attempts.get(spec_id, 0) + 1
+            self.config_task_attempts[spec_id] = attempts
+            yield self._config_task_item(
+                spec_id,
+                series_id,
+                "pending",
+                attempts,
+            )
+            yield scrapy.Request(
                 self.config_url.format(spec_id=spec_id),
                 callback=self.parse_config,
                 errback=self.config_error,
-                cb_kwargs={"series_id": series_id, "requested_spec_id": spec_id},
+                cb_kwargs={
+                    "series_id": series_id,
+                    "requested_spec_id": spec_id,
+                    "attempts": attempts,
+                },
                 headers={
                     "Referer": f"https://www.autohome.com.cn/config/spec/{spec_id}.html"
                 },
                 meta=self._network_meta(),
             )
+            return
         self.pending_specs.pop(series_id, None)
-        return None
 
-    def parse_config(self, response, series_id: int, requested_spec_id: int):
+    @staticmethod
+    def _config_task_item(
+        spec_id: int,
+        series_id: int,
+        status: str,
+        attempts: int,
+        parameter_count: int | None = None,
+        last_error: str | None = None,
+    ) -> ConfigCrawlTaskItem:
+        """Создать строку состояния полной конфигурации."""
+        return ConfigCrawlTaskItem(
+            spec_id=spec_id,
+            series_id=series_id,
+            status=status,
+            parameter_count=parameter_count,
+            attempts=attempts,
+            last_error=last_error,
+        )
+
+    def parse_config(
+        self,
+        response,
+        series_id: int,
+        requested_spec_id: int,
+        attempts: int,
+    ):
         """Разобрать определения и значения параметров комплектаций."""
         payload = response.json()
-        result = payload.get("result") or {}
+        result = payload.get("result")
+        if not isinstance(result, dict):
+            raise ValueError(
+                f"API конфигурации spec_id={requested_spec_id} не вернул result"
+            )
+        datalist = result.get("datalist")
+        if not isinstance(datalist, list):
+            raise ValueError(
+                f"API конфигурации spec_id={requested_spec_id} не вернул datalist"
+            )
 
         group_positions: dict[str, int] = {}
         section_positions: dict[str, int] = {}
@@ -1103,11 +1342,14 @@ class CarsSpider(scrapy.Spider):
                 )
 
         returned_ids: set[int] = set()
-        for spec_data in result.get("datalist") or []:
+        returned_parameter_counts: dict[int, int] = {}
+        for spec_data in datalist:
             spec_id = as_int(spec_data.get("specid"))
             if spec_id is None:
                 continue
             returned_ids.add(spec_id)
+            parameters = spec_data.get("paramconflist") or []
+            returned_parameter_counts[spec_id] = len(parameters)
             returned_series_id = self.spec_series.get(spec_id, series_id)
             if spec_id not in self.spec_years:
                 self.spec_years[spec_id] = as_int(spec_data.get("year"))
@@ -1117,7 +1359,7 @@ class CarsSpider(scrapy.Spider):
                 yield self._spec_item(spec_data, returned_series_id)
 
             powertrain_values: dict[str, object] = {}
-            for parameter in spec_data.get("paramconflist") or []:
+            for parameter in parameters:
                 title_id = as_int(parameter.get("titleid"))
                 if title_id is None:
                     continue
@@ -1199,29 +1441,43 @@ class CarsSpider(scrapy.Spider):
                 modification_id=modification["id"],
             )
 
-        # Считаем запрошенный ID обработанным даже при пустом ответе, иначе
-        # некорректная серия может создать бесконечный цикл.
+        parameter_count = returned_parameter_counts.get(requested_spec_id, 0)
+        status = "complete" if parameter_count else "empty"
+        self.completed_config_spec_ids.add(requested_spec_id)
+        yield self._config_task_item(
+            requested_spec_id,
+            series_id,
+            status,
+            attempts,
+            parameter_count=parameter_count,
+        )
+        # Пустой успешный ответ считается завершённым и больше не создаёт
+        # бесконечную очередь повторов при каждом запуске дозагрузки.
         returned_ids.add(requested_spec_id)
         self.processed_spec_ids.update(returned_ids)
-        request = self._next_config_request(series_id)
-        if request:
-            yield request
+        yield from self._next_config_outputs(series_id)
 
     def config_error(self, failure):
         """Записать ошибку конфигурации и продолжить обработку серии."""
         request = failure.request
         series_id = request.cb_kwargs["series_id"]
         requested_spec_id = request.cb_kwargs["requested_spec_id"]
+        attempts = request.cb_kwargs["attempts"]
         self.logger.error(
             "Configuration request failed for spec %d: %s",
             requested_spec_id,
             failure.getErrorMessage(),
         )
+        yield self._config_task_item(
+            requested_spec_id,
+            series_id,
+            "failed",
+            attempts,
+            last_error=failure.getErrorMessage(),
+        )
         # Продолжаем серию после исчерпания стандартных повторов Scrapy.
         self.processed_spec_ids.add(requested_spec_id)
-        next_request = self._next_config_request(series_id)
-        if next_request:
-            yield next_request
+        yield from self._next_config_outputs(series_id)
 
     @staticmethod
     def _spec_item(obj: dict, series_id: int):

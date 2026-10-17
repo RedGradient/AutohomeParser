@@ -371,3 +371,29 @@ class SeriesPhotoColorItem(scrapy.Item):
     series_id = scrapy.Field()
     color_type = scrapy.Field()
     color_id = scrapy.Field()
+
+
+class GalleryCrawlTaskItem(scrapy.Item):
+    """Состояние обработки одной страницы фотогалереи."""
+
+    id = scrapy.Field()
+    series_id = scrapy.Field()
+    category_id = scrapy.Field()
+    color_type = scrapy.Field()
+    color_id = scrapy.Field()
+    page_url = scrapy.Field()
+    status = scrapy.Field()
+    photo_count = scrapy.Field()
+    attempts = scrapy.Field()
+    last_error = scrapy.Field()
+
+
+class ConfigCrawlTaskItem(scrapy.Item):
+    """Состояние загрузки полной конфигурации комплектации."""
+
+    spec_id = scrapy.Field()
+    series_id = scrapy.Field()
+    status = scrapy.Field()
+    parameter_count = scrapy.Field()
+    attempts = scrapy.Field()
+    last_error = scrapy.Field()
