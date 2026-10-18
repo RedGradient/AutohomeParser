@@ -59,7 +59,7 @@ from autohome.powertrain_normalizer import (
     modification_row,
     normalize_powertrain,
 )
-from autohome.translator import translate_exact
+from autohome.translator import translate_powertrain_code, translate_powertrain_field
 
 
 def first(mapping: dict, *keys, default=None):
@@ -1374,9 +1374,15 @@ class CarsSpider(scrapy.Spider):
                 powertrain_field = local_powertrain_fields.get(title_id)
                 if powertrain_field not in SUBITEM_FIELDS:
                     if powertrain_field is not None:
-                        powertrain_values[powertrain_field] = translate_exact(
-                            parameter.get("itemname")
+                        raw_value = parameter.get("itemname")
+                        powertrain_values[powertrain_field] = translate_powertrain_field(
+                            powertrain_field,
+                            raw_value,
                         )
+                        if powertrain_field == "transmission_type":
+                            powertrain_values["clutch_type"] = (
+                                translate_powertrain_code("clutch_type", raw_value)
+                            )
                 yield SpecParameterItem(
                     spec_id=spec_id,
                     parameter_id=parameter_id,
@@ -1400,9 +1406,15 @@ class CarsSpider(scrapy.Spider):
                         powertrain_field in SUBITEM_FIELDS
                         and str(subitem.get("value") or "").strip() == "●"
                     ):
-                        powertrain_values[powertrain_field] = translate_exact(
-                            subitem.get("name")
+                        raw_value = subitem.get("name")
+                        powertrain_values[powertrain_field] = translate_powertrain_field(
+                            powertrain_field,
+                            raw_value,
                         )
+                        if powertrain_field == "drive_type":
+                            powertrain_values["engine_layout"] = (
+                                translate_powertrain_code("engine_layout", raw_value)
+                            )
 
                 color_info = parameter.get("colorinfo")
                 if isinstance(color_info, dict):

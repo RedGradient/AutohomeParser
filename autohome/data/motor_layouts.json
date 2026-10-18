@@ -1,0 +1,19 @@
+{
+  "前置": "FRONT",
+  "后置": "REAR",
+  "前置+后置": "FRONT_REAR",
+  "前+后": "FRONT_REAR",
+  "前后": "FRONT_REAR",
+  "集成式": "INTEGRATED",
+  "Переднее расположение": "FRONT",
+  "Заднее расположение": "REAR",
+  "Спереди и сзади": "FRONT_REAR",
+  "Front": "FRONT",
+  "Rear": "REAR",
+  "Front + Rear": "FRONT_REAR",
+  "Integrated": "INTEGRATED",
+  "FRONT": "FRONT",
+  "REAR": "REAR",
+  "FRONT_REAR": "FRONT_REAR",
+  "INTEGRATED": "INTEGRATED"
+}

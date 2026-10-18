@@ -32,9 +32,13 @@ from autohome.models import (
     SpecParameter,
     SpecPowertrain,
 )
+from autohome.translator import (
+    translate_powertrain_code,
+    translate_powertrain_field,
+)
 
 
-NORMALIZATION_VERSION = 1
+NORMALIZATION_VERSION = 3
 EMPTY_VALUES = {None, "", "-", "Нет", "Неизвестно"}
 NUMBER_RE = re.compile(r"[-+]?\d+(?:[.,]\d+)?")
 
@@ -46,31 +50,38 @@ SEMANTIC_PATHS = {
     "engine_displacement_ml": ("参数信息", "发动机", "排量(mL)"),
     "engine_model": ("参数信息", "发动机", "发动机型号"),
     "engine_power_kw": ("参数信息", "发动机", "最大功率(kW)"),
+    "engine_power_hp": ("参数信息", "发动机", "最大马力(Ps)"),
+    "aspiration_type": ("参数信息", "发动机", "进气形式"),
+    "cylinder_layout": ("参数信息", "发动机", "气缸排列形式"),
     "transmission_gears": ("参数信息", "变速箱", "挡位个数"),
     "transmission_type": ("参数信息", "变速箱", "变速箱类型"),
     "drive_type": ("参数信息", "底盘转向", "驱动方式"),
     "motor_total_power_kw": ("参数信息", "电动机", "电动机总功率(kW)"),
+    "motor_total_power_hp": ("参数信息", "电动机", "电动机总马力(Ps)"),
     "motor_count": ("参数信息", "电动机", "驱动电机数"),
     "motor_layout": ("参数信息", "电动机", "电机布局"),
     "system_power_kw": ("参数信息", "电动机", "系统综合功率(kW)"),
+    "system_power_hp": ("参数信息", "电动机", "系统综合马力(Ps)"),
     "battery_capacity_kwh": ("参数信息", "电池/充电", "电池能量(kWh)"),
     "battery_type": ("参数信息", "电池/充电", "电池类型"),
+    "body_type": ("参数信息", "基本参数", "车身结构"),
 }
 
 DECIMAL_FIELDS = {
     "engine_power_kw",
+    "engine_power_hp",
     "maximum_power_kw",
     "motor_total_power_kw",
+    "motor_total_power_hp",
     "system_power_kw",
+    "system_power_hp",
     "battery_capacity_kwh",
 }
 INTEGER_FIELDS = {"engine_displacement_ml", "transmission_gears"}
 SUBITEM_FIELDS = {"drive_type", "battery_type"}
-ELECTRIC_ENERGIES = {"Электромобиль"}
-PLUG_IN_ENERGIES = {
-    "Подключаемый гибрид",
-    "Гибрид с увеличенным запасом хода",
-}
+DERIVED_TEXT_FIELDS = {"clutch_type", "engine_layout"}
+ELECTRIC_ENERGIES = {"BEV"}
+PLUG_IN_ENERGIES = {"PHEV", "EREV"}
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -209,7 +220,11 @@ def load_powertrains(connection, parameter_ids: dict[str, int]) -> dict[int, dic
         elif field == "motor_count":
             row[field] = parse_motor_count(value)
         elif field not in SUBITEM_FIELDS:
-            row[field] = clean_text(value)
+            row[field] = clean_text(translate_powertrain_field(field, value))
+            if field == "transmission_type":
+                row["clutch_type"] = translate_powertrain_code(
+                    "clutch_type", value
+                )
 
     for field in SUBITEM_FIELDS:
         parameter_id = parameter_ids.get(field)
@@ -225,7 +240,13 @@ def load_powertrains(connection, parameter_ids: dict[str, int]) -> dict[int, dic
         )
         for spec_id, name in subitems:
             if spec_id in result:
-                result[spec_id][field] = clean_text(name)
+                result[spec_id][field] = clean_text(
+                    translate_powertrain_field(field, name)
+                )
+                if field == "drive_type":
+                    result[spec_id]["engine_layout"] = translate_powertrain_code(
+                        "engine_layout", name
+                    )
     return result
 
 
@@ -240,6 +261,9 @@ def required_missing(row: dict) -> list[str]:
         "energy_type": energy,
         "transmission": transmission,
         "drive_type": row.get("drive_type"),
+        "engine_layout": row.get("engine_layout"),
+        "aspiration_type": row.get("aspiration_type"),
+        "cylinder_layout": row.get("cylinder_layout"),
     }
     missing.extend(name for name, value in common.items() if value is None)
 
@@ -273,6 +297,7 @@ def modification_signature(row: dict, missing: list[str]) -> dict:
         "maximum_power_kw": decimal_key(row.get("maximum_power_kw")),
         "transmission": row.get("transmission_type")
         or row.get("transmission_summary"),
+        "clutch_type": row.get("clutch_type"),
         "transmission_gears": row.get("transmission_gears"),
         "drive_type": row.get("drive_type"),
     }
@@ -283,18 +308,22 @@ def modification_signature(row: dict, missing: list[str]) -> dict:
             "power_kw": decimal_key(
                 row.get("engine_power_kw") or row.get("maximum_power_kw")
             ),
+            "power_hp": decimal_key(row.get("engine_power_hp")),
         }
     if energy in ELECTRIC_ENERGIES | PLUG_IN_ENERGIES:
         signature["electric"] = {
             "motor_power_kw": decimal_key(
                 row.get("motor_total_power_kw") or row.get("maximum_power_kw")
             ),
+            "motor_power_hp": decimal_key(row.get("motor_total_power_hp")),
             "motor_count": row.get("motor_count"),
             "motor_layout": row.get("motor_layout"),
             "system_power_kw": decimal_key(row.get("system_power_kw")),
+            "system_power_hp": decimal_key(row.get("system_power_hp")),
             "battery_capacity_kwh": decimal_key(row.get("battery_capacity_kwh")),
             "battery_type": row.get("battery_type"),
         }
+    signature["body_type"] = row.get("body_type")
     if missing:
         signature["incomplete_spec_id"] = row["spec_id"]
     return signature
@@ -333,7 +362,7 @@ def rebuild(engine, batch_size: int) -> tuple[int, int, int]:
     powertrain_rows: list[dict] = []
     incomplete_count = 0
 
-    normalized_fields = tuple(SEMANTIC_PATHS)
+    normalized_fields = (*SEMANTIC_PATHS, *DERIVED_TEXT_FIELDS)
     for row in powertrains.values():
         for field in normalized_fields:
             row.setdefault(field, None)
@@ -367,15 +396,23 @@ def rebuild(engine, batch_size: int) -> tuple[int, int, int]:
                 "engine_displacement_ml": row["engine_displacement_ml"],
                 "engine_model": row["engine_model"],
                 "engine_power_kw": row["engine_power_kw"],
+                "engine_power_hp": row["engine_power_hp"],
                 "maximum_power_kw": row["maximum_power_kw"],
                 "transmission_summary": row["transmission_summary"],
                 "transmission_type": row["transmission_type"],
+                "clutch_type": row["clutch_type"],
                 "transmission_gears": row["transmission_gears"],
                 "drive_type": row["drive_type"],
+                "engine_layout": row["engine_layout"],
+                "aspiration_type": row["aspiration_type"],
+                "cylinder_layout": row["cylinder_layout"],
+                "body_type": row["body_type"],
                 "motor_total_power_kw": row["motor_total_power_kw"],
+                "motor_total_power_hp": row["motor_total_power_hp"],
                 "motor_count": row["motor_count"],
                 "motor_layout": row["motor_layout"],
                 "system_power_kw": row["system_power_kw"],
+                "system_power_hp": row["system_power_hp"],
                 "battery_capacity_kwh": row["battery_capacity_kwh"],
                 "battery_type": row["battery_type"],
                 "is_complete": not missing,

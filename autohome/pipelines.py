@@ -79,14 +79,28 @@ from autohome.models import (
 )
 from autohome.translator import (
     translate_brand_name,
-    translate_exact,
+    translate_color_name,
+    translate_equipment_name,
     translate_parameter_name,
+    translate_parameter_value,
     translate_series_name,
+    translate_spec_description,
     translate_spec_name,
+    translate_taxonomy_name,
+    translate_technology_name,
 )
 
 
 PRICE_RE = re.compile(r"(?P<number>\d+(?:\.\d+)?)\s*(?P<unit>万元|万|元|юаней)?")
+PRICE_RANGE_RE = re.compile(
+    r"^\s*(?P<minimum>\d+(?:[.,]\d+)?)\s*(?P<minimum_unit>万元|万|元)?"
+    r"\s*[-–—~至]\s*"
+    r"(?P<maximum>\d+(?:[.,]\d+)?)\s*(?P<maximum_unit>万元|万|元)?\s*$"
+)
+PRICE_SINGLE_RE = re.compile(
+    r"^\s*(?P<number>\d+(?:[.,]\d+)?)\s*(?P<unit>万元|万|元)?\s*$"
+)
+MISSING_PRICE_VALUES = {"", "-", "--", "暂无", "暂无报价"}
 LOGGER = logging.getLogger(__name__)
 RETRYABLE_SQLSTATES = {"40P01"}
 
@@ -109,16 +123,62 @@ def parse_yuan(value) -> Decimal | None:
         return value
     if isinstance(value, (int, float)):
         return Decimal(str(value))
-    match = PRICE_RE.search(str(value).replace(",", "").strip())
+    text = str(value).replace(",", "").strip()
+    match = PRICE_RE.search(text)
     if not match:
         return None
     try:
         amount = Decimal(match.group("number"))
     except InvalidOperation:
         return None
-    if match.group("unit") in {"万", "万元"}:
+    if match.group("unit") in {"万", "万元"} or "万" in text:
         amount *= Decimal("10000")
     return amount
+
+
+def _full_yuan_amount(number: str, unit: str | None) -> Decimal:
+    """Развернуть сокращённую сумму в полное количество юаней."""
+    amount = Decimal(number.replace(",", "."))
+    if unit in {"万", "万元"}:
+        amount *= Decimal("10000")
+    return amount
+
+
+def _plain_decimal(value: Decimal) -> str:
+    """Представить Decimal без экспоненты и незначащих нулей."""
+    text = format(value, "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def normalize_price_text(value) -> str | None:
+    """Нормализовать одиночную цену или диапазон в полные суммы в юанях."""
+    if value is None:
+        return None
+    text = str(value).strip().replace("￥", "").replace("¥", "")
+    if text in MISSING_PRICE_VALUES:
+        return None
+
+    range_match = PRICE_RANGE_RE.fullmatch(text)
+    if range_match:
+        minimum_unit = range_match.group("minimum_unit")
+        maximum_unit = range_match.group("maximum_unit")
+        shared_unit = maximum_unit or minimum_unit
+        minimum = _full_yuan_amount(
+            range_match.group("minimum"), minimum_unit or shared_unit
+        )
+        maximum = _full_yuan_amount(
+            range_match.group("maximum"), maximum_unit or shared_unit
+        )
+        return f"{_plain_decimal(minimum)}-{_plain_decimal(maximum)}"
+
+    single_match = PRICE_SINGLE_RE.fullmatch(text)
+    if single_match:
+        amount = _full_yuan_amount(
+            single_match.group("number"), single_match.group("unit")
+        )
+        return _plain_decimal(amount)
+
+    return text
 
 
 class SqlAlchemyPipeline:
@@ -340,6 +400,8 @@ class SqlAlchemyPipeline:
         data = dict(item)
         if "raw" in data:
             data["raw_json"] = data.pop("raw")
+        if "price_text" in data:
+            data["price_text"] = normalize_price_text(data.get("price_text"))
 
         if isinstance(item, BrandItem):
             data["name"] = translate_brand_name(data.get("name"))
@@ -351,7 +413,7 @@ class SqlAlchemyPipeline:
             data["name"] = translate_spec_name(data.get("name"))
             data["fetched_at"] = datetime.now(timezone.utc)
         elif isinstance(item, ManufacturerItem):
-            data["name"] = translate_exact(data.get("name"))
+            data["name"] = translate_taxonomy_name(data.get("name"))
 
         if isinstance(item, SpecItem):
             for field in (
@@ -360,25 +422,25 @@ class SqlAlchemyPipeline:
                 "discount_yuan",
             ):
                 data[field] = parse_yuan(data.get(field))
-            data["description"] = translate_exact(data.get("description"))
+            data["description"] = translate_spec_description(data.get("description"))
         elif isinstance(item, (ParameterGroupItem, ParameterSectionItem)):
-            data["name"] = translate_exact(data.get("name"))
+            data["name"] = translate_taxonomy_name(data.get("name"))
         elif isinstance(item, ParameterDefinitionItem):
             data["name"] = translate_parameter_name(data.get("name"))
         elif isinstance(item, SpecParameterItem):
-            data["value"] = translate_exact(data.get("value"))
+            data["value"] = translate_parameter_value(data.get("value"))
             data["option_price_yuan"] = parse_yuan(data.get("option_price_yuan"))
         elif isinstance(item, ParameterSubitemItem):
-            data["name"] = translate_exact(data.get("name"))
+            data["name"] = translate_equipment_name(data.get("name"))
             data["value"] = parse_equipment_value(data.get("value"))
             data["option_price_yuan"] = parse_yuan(data.get("option_price_yuan"))
         elif isinstance(item, ParameterColorItem):
-            data["name"] = translate_exact(data.get("name"))
+            data["name"] = translate_color_name(data.get("name"))
             data["price_yuan"] = parse_yuan(data.get("price_yuan"))
         elif isinstance(item, SeriesGalleryColorItem):
-            data["name"] = translate_exact(data.get("name"))
+            data["name"] = translate_color_name(data.get("name"))
         elif isinstance(item, SeriesPhotoItem):
-            data["title"] = translate_series_name(data.get("title"))
+            data["title"] = translate_spec_name(data.get("title"))
             data["fetched_at"] = datetime.now(timezone.utc)
         elif isinstance(item, (SeriesMonthlySaleItem, BrandMonthlySaleItem)):
             if isinstance(item, SeriesMonthlySaleItem):
@@ -406,7 +468,7 @@ class SqlAlchemyPipeline:
                 )
             data["fetched_at"] = datetime.now(timezone.utc)
         elif isinstance(item, TechnologyRankingItem):
-            data["name"] = translate_exact(data.get("name"))
+            data["name"] = translate_technology_name(data.get("name"))
             data["fetched_at"] = datetime.now(timezone.utc)
         elif isinstance(item, (GalleryCrawlTaskItem, ConfigCrawlTaskItem)):
             data["updated_at"] = datetime.now(timezone.utc)

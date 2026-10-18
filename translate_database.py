@@ -20,10 +20,14 @@ from autohome.models import (
 )
 from autohome.translator import (
     translate_brand_name,
-    translate_exact,
+    translate_color_name,
+    translate_equipment_name,
     translate_parameter_name,
+    translate_parameter_value,
     translate_series_name,
+    translate_spec_description,
     translate_spec_name,
+    translate_taxonomy_name,
 )
 
 
@@ -110,18 +114,18 @@ def main() -> int:
     engine = create_engine(args.database_url, pool_pre_ping=True)
     jobs = (
         (Brand, ("id",), {"name": translate_brand_name}),
-        (Manufacturer, ("id",), {"name": translate_exact}),
+        (Manufacturer, ("id",), {"name": translate_taxonomy_name}),
         (Series, ("id",), {"name": translate_series_name}),
         (
             Spec,
             ("id",),
             {
                 "name": translate_spec_name,
-                "description": translate_exact,
+                "description": translate_spec_description,
             },
         ),
-        (ParameterGroup, ("id",), {"name": translate_exact}),
-        (ParameterSection, ("id",), {"name": translate_exact}),
+        (ParameterGroup, ("id",), {"name": translate_taxonomy_name}),
+        (ParameterSection, ("id",), {"name": translate_taxonomy_name}),
         (
             ParameterDefinition,
             ("id",),
@@ -130,17 +134,17 @@ def main() -> int:
         (
             SpecParameter,
             ("spec_id", "parameter_id"),
-            {"value": translate_exact},
+            {"value": translate_parameter_value},
         ),
         (
             ParameterSubitem,
             ("spec_id", "parameter_id", "position"),
-            {"name": translate_exact, "value": translate_exact},
+            {"name": translate_equipment_name},
         ),
         (
             ParameterColor,
             ("spec_id", "parameter_id", "position"),
-            {"name": translate_exact},
+            {"name": translate_color_name},
         ),
     )
     try:
