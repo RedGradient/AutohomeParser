@@ -30,6 +30,10 @@ class VolumeRate:
     code: str
 
 
+# Физлица: автомобиль возрастом не более 3 лет.
+# Строка выбирается по таможенной стоимости в EUR (max_value_eur), а пошлина
+# равна максимуму из процента стоимости и минимальной ставки за 1 см³:
+# max(value_eur * percent, engine_cc * minimum_eur_per_cc).
 PERSONAL_UNDER_3 = (
     PersonalValueRate(Decimal("8500"), Decimal("0.54"), Decimal("2.5"), "PERSONAL_U3_000_8500"),
     PersonalValueRate(Decimal("16700"), Decimal("0.48"), Decimal("3.5"), "PERSONAL_U3_8500_16700"),
@@ -39,6 +43,9 @@ PERSONAL_UNDER_3 = (
     PersonalValueRate(None, Decimal("0.48"), Decimal("20"), "PERSONAL_U3_OVER_169000"),
 )
 
+# Физлица: автомобиль старше 3 лет, но не старше 5 лет.
+# Строка выбирается по объёму двигателя (max_volume_cc). Цена автомобиля в
+# расчёте не участвует: engine_cc * eur_per_cc.
 PERSONAL_3_TO_5 = (
     VolumeRate(1000, Decimal("1.5"), "PERSONAL_3_5_UP_TO_1000"),
     VolumeRate(1500, Decimal("1.7"), "PERSONAL_3_5_1000_1500"),
@@ -48,6 +55,9 @@ PERSONAL_3_TO_5 = (
     VolumeRate(None, Decimal("3.6"), "PERSONAL_3_5_OVER_3000"),
 )
 
+# Физлица: автомобиль старше 5 лет.
+# Формула также зависит только от объёма двигателя, но применяются повышенные
+# ставки: engine_cc * eur_per_cc.
 PERSONAL_OVER_5 = (
     VolumeRate(1000, Decimal("3.0"), "PERSONAL_O5_UP_TO_1000"),
     VolumeRate(1500, Decimal("3.2"), "PERSONAL_O5_1000_1500"),
@@ -67,6 +77,11 @@ class CommercialUsedRate:
     over_7_eur_per_cc: Decimal
 
 
+# Юрлица: подержанные легковые автомобили с бензиновым двигателем.
+# Для возраста от 3 до 7 лет включительно пошлина равна максимуму из 20%
+# таможенной стоимости и minimum_eur_per_cc за 1 см³. Для автомобилей старше
+# 7 лет применяется только engine_cc * over_7_eur_per_cc. tnved_heading хранит
+# тарифную ветку, а max_volume_cc — верхнюю границу объёма двигателя.
 COMMERCIAL_GASOLINE_USED = (
     CommercialUsedRate(1000, "870321", Decimal("0.20"), Decimal("0.36"), Decimal("1.4")),
     CommercialUsedRate(1500, "870322", Decimal("0.20"), Decimal("0.40"), Decimal("1.5")),
@@ -75,6 +90,10 @@ COMMERCIAL_GASOLINE_USED = (
     CommercialUsedRate(None, "870324", Decimal("0.20"), Decimal("0.80"), Decimal("3.2")),
 )
 
+# Юрлица: подержанные легковые автомобили с дизельным двигателем.
+# Возрастные формулы совпадают с бензиновой таблицей: до 7 лет включительно —
+# максимум из 20% стоимости и минимальной ставки за 1 см³, старше 7 лет —
+# фиксированная ставка over_7_eur_per_cc за 1 см³.
 COMMERCIAL_DIESEL_USED = (
     CommercialUsedRate(1500, "870331", Decimal("0.20"), Decimal("0.32"), Decimal("1.5")),
     CommercialUsedRate(2500, "870332", Decimal("0.20"), Decimal("0.40"), Decimal("2.2")),
