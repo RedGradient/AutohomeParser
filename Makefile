@@ -23,7 +23,7 @@ ETH_TABLE := 10102
 WIFI_PRIORITY := 10101
 ETH_PRIORITY := 10102
 
-.PHONY: help network-up network-down network-status network-test postgres-up parser-run parser-resume database-reset parameters-reset build-modifications translate-db docker-down
+.PHONY: help network-up network-down network-status network-test postgres-up parser-run parser-resume database-reset parameters-reset build-modifications translate-db calculate-import-duties docker-down
 
 help:
 	@echo "Доступные команды:"
@@ -38,6 +38,7 @@ help:
 	@echo "  make parameters-reset — пересоздать только таблицы характеристик"
 	@echo "  make build-modifications — нормализовать параметры и собрать модификации"
 	@echo "  make translate-db    — перевести уже сохранённые данные"
+	@echo "  make calculate-import-duties — рассчитать ввозную пошлину"
 	@echo "  make docker-down     — остановить контейнеры"
 	@echo
 	@echo "Интерфейсы можно переопределить:"
@@ -135,6 +136,10 @@ build-modifications: postgres-up
 translate-db: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
 		.venv/bin/python translate_database.py
+
+calculate-import-duties: postgres-up
+	@DATABASE_URL='$(DATABASE_URL)' \
+		.venv/bin/python calculate_import_duties.py
 
 docker-down:
 	@docker compose down

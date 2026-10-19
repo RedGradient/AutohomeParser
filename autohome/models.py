@@ -315,6 +315,72 @@ class Modification(Base):
     )
 
 
+class CustomsCalculation(Base):
+    """Один воспроизводимый сценарий расчёта таможенных платежей."""
+
+    __tablename__ = "customs_calculations"
+    __table_args__ = (
+        UniqueConstraint(
+            "spec_id",
+            "importer_type",
+            "calculation_date",
+            "rules_version",
+            "price_source",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    spec_id: Mapped[int] = mapped_column(ForeignKey("specs.id"), index=True)
+    importer_type: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    calculation_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    rules_version: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    price_source: Mapped[str] = mapped_column(String(30), nullable=False)
+    vehicle_price_cny: Mapped[Decimal | None] = mapped_column(PRICE_TYPE)
+    customs_value_rub: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    cny_rate_nominal: Mapped[int | None] = mapped_column(Integer)
+    cny_rate_rub: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    cny_rate_date: Mapped[date | None] = mapped_column(Date)
+    eur_rate_nominal: Mapped[int | None] = mapped_column(Integer)
+    eur_rate_rub: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    eur_rate_date: Mapped[date | None] = mapped_column(Date)
+    model_year: Mapped[int | None] = mapped_column(Integer)
+    assumed_production_date: Mapped[date | None] = mapped_column(Date)
+    age_months: Mapped[int | None] = mapped_column(Integer)
+    energy_type: Mapped[str | None] = mapped_column(String(50), index=True)
+    body_type: Mapped[str | None] = mapped_column(String(50), index=True)
+    engine_displacement_ml: Mapped[int | None] = mapped_column(Integer)
+    tnved_code: Mapped[str | None] = mapped_column(String(20), index=True)
+    classification_status: Mapped[str] = mapped_column(
+        String(30), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    input_snapshot_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON_TYPE, nullable=False
+    )
+    warnings_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON_TYPE, nullable=False
+    )
+    calculated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class CustomsPaymentResult(Base):
+    """Результат одного вида платежа внутри таможенного расчёта."""
+
+    __tablename__ = "customs_payment_results"
+    __table_args__ = (PrimaryKeyConstraint("calculation_id", "payment_type"),)
+
+    calculation_id: Mapped[int] = mapped_column(
+        ForeignKey("customs_calculations.id"), index=True
+    )
+    payment_type: Mapped[str] = mapped_column(String(50), index=True)
+    amount_rub: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    status: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    rule_code: Mapped[str | None] = mapped_column(String(150))
+    details_json: Mapped[dict[str, Any]] = mapped_column(JSON_TYPE, nullable=False)
+
+
 class SeriesMonthlySale(Base):
     """Месячная позиция серии в рейтинге продаж."""
 
