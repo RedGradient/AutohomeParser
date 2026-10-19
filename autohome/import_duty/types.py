@@ -71,6 +71,10 @@ class DutyContext:
     engine_power_hp: Decimal | None = None
     motor_power_kw: Decimal | None = None
     price_source: str | None = None
+    tnved_heading: str | None = None
+    gross_mass_kg: int | None = None
+    seat_count_max: int | None = None
+    is_special_purpose: bool | None = None
 
 
 @dataclass(frozen=True)

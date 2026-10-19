@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-
 RULES_VERSION = "RU-EAEU-2026-01-22-v2"
 PERSONAL_RULES_SOURCE = (
     "https://eec.eaeunion.org/upload/medialibrary/48d/"
@@ -13,6 +12,7 @@ COMMERCIAL_RULES_SOURCE = (
     "https://eec.eaeunion.org/comission/department/catr/ett/ru.2022/"
     "ru.87_2022_22.01.2026.pdf"
 )
+COMMERCIAL_VEHICLE_RULES_VERSION = "RU-EAEU-8702-8704-2026-01-22-v1"
 
 
 @dataclass(frozen=True)
@@ -99,3 +99,127 @@ COMMERCIAL_DIESEL_USED = (
     CommercialUsedRate(2500, "870332", Decimal("0.20"), Decimal("0.40"), Decimal("2.2")),
     CommercialUsedRate(None, "870333", Decimal("0.20"), Decimal("0.80"), Decimal("3.2")),
 )
+
+
+@dataclass(frozen=True)
+class CommercialVehicleRate:
+    """Одна ставка для обычного автобуса или грузового автомобиля."""
+
+    tnved_code: str
+    code: str
+    percent: Decimal | None = None
+    minimum_eur_per_cc: Decimal | None = None
+    eur_per_cc: Decimal | None = None
+
+    def __post_init__(self) -> None:
+        formulas = sum(
+            (
+                self.percent is not None,
+                self.eur_per_cc is not None,
+            )
+        )
+        if formulas != 1:
+            raise ValueError("Ставка должна содержать процент либо EUR за см³")
+        if self.minimum_eur_per_cc is not None and self.percent is None:
+            raise ValueError("Минимальная ставка требует процентной ставки")
+
+
+def _percent(
+    tnved_code: str,
+    percent: str,
+    *,
+    minimum: str | None = None,
+) -> CommercialVehicleRate:
+    suffix = percent.replace(".", "_")
+    if minimum is not None:
+        suffix += f"_MIN_{minimum.replace('.', '_')}_EUR_CC"
+    return CommercialVehicleRate(
+        tnved_code=tnved_code,
+        code=f"ETT_{tnved_code}_{suffix}_PERCENT",
+        percent=Decimal(percent) / Decimal("100"),
+        minimum_eur_per_cc=Decimal(minimum) if minimum is not None else None,
+    )
+
+
+def _specific(tnved_code: str, eur_per_cc: str) -> CommercialVehicleRate:
+    suffix = eur_per_cc.replace(".", "_")
+    return CommercialVehicleRate(
+        tnved_code=tnved_code,
+        code=f"ETT_{tnved_code}_{suffix}_EUR_CC",
+        eur_per_cc=Decimal(eur_per_cc),
+    )
+
+
+# 8702: обычные автобусы до 120 человек, без медицинского назначения и
+# специальных льгот для крупных междугородних автобусов. Ключ таблицы:
+# (тип энергии, объёмная группа, возрастная группа).
+BUS_8702_RATES = {
+    ("DIESEL", "OVER_2500", "NEW"): _percent("8702101199", "10"),
+    ("DIESEL", "OVER_2500", "USED_UP_TO_5"): _percent("8702101997", "20"),
+    ("DIESEL", "OVER_2500", "USED_5_TO_7"): _percent(
+        "8702101995", "20", minimum="0.8"
+    ),
+    ("DIESEL", "OVER_2500", "USED_OVER_7"): _specific("8702101994", "3"),
+    ("DIESEL", "UP_TO_2500", "NEW"): _percent("8702109199", "10"),
+    ("DIESEL", "UP_TO_2500", "USED_UP_TO_5"): _percent("8702109998", "20"),
+    ("DIESEL", "UP_TO_2500", "USED_5_TO_7"): _percent(
+        "8702109994", "20", minimum="1.1"
+    ),
+    ("DIESEL", "UP_TO_2500", "USED_OVER_7"): _percent(
+        "8702109993", "20", minimum="1.1"
+    ),
+    ("GASOLINE", "OVER_2800", "NEW"): _percent("8702901190", "15"),
+    ("GASOLINE", "OVER_2800", "USED_UP_TO_5"): _percent("8702901998", "20"),
+    ("GASOLINE", "OVER_2800", "USED_5_TO_7"): _percent(
+        "8702901995", "20", minimum="0.8"
+    ),
+    ("GASOLINE", "OVER_2800", "USED_OVER_7"): _specific("8702901994", "3"),
+    ("GASOLINE", "UP_TO_2800", "NEW"): _percent("8702903190", "17"),
+    ("GASOLINE", "UP_TO_2800", "USED_UP_TO_5"): _percent("8702903998", "20"),
+    ("GASOLINE", "UP_TO_2800", "USED_5_TO_7"): _percent("8702903994", "20"),
+    ("GASOLINE", "UP_TO_2800", "USED_OVER_7"): _percent("8702903993", "20"),
+}
+BUS_8702_BEV_RATE = _percent("8702400009", "10")
+
+
+# 8704: обычные грузовые автомобили, без самосвалов для бездорожья,
+# радиоактивных грузов, форвардеров и других специальных исполнений. Ключ:
+# (топливо, полная масса, объёмная группа, возрастная группа). Для масс свыше
+# 5 т объёмная группа не влияет на ставку и обозначается ANY.
+TRUCK_8704_RATES = {
+    ("DIESEL", "UP_TO_5T", "OVER_2500", "NEW"): _percent("8704213200", "10"),
+    ("DIESEL", "UP_TO_5T", "OVER_2500", "USED_UP_TO_5"): _percent("8704213809", "10"),
+    ("DIESEL", "UP_TO_5T", "OVER_2500", "USED_5_TO_7"): _percent("8704213802", "10"),
+    ("DIESEL", "UP_TO_5T", "OVER_2500", "USED_OVER_7"): _specific("8704213801", "1"),
+    ("DIESEL", "UP_TO_5T", "UP_TO_2500", "NEW"): _percent("8704219200", "10"),
+    ("DIESEL", "UP_TO_5T", "UP_TO_2500", "USED_UP_TO_5"): _percent("8704219809", "10"),
+    ("DIESEL", "UP_TO_5T", "UP_TO_2500", "USED_5_TO_7"): _percent(
+        "8704219802", "10", minimum="0.13"
+    ),
+    ("DIESEL", "UP_TO_5T", "UP_TO_2500", "USED_OVER_7"): _specific("8704219801", "1"),
+    ("DIESEL", "5T_TO_20T", "ANY", "NEW"): _percent("8704229209", "15"),
+    ("DIESEL", "5T_TO_20T", "ANY", "USED_UP_TO_5"): _percent("8704229809", "10"),
+    ("DIESEL", "5T_TO_20T", "ANY", "USED_5_TO_7"): _percent(
+        "8704229803", "10", minimum="0.18"
+    ),
+    ("DIESEL", "5T_TO_20T", "ANY", "USED_OVER_7"): _specific("8704229802", "1"),
+    ("DIESEL", "OVER_20T", "ANY", "NEW"): _percent("8704239209", "5"),
+    ("DIESEL", "OVER_20T", "ANY", "USED_UP_TO_5"): _percent("8704239809", "10"),
+    ("DIESEL", "OVER_20T", "ANY", "USED_5_TO_7"): _percent("8704239802", "10"),
+    ("DIESEL", "OVER_20T", "ANY", "USED_OVER_7"): _specific("8704239801", "1"),
+    ("GASOLINE", "UP_TO_5T", "OVER_2800", "NEW"): _percent("8704313200", "12.5"),
+    ("GASOLINE", "UP_TO_5T", "OVER_2800", "USED_UP_TO_5"): _percent("8704313809", "15"),
+    ("GASOLINE", "UP_TO_5T", "OVER_2800", "USED_5_TO_7"): _percent("8704313802", "15"),
+    ("GASOLINE", "UP_TO_5T", "OVER_2800", "USED_OVER_7"): _specific("8704313801", "1"),
+    ("GASOLINE", "UP_TO_5T", "UP_TO_2800", "NEW"): _percent("8704319200", "15"),
+    ("GASOLINE", "UP_TO_5T", "UP_TO_2800", "USED_UP_TO_5"): _percent(
+        "8704319809", "15"
+    ),
+    ("GASOLINE", "UP_TO_5T", "UP_TO_2800", "USED_5_TO_7"): _percent("8704319802", "15"),
+    ("GASOLINE", "UP_TO_5T", "UP_TO_2800", "USED_OVER_7"): _specific("8704319801", "1"),
+    ("GASOLINE", "OVER_5T", "ANY", "NEW"): _percent("8704329209", "15"),
+    ("GASOLINE", "OVER_5T", "ANY", "USED_UP_TO_5"): _percent("8704329809", "15"),
+    ("GASOLINE", "OVER_5T", "ANY", "USED_5_TO_7"): _percent("8704329803", "15"),
+    ("GASOLINE", "OVER_5T", "ANY", "USED_OVER_7"): _specific("8704329802", "1"),
+}
+TRUCK_8704_BEV_RATE = _percent("8704600000", "15")
