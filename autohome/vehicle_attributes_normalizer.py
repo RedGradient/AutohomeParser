@@ -5,6 +5,8 @@ from decimal import Decimal, InvalidOperation
 import re
 from typing import Any
 
+from autohome.translator import translate_vehicle_attribute_code
+
 
 NORMALIZATION_VERSION = 1
 EMPTY_VALUES = {
@@ -70,6 +72,21 @@ def clean_text(value: Any) -> str | None:
 def warning(code: str, field: str, value: Any) -> dict[str, Any]:
     """Сформировать воспроизводимое описание проблемы исходного значения."""
     return {"code": code, "field": field, "value": value}
+
+
+def normalize_categorical_code(
+    value: Any,
+    field: str,
+    warnings: list[dict[str, Any]],
+) -> str | None:
+    """Нормализовать закрытую категорию и отметить неизвестное значение."""
+    text = clean_text(value)
+    if text is None:
+        return None
+    normalized = translate_vehicle_attribute_code(field, text)
+    if normalized is None:
+        warnings.append(warning("UNMAPPED_CATEGORICAL_VALUE", field, text))
+    return normalized
 
 
 def _positive_integer(value: Any) -> int | None:
@@ -293,9 +310,15 @@ def normalize_vehicle_attributes(
     row: dict[str, Any] = {
         "spec_id": spec_id,
         "series_id": series_id,
-        "vehicle_class": clean_text(values.get("vehicle_class")),
-        "body_type": clean_text(values.get("body_type")),
-        "body_construction": clean_text(values.get("body_construction")),
+        "vehicle_class": normalize_categorical_code(
+            values.get("vehicle_class"), "vehicle_class", warnings
+        ),
+        "body_type": normalize_categorical_code(
+            values.get("body_type"), "body_type", warnings
+        ),
+        "body_construction": normalize_categorical_code(
+            values.get("body_construction"), "body_construction", warnings
+        ),
         "seat_count_min": seat_min,
         "seat_count_max": seat_max,
         "door_count": parse_doors(

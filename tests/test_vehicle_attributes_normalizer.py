@@ -8,6 +8,47 @@ from autohome.vehicle_attributes_normalizer import (
     parse_cargo_dimensions,
     parse_integer_range,
 )
+from autohome.translator import (
+    translate_powertrain_code,
+    translate_vehicle_attribute_code,
+)
+
+
+class VehicleAttributeDictionaryTests(unittest.TestCase):
+    def test_vehicle_class_accepts_chinese_and_translated_values(self):
+        self.assertEqual(
+            translate_vehicle_attribute_code("vehicle_class", "轻客"),
+            "LIGHT_COMMERCIAL_VAN",
+        )
+        self.assertEqual(
+            translate_vehicle_attribute_code(
+                "vehicle_class", "Лёгкий коммерческий фургон"
+            ),
+            "LIGHT_COMMERCIAL_VAN",
+        )
+
+    def test_body_and_construction_use_stable_codes(self):
+        self.assertEqual(
+            translate_vehicle_attribute_code("body_type", "掀背车"),
+            "LIFTBACK",
+        )
+        self.assertEqual(
+            translate_vehicle_attribute_code("body_construction", "Несущий кузов"),
+            "UNIBODY",
+        )
+
+    def test_unknown_value_is_not_exposed_as_a_code(self):
+        self.assertIsNone(
+            translate_vehicle_attribute_code("vehicle_class", "Новый класс")
+        )
+
+    def test_powertrain_dictionary_closes_known_tail_values(self):
+        self.assertEqual(translate_powertrain_code("energy_type", "汽油电驱"), "HEV")
+        self.assertEqual(
+            translate_powertrain_code("body_type", "5门5座两厢跨界车"),
+            "HATCHBACK",
+        )
+        self.assertIsNone(translate_powertrain_code("drive_type", "未知"))
 
 
 class NumericVariantTests(unittest.TestCase):
@@ -73,7 +114,7 @@ class VehicleAttributesNormalizerTests(unittest.TestCase):
             10,
             20,
             {
-                "vehicle_class": "MEDIUM_SUV",
+                "vehicle_class": "MIDSIZE_SUV",
                 "body_type": "SUV",
                 "body_description": "5-дверный 5-местный SUV",
                 "body_construction": "UNIBODY",
@@ -101,7 +142,7 @@ class VehicleAttributesNormalizerTests(unittest.TestCase):
             10,
             20,
             {
-                "vehicle_class": "MEDIUM_SUV",
+                "vehicle_class": "MIDSIZE_SUV",
                 "body_type": "SUV",
                 "body_description": "5-дверный 5/7-местный SUV",
             },

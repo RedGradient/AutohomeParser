@@ -20,6 +20,9 @@ SPEC_NAME_FRAGMENTS_PATH = (
 BATTERY_TYPES_PATH = Path(__file__).parent / "data" / "battery_types.json"
 MOTOR_LAYOUTS_PATH = Path(__file__).parent / "data" / "motor_layouts.json"
 POWERTRAIN_CODES_PATH = Path(__file__).parent / "data" / "powertrain_codes.json"
+VEHICLE_ATTRIBUTE_CODES_PATH = (
+    Path(__file__).parent / "data" / "vehicle_attribute_codes.json"
+)
 CHINESE_NUMBER_RE = re.compile(r"(?P<number>\d+(?:\.\d+)?)\s*(?P<unit>万元|万公里|万|亿)")
 YUAN_RE = re.compile(r"(?P<number>\d+(?:\.\d+)?)\s*元")
 
@@ -69,6 +72,11 @@ def motor_layout_dictionary() -> dict[str, str]:
 def powertrain_code_dictionary() -> dict[str, dict[str, str]]:
     """Вернуть контекстные коды силовой установки и шасси."""
     return _name_dictionary(POWERTRAIN_CODES_PATH)
+
+
+def vehicle_attribute_code_dictionary() -> dict[str, dict[str, str]]:
+    """Вернуть коды классов, кузовов и конструкции автомобиля."""
+    return _name_dictionary(VEHICLE_ATTRIBUTE_CODES_PATH)
 
 
 def _decimal_text(value: Decimal) -> str:
@@ -165,7 +173,17 @@ def translate_powertrain_code(field: str, value: Any) -> Any:
     if value is None:
         return None
     normalized = str(value).strip()
-    if normalized in {"", "-", "无", "暂无", "Нет", "Нет данных"}:
+    if normalized in {
+        "",
+        "-",
+        "无",
+        "暂无",
+        "未知",
+        "待查",
+        "Нет",
+        "Нет данных",
+        "Неизвестно",
+    }:
         return None
     mapping = powertrain_code_dictionary().get(field, {})
     if field in {"clutch_type", "engine_layout"}:
@@ -196,6 +214,40 @@ def translate_powertrain_code(field: str, value: Any) -> Any:
             if source.casefold() == normalized_folded
         ),
         normalized,
+    )
+
+
+def translate_vehicle_attribute_code(field: str, value: Any) -> str | None:
+    """Преобразовать категориальный признак в закрытый стабильный код."""
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    if normalized in {
+        "",
+        "-",
+        "无",
+        "暂无",
+        "未知",
+        "待查",
+        "Нет",
+        "Нет данных",
+        "Неизвестно",
+    }:
+        return None
+    mapping = vehicle_attribute_code_dictionary().get(field, {})
+    exact = mapping.get(normalized)
+    if exact is not None:
+        return exact
+    if normalized in mapping.values():
+        return normalized
+    normalized_folded = normalized.casefold()
+    return next(
+        (
+            target
+            for source, target in mapping.items()
+            if source.casefold() == normalized_folded
+        ),
+        None,
     )
 
 
