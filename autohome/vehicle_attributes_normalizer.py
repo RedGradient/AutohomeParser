@@ -50,6 +50,22 @@ SEMANTIC_PATHS = {
     ),
 }
 PATH_TO_FIELD = {path: field for field, path in SEMANTIC_PATHS.items()}
+REQUIRED_SOURCE_FIELDS = frozenset(
+    {
+        "vehicle_class",
+        "body_description",
+        "curb_mass_kg",
+        "gross_mass_kg",
+        "length_mm",
+        "width_mm",
+        "height_mm",
+        "wheelbase_mm",
+        "door_count",
+        "seat_count",
+        "body_type",
+        "body_construction",
+    }
+)
 
 PLAIN_NUMBER_RE = re.compile(r"^\s*([0-9]+(?:[.,][0-9]+)?)\s*$")
 BODY_SEAT_RE = re.compile(r"(?P<first>\d+)(?:/(?P<second>\d+))?-местн", re.I)

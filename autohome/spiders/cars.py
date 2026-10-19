@@ -42,6 +42,7 @@ from autohome.items import (
     SpecModificationItem,
     SpecParameterItem,
     SpecPowertrainItem,
+    SpecVehicleAttributesItem,
     ResaleValueRankingItem,
     TechnologyRankingItem,
 )
@@ -60,6 +61,11 @@ from autohome.powertrain_normalizer import (
     normalize_powertrain,
 )
 from autohome.translator import translate_powertrain_code, translate_powertrain_field
+from autohome.vehicle_attributes_normalizer import (
+    PATH_TO_FIELD as VEHICLE_ATTRIBUTE_PATH_TO_FIELD,
+    REQUIRED_SOURCE_FIELDS as REQUIRED_VEHICLE_ATTRIBUTE_SOURCE_FIELDS,
+    normalize_vehicle_attributes,
+)
 
 
 def first(mapping: dict, *keys, default=None):
@@ -1309,6 +1315,7 @@ class CarsSpider(scrapy.Spider):
         section_positions: dict[str, int] = {}
         local_parameter_ids: dict[int, int] = {}
         local_powertrain_fields: dict[int, str] = {}
+        local_vehicle_attribute_fields: dict[int, str] = {}
         for position, group in enumerate(result.get("titlelist") or []):
             group_name = str(group.get("groupname") or "")
             section_name = str(group.get("itemtype") or "")
@@ -1357,6 +1364,13 @@ class CarsSpider(scrapy.Spider):
                 )
                 if powertrain_field is not None:
                     local_powertrain_fields[title_id] = powertrain_field
+                vehicle_attribute_field = VEHICLE_ATTRIBUTE_PATH_TO_FIELD.get(
+                    (group_name, section_name, parameter_name)
+                )
+                if vehicle_attribute_field is not None:
+                    local_vehicle_attribute_fields[title_id] = (
+                        vehicle_attribute_field
+                    )
                 yield ParameterDefinitionItem(
                     id=parameter_id,
                     semantic_key=semantic_key,
@@ -1392,6 +1406,8 @@ class CarsSpider(scrapy.Spider):
                 yield self._spec_item(spec_data, returned_series_id)
 
             powertrain_values: dict[str, object] = {}
+            vehicle_attribute_values: dict[str, object] = {}
+            seen_vehicle_attribute_fields: set[str] = set()
             for parameter in parameters:
                 title_id = as_int(parameter.get("titleid"))
                 if title_id is None:
@@ -1405,6 +1421,12 @@ class CarsSpider(scrapy.Spider):
                     )
                     continue
                 powertrain_field = local_powertrain_fields.get(title_id)
+                vehicle_attribute_field = local_vehicle_attribute_fields.get(title_id)
+                if vehicle_attribute_field is not None:
+                    vehicle_attribute_values[vehicle_attribute_field] = parameter.get(
+                        "itemname"
+                    )
+                    seen_vehicle_attribute_fields.add(vehicle_attribute_field)
                 if powertrain_field not in SUBITEM_FIELDS:
                     if powertrain_field is not None:
                         raw_value = parameter.get("itemname")
@@ -1481,6 +1503,27 @@ class CarsSpider(scrapy.Spider):
             modification = modification_row(powertrain)
             yield ModificationItem(**modification)
             yield SpecPowertrainItem(**powertrain)
+            missing_attribute_sources = (
+                REQUIRED_VEHICLE_ATTRIBUTE_SOURCE_FIELDS
+                - seen_vehicle_attribute_fields
+            )
+            if missing_attribute_sources:
+                self.logger.warning(
+                    "Нормализация характеристик spec_id=%d пропущена: "
+                    "частичный ответ без полей %s",
+                    spec_id,
+                    ", ".join(sorted(missing_attribute_sources)),
+                )
+            else:
+                vehicle_attribute_values["drive_type"] = powertrain_values.get(
+                    "drive_type"
+                )
+                vehicle_attributes = normalize_vehicle_attributes(
+                    spec_id,
+                    returned_series_id,
+                    vehicle_attribute_values,
+                )
+                yield SpecVehicleAttributesItem(**vehicle_attributes)
             yield SpecModificationItem(
                 spec_id=spec_id,
                 modification_id=modification["id"],

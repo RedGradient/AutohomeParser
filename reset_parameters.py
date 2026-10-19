@@ -16,6 +16,7 @@ from autohome.models import (
     Spec,
     SpecParameter,
     SpecPowertrain,
+    SpecVehicleAttributes,
 )
 
 
@@ -63,6 +64,7 @@ def main() -> int:
         with engine.begin() as connection:
             connection.execute(update(Spec).values(modification_id=None))
             connection.execute(delete(SpecPowertrain))
+            connection.execute(delete(SpecVehicleAttributes))
             connection.execute(delete(Modification))
             for model in PARAMETER_MODELS:
                 model.__table__.drop(connection, checkfirst=True)
