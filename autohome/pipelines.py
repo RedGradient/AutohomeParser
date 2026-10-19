@@ -44,6 +44,7 @@ from autohome.items import (
     SpecModificationItem,
     SpecParameterItem,
     SpecPowertrainItem,
+    SpecVehicleAttributesItem,
     ResaleValueRankingItem,
     TechnologyRankingItem,
 )
@@ -74,6 +75,7 @@ from autohome.models import (
     SmartTestRanking,
     Spec,
     SpecPowertrain,
+    SpecVehicleAttributes,
     SpecParameter,
     ResaleValueRanking,
     TechnologyRanking,
@@ -196,6 +198,7 @@ class SqlAlchemyPipeline:
         ParameterDefinitionItem: ParameterDefinition,
         ModificationItem: Modification,
         SpecPowertrainItem: SpecPowertrain,
+        SpecVehicleAttributesItem: SpecVehicleAttributes,
         SpecParameterItem: SpecParameter,
         ParameterSubitemItem: ParameterSubitem,
         ParameterColorSetItem: ParameterColorSet,

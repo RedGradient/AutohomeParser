@@ -167,6 +167,47 @@ class SpecPowertrainItem(scrapy.Item):
     normalized_at = scrapy.Field()
 
 
+class SpecVehicleAttributesItem(scrapy.Item):
+    """Нормализованные кузовные и классификационные признаки комплектации."""
+
+    spec_id = scrapy.Field()
+    series_id = scrapy.Field()
+    vehicle_class = scrapy.Field()
+    body_type = scrapy.Field()
+    body_construction = scrapy.Field()
+    seat_count_min = scrapy.Field()
+    seat_count_max = scrapy.Field()
+    door_count = scrapy.Field()
+    curb_mass_kg = scrapy.Field()
+    gross_mass_kg = scrapy.Field()
+    payload_kg_min = scrapy.Field()
+    payload_kg_max = scrapy.Field()
+    length_mm = scrapy.Field()
+    width_mm = scrapy.Field()
+    height_mm = scrapy.Field()
+    wheelbase_mm = scrapy.Field()
+    cargo_length_min_mm = scrapy.Field()
+    cargo_length_max_mm = scrapy.Field()
+    cargo_width_min_mm = scrapy.Field()
+    cargo_width_max_mm = scrapy.Field()
+    cargo_height_min_mm = scrapy.Field()
+    cargo_height_max_mm = scrapy.Field()
+    ground_clearance_mm = scrapy.Field()
+    ground_clearance_laden_mm = scrapy.Field()
+    ground_clearance_unladen_mm = scrapy.Field()
+    is_four_wheel_drive = scrapy.Field()
+    has_permanent_rear_seats = scrapy.Field()
+    has_rear_side_windows = scrapy.Field()
+    has_rear_windowed_door = scrapy.Field()
+    has_separate_cargo_compartment = scrapy.Field()
+    is_special_purpose = scrapy.Field()
+    is_complete = scrapy.Field()
+    missing_fields_json = scrapy.Field()
+    warnings_json = scrapy.Field()
+    normalization_version = scrapy.Field()
+    normalized_at = scrapy.Field()
+
+
 class ModificationItem(scrapy.Item):
     """Нормализованная модификация автомобиля."""
 

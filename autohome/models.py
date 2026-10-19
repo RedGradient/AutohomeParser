@@ -273,6 +273,53 @@ class SpecPowertrain(Base):
     )
 
 
+class SpecVehicleAttributes(Base):
+    """Нормализованные кузовные и классификационные признаки комплектации."""
+
+    __tablename__ = "spec_vehicle_attributes"
+
+    spec_id: Mapped[int] = mapped_column(ForeignKey("specs.id"), primary_key=True)
+    series_id: Mapped[int] = mapped_column(ForeignKey("series.id"), index=True)
+    vehicle_class: Mapped[str | None] = mapped_column(String(100), index=True)
+    body_type: Mapped[str | None] = mapped_column(String(50), index=True)
+    body_construction: Mapped[str | None] = mapped_column(String(50), index=True)
+    seat_count_min: Mapped[int | None] = mapped_column(Integer)
+    seat_count_max: Mapped[int | None] = mapped_column(Integer)
+    door_count: Mapped[int | None] = mapped_column(Integer)
+    curb_mass_kg: Mapped[int | None] = mapped_column(Integer)
+    gross_mass_kg: Mapped[int | None] = mapped_column(Integer, index=True)
+    payload_kg_min: Mapped[int | None] = mapped_column(Integer)
+    payload_kg_max: Mapped[int | None] = mapped_column(Integer)
+    length_mm: Mapped[int | None] = mapped_column(Integer)
+    width_mm: Mapped[int | None] = mapped_column(Integer)
+    height_mm: Mapped[int | None] = mapped_column(Integer)
+    wheelbase_mm: Mapped[int | None] = mapped_column(Integer)
+    cargo_length_min_mm: Mapped[int | None] = mapped_column(Integer)
+    cargo_length_max_mm: Mapped[int | None] = mapped_column(Integer)
+    cargo_width_min_mm: Mapped[int | None] = mapped_column(Integer)
+    cargo_width_max_mm: Mapped[int | None] = mapped_column(Integer)
+    cargo_height_min_mm: Mapped[int | None] = mapped_column(Integer)
+    cargo_height_max_mm: Mapped[int | None] = mapped_column(Integer)
+    ground_clearance_mm: Mapped[int | None] = mapped_column(Integer)
+    ground_clearance_laden_mm: Mapped[int | None] = mapped_column(Integer)
+    ground_clearance_unladen_mm: Mapped[int | None] = mapped_column(Integer)
+    is_four_wheel_drive: Mapped[bool | None] = mapped_column(Boolean, index=True)
+    has_permanent_rear_seats: Mapped[bool | None] = mapped_column(Boolean)
+    has_rear_side_windows: Mapped[bool | None] = mapped_column(Boolean)
+    has_rear_windowed_door: Mapped[bool | None] = mapped_column(Boolean)
+    has_separate_cargo_compartment: Mapped[bool | None] = mapped_column(Boolean)
+    is_special_purpose: Mapped[bool | None] = mapped_column(Boolean, index=True)
+    is_complete: Mapped[bool] = mapped_column(Boolean, nullable=False, index=True)
+    missing_fields_json: Mapped[list[str]] = mapped_column(JSON_TYPE, nullable=False)
+    warnings_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON_TYPE, nullable=False
+    )
+    normalization_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    normalized_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class Modification(Base):
     """Одна нормализованная модификация внутри серии и модельного года."""
 
