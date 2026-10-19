@@ -9,6 +9,7 @@ import random
 import re
 import time
 
+from scrapy.exceptions import DropItem
 from sqlalchemy import bindparam, create_engine, event, func, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -268,6 +269,14 @@ class SqlAlchemyPipeline:
     def process_item(self, item):
         """Добавить элемент в буфер и записать заполненный пакет."""
         row = self._serialize(item)
+        if isinstance(item, SpecItem) and not any(
+            row.get(field) is not None and row[field] > 0
+            for field in ("guide_price_yuan", "dealer_price_yuan")
+        ):
+            spec_id = row.get("id")
+            raise DropItem(
+                f"Комплектация spec_id={spec_id} пропущена: отсутствуют цены"
+            )
         self.buffers[type(item)].append(row)
         self.buffered += 1
         if self.buffered >= self.batch_size:

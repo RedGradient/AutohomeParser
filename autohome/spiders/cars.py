@@ -113,6 +113,14 @@ def yuan_from_text(value: object) -> Decimal | None:
     return amount
 
 
+def has_vehicle_price(guide_price: object, dealer_price: object) -> bool:
+    """Проверить наличие хотя бы одной положительной цены автомобиля."""
+    return any(
+        price is not None and price > 0
+        for price in (yuan_from_text(guide_price), yuan_from_text(dealer_price))
+    )
+
+
 def text_after_colon(value: object) -> str | None:
     """Вернуть содержимое после китайского или обычного двоеточия."""
     text = str(value or "").strip()
@@ -1166,7 +1174,26 @@ class CarsSpider(scrapy.Spider):
             # Пропускаем обёртки, которые только ссылаются на комплектацию.
             if not any(k in obj for k in ("name", "specname", "specName", "price", "year")):
                 continue
-            specs.setdefault(spec_id, obj)
+            current = specs.get(spec_id)
+            if current is None or (
+                not self._spec_has_price(current) and self._spec_has_price(obj)
+            ):
+                specs[spec_id] = obj
+
+        skipped_spec_ids = {
+            spec_id for spec_id, obj in specs.items() if not self._spec_has_price(obj)
+        }
+        if skipped_spec_ids:
+            self.logger.info(
+                "Серия %d: пропущено комплектаций без цены: %d",
+                series_id,
+                len(skipped_spec_ids),
+            )
+            specs = {
+                spec_id: obj
+                for spec_id, obj in specs.items()
+                if spec_id not in skipped_spec_ids
+            }
 
         for spec_id, obj in specs.items():
             self.spec_series[spec_id] = series_id
@@ -1356,6 +1383,12 @@ class CarsSpider(scrapy.Spider):
             # Эндпоинт списка содержит более полные данные о годе, цене дилера
             # и изображении. Здесь создаём запись только при её отсутствии.
             if spec_id not in self.spec_series and not self.resume_configs:
+                if not self._spec_has_price(spec_data):
+                    self.logger.info(
+                        "Пропущена комплектация spec_id=%d без цены из ответа конфигурации",
+                        spec_id,
+                    )
+                    continue
                 yield self._spec_item(spec_data, returned_series_id)
 
             powertrain_values: dict[str, object] = {}
@@ -1490,6 +1523,14 @@ class CarsSpider(scrapy.Spider):
         # Продолжаем серию после исчерпания стандартных повторов Scrapy.
         self.processed_spec_ids.add(requested_spec_id)
         yield from self._next_config_outputs(series_id)
+
+    @staticmethod
+    def _spec_has_price(obj: dict) -> bool:
+        """Проверить цены комплектации во входном объекте API."""
+        return has_vehicle_price(
+            first(obj, "minprice", "price"),
+            first(obj, "dealerprice", "dealerPrice"),
+        )
 
     @staticmethod
     def _spec_item(obj: dict, series_id: int):
