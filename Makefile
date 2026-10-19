@@ -13,6 +13,7 @@ DATABASE_BATCH_SIZE ?= 1000
 SHUTDOWN_TIMEOUT ?= 120
 NORMALIZE_VEHICLE_ATTRIBUTES_ARGS ?=
 AUDIT_VEHICLE_CLASSIFICATIONS_ARGS ?=
+CALCULATE_IMPORT_DUTIES_ARGS ?=
 DATABASE_URL ?= postgresql+psycopg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@127.0.0.1:$(POSTGRES_PORT)/$(POSTGRES_DB)
 
 # Используемые по умолчанию сетевые интерфейсы.
@@ -153,7 +154,8 @@ translate-db: postgres-up
 
 calculate-import-duties: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
-		.venv/bin/python calculate_import_duties.py
+		.venv/bin/python calculate_import_duties.py \
+		$(CALCULATE_IMPORT_DUTIES_ARGS)
 
 docker-down:
 	@docker compose down

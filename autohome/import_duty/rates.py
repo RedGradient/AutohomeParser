@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-RULES_VERSION = "RU-EAEU-2026-01-22-v2"
+RULES_VERSION = "RU-EAEU-2026-01-22-v3"
 PERSONAL_RULES_SOURCE = (
     "https://eec.eaeunion.org/upload/medialibrary/48d/"
     "754bnati3u804penijmb0h866e5g6cng/Prilozhenie-2_107.pdf"

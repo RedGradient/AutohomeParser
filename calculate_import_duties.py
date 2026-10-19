@@ -1,33 +1,41 @@
 from __future__ import annotations
 
 import argparse
+import os
 from collections import Counter
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from hashlib import blake2b
-import os
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from autohome.import_duty import (
+    CLASSIFICATION_RULES_VERSION,
     DutyContext,
     ExchangeRate,
     ImporterType,
+    VehicleClassificationInput,
     calculate_import_duty,
+    classify_vehicle,
 )
 from autohome.import_duty.calculator import assumed_production_date, completed_months
 from autohome.import_duty.currency import fetch_cbr_rates
 from autohome.import_duty.rates import RULES_VERSION
+from autohome.import_duty.types import (
+    CalculationStatus,
+    ClassificationStatus,
+    DutyResult,
+)
 from autohome.models import (
     Base,
     CustomsCalculation,
     CustomsPaymentResult,
     Spec,
     SpecPowertrain,
+    SpecVehicleAttributes,
 )
-
 
 MAX_UPSERT_ROWS = 2000
 
@@ -35,7 +43,7 @@ MAX_UPSERT_ROWS = 2000
 def parse_arguments() -> argparse.Namespace:
     """Разобрать параметры массового расчёта."""
     parser = argparse.ArgumentParser(
-        description="Рассчитать ввозную пошлину легковых автомобилей Китай → Россия."
+        description="Рассчитать ввозную пошлину автомобилей Китай → Россия."
     )
     parser.add_argument(
         "--database-url",
@@ -128,8 +136,52 @@ def select_vehicle_price(
     return None, "MISSING"
 
 
-def make_rows(row, importer: ImporterType, calculation_date: date, rates):
+def classify_database_row(row):
+    """Классифицировать выбранную SQL-строку общим классификатором."""
+    values = VehicleClassificationInput(
+        **{
+            field: getattr(row, field, None)
+            for field in VehicleClassificationInput.__dataclass_fields__
+        }
+    )
+    return classify_vehicle(values)
+
+
+def classification_failure(result) -> DutyResult:
+    """Преобразовать безопасный отказ классификатора в результат расчёта."""
+    status_by_classification = {
+        ClassificationStatus.AMBIGUOUS: CalculationStatus.MANUAL_REVIEW,
+        ClassificationStatus.MISSING_DATA: CalculationStatus.MISSING_DATA,
+        ClassificationStatus.MANUAL_REVIEW: CalculationStatus.MANUAL_REVIEW,
+        ClassificationStatus.UNSUPPORTED: CalculationStatus.UNSUPPORTED,
+    }
+    calculation_status = status_by_classification.get(
+        result.status,
+        CalculationStatus.MANUAL_REVIEW,
+    )
+    return DutyResult(
+        status=calculation_status,
+        classification_status=result.status,
+        tnved_code=result.tnved_heading,
+        details={
+            "classification_rules_version": result.rules_version,
+            "classification_rule_code": result.rule_code,
+            "classification_missing_fields": list(result.missing_fields),
+            **result.details,
+        },
+    )
+
+
+def make_rows(
+    row,
+    importer: ImporterType,
+    calculation_date: date,
+    rates,
+    classification=None,
+):
     """Рассчитать один сценарий и сериализовать две строки БД."""
+    if classification is None:
+        classification = classify_database_row(row)
     price_cny, price_source = select_vehicle_price(
         row.guide_price_yuan, row.dealer_price_yuan
     )
@@ -147,8 +199,15 @@ def make_rows(row, importer: ImporterType, calculation_date: date, rates):
         engine_power_hp=row.engine_power_hp,
         motor_power_kw=row.motor_total_power_kw,
         price_source=price_source,
+        tnved_heading=classification.tnved_heading,
+        gross_mass_kg=getattr(row, "gross_mass_kg", None),
+        seat_count_max=getattr(row, "seat_count_max", None),
+        is_special_purpose=getattr(row, "is_special_purpose", None),
     )
-    result = calculate_import_duty(context)
+    if classification.status == ClassificationStatus.CLASSIFIED:
+        result = calculate_import_duty(context)
+    else:
+        result = classification_failure(classification)
     if price_cny is None and result.status.value == "CALCULATED":
         price_source = "NOT_REQUIRED"
     production_date = assumed_production_date(row.year)
@@ -202,6 +261,20 @@ def make_rows(row, importer: ImporterType, calculation_date: date, rates):
             "engine_displacement_cc": row.engine_displacement_ml,
             "engine_power_hp": str(row.engine_power_hp) if row.engine_power_hp is not None else None,
             "motor_power_kw": str(row.motor_total_power_kw) if row.motor_total_power_kw is not None else None,
+            "vehicle_class": getattr(row, "vehicle_class", None),
+            "seat_count_min": getattr(row, "seat_count_min", None),
+            "seat_count_max": getattr(row, "seat_count_max", None),
+            "gross_mass_kg": getattr(row, "gross_mass_kg", None),
+            "curb_mass_kg": getattr(row, "curb_mass_kg", None),
+            "payload_kg_min": getattr(row, "payload_kg_min", None),
+            "payload_kg_max": getattr(row, "payload_kg_max", None),
+            "is_special_purpose": getattr(row, "is_special_purpose", None),
+            "classification_rules_version": CLASSIFICATION_RULES_VERSION,
+            "classification_status": classification.status.value,
+            "classification_tnved_heading": classification.tnved_heading,
+            "classification_rule_code": classification.rule_code,
+            "classification_missing_fields": list(classification.missing_fields),
+            "classification_details": classification.details,
         },
         "warnings_json": result.warnings,
         "calculated_at": now,
@@ -283,12 +356,36 @@ def main() -> int:
             Spec.dealer_price_yuan,
             Spec.year,
             SpecPowertrain.energy_type,
-            SpecPowertrain.body_type,
             SpecPowertrain.engine_displacement_ml,
             SpecPowertrain.engine_power_hp,
             SpecPowertrain.motor_total_power_kw,
+            SpecVehicleAttributes.vehicle_class,
+            SpecVehicleAttributes.body_type,
+            SpecVehicleAttributes.seat_count_min,
+            SpecVehicleAttributes.seat_count_max,
+            SpecVehicleAttributes.gross_mass_kg,
+            SpecVehicleAttributes.curb_mass_kg,
+            SpecVehicleAttributes.payload_kg_min,
+            SpecVehicleAttributes.payload_kg_max,
+            SpecVehicleAttributes.length_mm,
+            SpecVehicleAttributes.wheelbase_mm,
+            SpecVehicleAttributes.cargo_length_min_mm,
+            SpecVehicleAttributes.cargo_length_max_mm,
+            SpecVehicleAttributes.cargo_width_min_mm,
+            SpecVehicleAttributes.cargo_width_max_mm,
+            SpecVehicleAttributes.cargo_height_min_mm,
+            SpecVehicleAttributes.cargo_height_max_mm,
+            SpecVehicleAttributes.has_permanent_rear_seats,
+            SpecVehicleAttributes.has_rear_side_windows,
+            SpecVehicleAttributes.has_rear_windowed_door,
+            SpecVehicleAttributes.has_separate_cargo_compartment,
+            SpecVehicleAttributes.is_special_purpose,
         )
         .outerjoin(SpecPowertrain, SpecPowertrain.spec_id == Spec.id)
+        .outerjoin(
+            SpecVehicleAttributes,
+            SpecVehicleAttributes.spec_id == Spec.id,
+        )
         .order_by(Spec.id)
     )
     if args.limit:
@@ -303,9 +400,17 @@ def main() -> int:
             rows = connection.execution_options(stream_results=True).execute(query)
             for row in rows:
                 processed_specs += 1
+                classification = classify_database_row(row)
+                counts[f"CLASSIFICATION:{classification.status.value}"] += 1
+                if classification.tnved_heading:
+                    counts[f"HEADING:{classification.tnved_heading}"] += 1
                 for importer in importers:
                     calculation, payment = make_rows(
-                        row, importer, args.calculation_date, rates
+                        row,
+                        importer,
+                        args.calculation_date,
+                        rates,
+                        classification,
                     )
                     calculations.append(calculation)
                     payments.append(payment)
