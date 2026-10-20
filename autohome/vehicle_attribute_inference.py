@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 import re
 from typing import Any, Iterable, Mapping
 
 
-VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-20-v1"
+VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-20-v2"
 INFERRED_INPUTS_USED = "INFERRED_INPUTS_USED"
+TRUCK_OCCUPANT_MASS_KG = 65
+TRUCK_GROSS_MASS_NAME_RE = re.compile(
+    r"(?<![\d.])(?P<tonnes>\d{1,2}(?:\.\d+)?)吨(?=(?:底盘|级|加|\s|$))"
+)
 
 
 class VehiclePurposeType(StrEnum):
@@ -86,7 +91,7 @@ class InferenceEvidence:
 class InferenceDecision:
     """Выведенное значение одного нормализованного поля."""
 
-    value: bool | VehiclePurposeType
+    value: bool | int | VehiclePurposeType
     rule_code: str
     confidence: InferenceConfidence
     evidence: tuple[InferenceEvidence, ...]
@@ -101,7 +106,7 @@ class VehicleAttributeInferenceResult:
     flags: tuple[str, ...] = ()
     rules_version: str = VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION
 
-    def value(self, field_name: str) -> bool | VehiclePurposeType | None:
+    def value(self, field_name: str) -> bool | int | VehiclePurposeType | None:
         decision = self.decisions.get(field_name)
         return decision.value if decision is not None else None
 
@@ -114,6 +119,7 @@ INFERRED_STORAGE_FIELDS = frozenset(
         "has_separate_cargo_compartment",
         "is_special_purpose",
         "vehicle_purpose_type",
+        "gross_mass_kg",
     }
 )
 
@@ -752,6 +758,79 @@ def infer_ordinary_transport(
     return None
 
 
+def infer_truck_gross_mass(
+    *,
+    body_type: str | None,
+    gross_mass_kg: int | None,
+    curb_mass_kg: int | None,
+    payload_kg_min: int | None,
+    payload_kg_max: int | None,
+    seat_count_min: int | None,
+    seat_count_max: int | None,
+    spec_name: str | None,
+) -> InferenceDecision | None:
+    """Восстановить полную массу грузовика без замены прямого значения."""
+    if body_type != "TRUCK" or gross_mass_kg is not None:
+        return None
+
+    raw_name = _text(spec_name)
+    name_match = TRUCK_GROSS_MASS_NAME_RE.search(raw_name)
+    if name_match is not None:
+        try:
+            mass = Decimal(name_match.group("tonnes")) * 1000
+        except InvalidOperation:
+            mass = Decimal(0)
+        if 500 <= mass <= 100_000 and mass == mass.to_integral_value():
+            return InferenceDecision(
+                value=int(mass),
+                rule_code="TRUCK_GROSS_MASS_FROM_SPEC_NAME",
+                confidence=InferenceConfidence.HIGH,
+                evidence=(
+                    InferenceEvidence(
+                        source="specs.raw_json.name",
+                        marker=name_match.group(0),
+                        raw_value=raw_name,
+                    ),
+                ),
+            )
+
+    exact_inputs = (
+        curb_mass_kg is not None
+        and curb_mass_kg > 0
+        and payload_kg_min is not None
+        and payload_kg_min > 0
+        and payload_kg_min == payload_kg_max
+        and seat_count_min is not None
+        and seat_count_min > 0
+        and seat_count_min == seat_count_max
+    )
+    if not exact_inputs:
+        return None
+    assert curb_mass_kg is not None
+    assert payload_kg_max is not None
+    assert seat_count_max is not None
+    inferred_mass = (
+        curb_mass_kg
+        + payload_kg_max
+        + seat_count_max * TRUCK_OCCUPANT_MASS_KG
+    )
+    return InferenceDecision(
+        value=inferred_mass,
+        rule_code="TRUCK_GROSS_MASS_FROM_CURB_PAYLOAD_AND_SEATS",
+        confidence=InferenceConfidence.MEDIUM,
+        evidence=(
+            _normalized_evidence("curb_mass_kg", curb_mass_kg),
+            _normalized_evidence("payload_kg", payload_kg_max),
+            _normalized_evidence("seat_count", seat_count_max),
+            InferenceEvidence(
+                source="inference_formula",
+                marker="curb_mass + payload + seats * 65",
+                raw_value=inferred_mass,
+            ),
+        ),
+    )
+
+
 def infer_vehicle_attributes(
     parameters: Iterable[RawParameter],
     *,
@@ -759,6 +838,7 @@ def infer_vehicle_attributes(
     vehicle_class: str | None = None,
     seat_count_min: int | None = None,
     seat_count_max: int | None = None,
+    curb_mass_kg: int | None = None,
     gross_mass_kg: int | None = None,
     payload_kg_min: int | None = None,
     payload_kg_max: int | None = None,
@@ -774,6 +854,18 @@ def infer_vehicle_attributes(
 ) -> VehicleAttributeInferenceResult:
     """Выполнить все косвенные правила для одной комплектации."""
     decisions = infer_parameter_attributes(parameters, body_type=body_type)
+    inferred_gross_mass = infer_truck_gross_mass(
+        body_type=body_type,
+        gross_mass_kg=gross_mass_kg,
+        curb_mass_kg=curb_mass_kg,
+        payload_kg_min=payload_kg_min,
+        payload_kg_max=payload_kg_max,
+        seat_count_min=seat_count_min,
+        seat_count_max=seat_count_max,
+        spec_name=spec_name,
+    )
+    if inferred_gross_mass is not None:
+        decisions["gross_mass_kg"] = inferred_gross_mass
     purpose, warnings = infer_vehicle_purpose(
         spec_name=spec_name,
         series_name=series_name,
@@ -806,7 +898,15 @@ def infer_vehicle_attributes(
             vehicle_class=vehicle_class,
             seat_count_min=seat_count_min,
             seat_count_max=seat_count_max,
-            gross_mass_kg=gross_mass_kg,
+            gross_mass_kg=(
+                gross_mass_kg
+                if gross_mass_kg is not None
+                else (
+                    int(inferred_gross_mass.value)
+                    if inferred_gross_mass is not None
+                    else None
+                )
+            ),
             payload_kg_min=payload_kg_min,
             payload_kg_max=payload_kg_max,
             cargo_length_min_mm=cargo_length_min_mm,
@@ -876,6 +976,7 @@ def apply_vehicle_attribute_inference(
         vehicle_class=inference_input.get("vehicle_class"),
         seat_count_min=inference_input.get("seat_count_min"),
         seat_count_max=inference_input.get("seat_count_max"),
+        curb_mass_kg=inference_input.get("curb_mass_kg"),
         gross_mass_kg=inference_input.get("gross_mass_kg"),
         payload_kg_min=inference_input.get("payload_kg_min"),
         payload_kg_max=inference_input.get("payload_kg_max"),

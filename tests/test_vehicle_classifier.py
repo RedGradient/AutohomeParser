@@ -241,6 +241,120 @@ class VehicleClassifierTests(unittest.TestCase):
 
         self.assertEqual(result.status, ClassificationStatus.MANUAL_REVIEW)
 
+    def test_truck_body_overrides_van_class_below_ten_seats(self):
+        result = classify(
+            body_type="TRUCK",
+            vehicle_class="LIGHT_COMMERCIAL_VAN",
+            seat_count_min=3,
+            seat_count_max=3,
+            gross_mass_kg=3500,
+            is_special_purpose=False,
+        )
+
+        self.assertEqual(result.status, ClassificationStatus.CLASSIFIED)
+        self.assertEqual(result.tnved_heading, "8704")
+        self.assertEqual(
+            result.details["family_conflict_resolution"],
+            "SPECIFIC_TRUCK_BODY_OVERRIDES_VAN_CLASS",
+        )
+
+    def test_truck_body_and_van_class_with_ten_seats_requires_review(self):
+        result = classify(
+            body_type="TRUCK",
+            vehicle_class="LIGHT_COMMERCIAL_VAN",
+            seat_count_min=10,
+            seat_count_max=10,
+            gross_mass_kg=3500,
+            is_special_purpose=False,
+        )
+
+        self.assertEqual(result.status, ClassificationStatus.MANUAL_REVIEW)
+        self.assertEqual(
+            result.details["reason"],
+            "TRUCK_BODY_CONFLICTS_WITH_PASSENGER_SEAT_COUNT",
+        )
+
+    def test_truck_body_and_van_class_crossing_ten_is_ambiguous(self):
+        result = classify(
+            body_type="TRUCK",
+            vehicle_class="LIGHT_COMMERCIAL_VAN",
+            seat_count_min=9,
+            seat_count_max=10,
+            gross_mass_kg=3500,
+            is_special_purpose=False,
+        )
+
+        self.assertEqual(result.status, ClassificationStatus.AMBIGUOUS)
+        self.assertEqual(
+            result.details["reason"],
+            "TRUCK_VAN_CONFLICT_CROSSES_8702_BOUNDARY",
+        )
+
+    def test_truck_body_and_van_class_requires_seat_count(self):
+        result = classify(
+            body_type="TRUCK",
+            vehicle_class="LIGHT_COMMERCIAL_VAN",
+            seat_count_min=None,
+            seat_count_max=None,
+            gross_mass_kg=3500,
+            is_special_purpose=False,
+        )
+
+        self.assertEqual(result.status, ClassificationStatus.MISSING_DATA)
+        self.assertEqual(
+            result.missing_fields,
+            ("seat_count_max", "seat_count_min"),
+        )
+
+    def test_two_seat_commercial_truck_overrides_mpv_class(self):
+        result = classify(
+            body_type="TRUCK",
+            vehicle_class="MIDSIZE_MPV",
+            seat_count_min=2,
+            seat_count_max=2,
+            gross_mass_kg=2900,
+            is_special_purpose=False,
+        )
+
+        self.assertEqual(result.status, ClassificationStatus.CLASSIFIED)
+        self.assertEqual(result.tnved_heading, "8704")
+
+    def test_pickup_body_overrides_mini_truck_class(self):
+        result = classify(
+            body_type="PICKUP",
+            vehicle_class="MINI_TRUCK",
+            seat_count_min=2,
+            seat_count_max=2,
+            wheelbase_mm=2800,
+            cargo_length_min_mm=2465,
+            cargo_length_max_mm=2465,
+        )
+
+        self.assertEqual(result.status, ClassificationStatus.CLASSIFIED)
+        self.assertEqual(result.tnved_heading, "8704")
+        self.assertEqual(
+            result.details["family_conflict_resolution"],
+            "SPECIFIC_PICKUP_BODY_OVERRIDES_BROAD_CLASS",
+        )
+
+    def test_pickup_class_overrides_generic_truck_body(self):
+        result = classify(
+            body_type="TRUCK",
+            vehicle_class="PICKUP",
+            seat_count_min=5,
+            seat_count_max=5,
+            wheelbase_mm=3380,
+            cargo_length_min_mm=1855,
+            cargo_length_max_mm=1855,
+        )
+
+        self.assertEqual(result.status, ClassificationStatus.CLASSIFIED)
+        self.assertEqual(result.tnved_heading, "8704")
+        self.assertEqual(
+            result.details["family_conflict_resolution"],
+            "SPECIFIC_PICKUP_CLASS_OVERRIDES_TRUCK_BODY",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

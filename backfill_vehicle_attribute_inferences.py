@@ -28,6 +28,7 @@ NORMALIZED_INPUT_FIELDS = (
     "vehicle_class",
     "seat_count_min",
     "seat_count_max",
+    "curb_mass_kg",
     "gross_mass_kg",
     "payload_kg_min",
     "payload_kg_max",
@@ -42,6 +43,7 @@ NORMALIZED_INPUT_FIELDS = (
     "warnings_json",
 )
 INFERENCE_STORAGE_FIELDS = (
+    "gross_mass_kg",
     "has_permanent_rear_seats",
     "has_rear_side_windows",
     "has_rear_windowed_door",
@@ -252,8 +254,10 @@ def _record_counts(counts: Counter, updates: list[dict[str, Any]]) -> None:
         counts[f"is_special_purpose_{str(value).lower()}"] += 1
         details = row.get("inference_details_json") or {}
         decisions = details.get("decisions") or {}
-        for decision in decisions.values():
+        for field_name, decision in decisions.items():
             counts[f"outcome_{decision['outcome'].lower()}"] += 1
+            if decision["outcome"] == "APPLIED":
+                counts[f"field_{field_name}_applied"] += 1
         if row.get("vehicle_purpose_type"):
             counts[f"purpose_{row['vehicle_purpose_type']}"] += 1
 

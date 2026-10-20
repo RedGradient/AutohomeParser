@@ -41,6 +41,11 @@ class VehicleAttributeInferenceBackfillTests(unittest.TestCase):
                     "series_id": 1,
                     "body_type": "TRUCK",
                     "vehicle_class": "LIGHT_TRUCK",
+                    "seat_count_min": 3,
+                    "seat_count_max": 3,
+                    "curb_mass_kg": 1590,
+                    "payload_kg_min": 1475,
+                    "payload_kg_max": 1475,
                     "is_complete": True,
                     "missing_fields_json": [],
                     "warnings_json": [],
@@ -71,9 +76,11 @@ class VehicleAttributeInferenceBackfillTests(unittest.TestCase):
 
         self.assertEqual(counts["selected"], 1)
         self.assertEqual(counts["is_special_purpose_false"], 1)
+        self.assertEqual(counts["field_gross_mass_kg_applied"], 1)
         with self.engine.connect() as connection:
             row = connection.execute(select(SpecVehicleAttributes)).one()
         self.assertIsNone(row.is_special_purpose)
+        self.assertIsNone(row.gross_mass_kg)
         self.assertIsNone(row.inference_rules_version)
 
     def test_write_is_idempotent_and_only_outdated_skips_current_version(self):
@@ -88,6 +95,7 @@ class VehicleAttributeInferenceBackfillTests(unittest.TestCase):
         with self.engine.connect() as connection:
             row = connection.execute(select(SpecVehicleAttributes)).one()
         self.assertIs(row.is_special_purpose, False)
+        self.assertEqual(row.gross_mass_kg, 3260)
         self.assertEqual(
             row.inference_rules_version,
             VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION,

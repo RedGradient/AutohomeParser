@@ -6,7 +6,7 @@ from typing import Any, Mapping
 from .types import ClassificationStatus
 
 
-CLASSIFICATION_RULES_VERSION = "RU-EAEU-VEHICLE-CLASSIFICATION-2026-10-20-v2"
+CLASSIFICATION_RULES_VERSION = "RU-EAEU-VEHICLE-CLASSIFICATION-2026-10-20-v3"
 PICKUP_CLASSIFICATION_SOURCE = "https://adilet.zan.kz/rus/docs/H11T0000751"
 PICKUP_DRIVER_MASS_KG = 75
 PICKUP_PASSENGER_MASS_KG = 68
@@ -106,6 +106,30 @@ def _result(
         rule_code=rule_code,
         missing_fields=tuple(sorted(missing_fields)),
         details=details,
+    )
+
+
+def _with_conflict_resolution(
+    result: VehicleClassificationResult,
+    resolution: str | None,
+    *,
+    body_type: str,
+    vehicle_class: str,
+) -> VehicleClassificationResult:
+    if resolution is None:
+        return result
+    return VehicleClassificationResult(
+        status=result.status,
+        tnved_heading=result.tnved_heading,
+        rule_code=result.rule_code,
+        missing_fields=result.missing_fields,
+        details={
+            **result.details,
+            "family_conflict_resolution": resolution,
+            "body_type": body_type,
+            "vehicle_class": vehicle_class,
+        },
+        rules_version=result.rules_version,
     )
 
 
@@ -430,9 +454,66 @@ def classify_vehicle(
 
     body_family = _body_family(values.body_type)
     class_family = _vehicle_family(values.vehicle_class)
+    conflict_resolution = None
     if class_family is not None and body_family != class_family:
         compatible = {body_family, class_family} == {"PASSENGER", "VAN"}
-        if not compatible:
+        if compatible:
+            pass
+        elif body_family == "TRUCK" and class_family == "VAN":
+            if values.seat_count_min is None or values.seat_count_max is None:
+                return _result(
+                    ClassificationStatus.MISSING_DATA,
+                    missing_fields=[
+                        name
+                        for name in ("seat_count_min", "seat_count_max")
+                        if getattr(values, name) is None
+                    ],
+                    reason="TRUCK_VAN_CONFLICT_REQUIRES_SEAT_COUNT",
+                    body_type=values.body_type,
+                    vehicle_class=values.vehicle_class,
+                )
+            if values.seat_count_min < 10 <= values.seat_count_max:
+                return _result(
+                    ClassificationStatus.AMBIGUOUS,
+                    reason="TRUCK_VAN_CONFLICT_CROSSES_8702_BOUNDARY",
+                    body_type=values.body_type,
+                    vehicle_class=values.vehicle_class,
+                    seat_count_min=values.seat_count_min,
+                    seat_count_max=values.seat_count_max,
+                )
+            if values.seat_count_min >= 10:
+                return _result(
+                    ClassificationStatus.MANUAL_REVIEW,
+                    reason="TRUCK_BODY_CONFLICTS_WITH_PASSENGER_SEAT_COUNT",
+                    body_type=values.body_type,
+                    vehicle_class=values.vehicle_class,
+                    seat_count_min=values.seat_count_min,
+                    seat_count_max=values.seat_count_max,
+                )
+            conflict_resolution = "SPECIFIC_TRUCK_BODY_OVERRIDES_VAN_CLASS"
+        elif (
+            body_family == "TRUCK"
+            and class_family == "PASSENGER"
+            and (
+                values.vehicle_class == "MPV"
+                or values.vehicle_class.endswith("_MPV")
+            )
+            and values.seat_count_min is not None
+            and values.seat_count_max is not None
+            and values.seat_count_max <= 2
+        ):
+            conflict_resolution = (
+                "TWO_SEAT_COMMERCIAL_TRUCK_BODY_OVERRIDES_MPV_CLASS"
+            )
+        elif body_family == "TRUCK" and class_family == "PICKUP":
+            body_family = "PICKUP"
+            conflict_resolution = "SPECIFIC_PICKUP_CLASS_OVERRIDES_TRUCK_BODY"
+        elif body_family == "PICKUP" and class_family in {
+            "TRUCK",
+            "PASSENGER",
+        }:
+            conflict_resolution = "SPECIFIC_PICKUP_BODY_OVERRIDES_BROAD_CLASS"
+        else:
             return _result(
                 ClassificationStatus.MANUAL_REVIEW,
                 reason="CONFLICTING_BODY_TYPE_AND_VEHICLE_CLASS",
@@ -441,9 +522,19 @@ def classify_vehicle(
             )
 
     if body_family == "TRUCK":
-        return _classify_truck(values)
+        return _with_conflict_resolution(
+            _classify_truck(values),
+            conflict_resolution,
+            body_type=values.body_type,
+            vehicle_class=values.vehicle_class,
+        )
     if body_family == "PICKUP":
-        return _classify_pickup(values)
+        return _with_conflict_resolution(
+            _classify_pickup(values),
+            conflict_resolution,
+            body_type=values.body_type,
+            vehicle_class=values.vehicle_class,
+        )
 
     seat_result = _seat_classification(values)
     if isinstance(seat_result, VehicleClassificationResult):

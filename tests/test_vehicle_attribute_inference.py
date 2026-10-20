@@ -261,6 +261,12 @@ class InferencePersistenceTests(unittest.TestCase):
         row = {
             "body_type": "TRUCK",
             "vehicle_class": "LIGHT_TRUCK",
+            "curb_mass_kg": None,
+            "gross_mass_kg": None,
+            "payload_kg_min": None,
+            "payload_kg_max": None,
+            "seat_count_min": None,
+            "seat_count_max": None,
             "has_permanent_rear_seats": None,
             "has_rear_side_windows": None,
             "has_rear_windowed_door": None,
@@ -327,6 +333,78 @@ class InferencePersistenceTests(unittest.TestCase):
         second = apply_vehicle_attribute_inference(first, [])
 
         self.assertEqual(first, second)
+
+    def test_infers_truck_gross_mass_from_exact_components(self):
+        row = apply_vehicle_attribute_inference(
+            self.base_row(
+                curb_mass_kg=1590,
+                payload_kg_min=1475,
+                payload_kg_max=1475,
+                seat_count_min=3,
+                seat_count_max=3,
+            ),
+            [],
+        )
+
+        self.assertEqual(row["gross_mass_kg"], 3260)
+        decision = row["inference_details_json"]["decisions"]["gross_mass_kg"]
+        self.assertEqual(decision["outcome"], "APPLIED")
+        self.assertEqual(decision["confidence"], "MEDIUM")
+        self.assertEqual(row["inference_flags_json"], [INFERRED_INPUTS_USED])
+
+    def test_explicit_truck_gross_mass_has_priority(self):
+        row = apply_vehicle_attribute_inference(
+            self.base_row(
+                curb_mass_kg=1590,
+                gross_mass_kg=3300,
+                payload_kg_min=1475,
+                payload_kg_max=1475,
+                seat_count_min=3,
+                seat_count_max=3,
+            ),
+            [],
+        )
+
+        self.assertEqual(row["gross_mass_kg"], 3300)
+        self.assertNotIn(
+            "gross_mass_kg",
+            row["inference_details_json"]["decisions"],
+        )
+
+    def test_spec_name_gross_mass_has_priority_over_formula(self):
+        row = apply_vehicle_attribute_inference(
+            self.base_row(
+                curb_mass_kg=1590,
+                payload_kg_min=1475,
+                payload_kg_max=1475,
+                seat_count_min=3,
+                seat_count_max=3,
+            ),
+            [],
+            spec_name="2020 3.0T MT 4.5吨底盘 длинная база",
+        )
+
+        self.assertEqual(row["gross_mass_kg"], 4500)
+        decision = row["inference_details_json"]["decisions"]["gross_mass_kg"]
+        self.assertEqual(decision["confidence"], "HIGH")
+        self.assertEqual(
+            decision["rule_code"],
+            "TRUCK_GROSS_MASS_FROM_SPEC_NAME",
+        )
+
+    def test_does_not_infer_truck_gross_mass_from_ranges(self):
+        row = apply_vehicle_attribute_inference(
+            self.base_row(
+                curb_mass_kg=1590,
+                payload_kg_min=995,
+                payload_kg_max=1475,
+                seat_count_min=2,
+                seat_count_max=3,
+            ),
+            [],
+        )
+
+        self.assertIsNone(row["gross_mass_kg"])
 
 
 class OrdinaryTransportInferenceAdditionalTests(unittest.TestCase):

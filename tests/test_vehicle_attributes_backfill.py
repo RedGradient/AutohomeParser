@@ -146,6 +146,7 @@ class VehicleAttributesBackfillTests(unittest.TestCase):
             {"vehicle_class": "PICKUP", "body_type": "PICKUP"},
         )
         original.update(
+            gross_mass_kg=3260,
             is_special_purpose=False,
             inference_details_json={"decisions": {}},
             inference_flags_json=["INFERRED_INPUTS_USED"],
@@ -164,6 +165,7 @@ class VehicleAttributesBackfillTests(unittest.TestCase):
 
         engine.dispose()
         self.assertIs(row.is_special_purpose, False)
+        self.assertEqual(row.gross_mass_kg, 3260)
         self.assertEqual(row.inference_flags_json, ["INFERRED_INPUTS_USED"])
         self.assertEqual(row.inference_rules_version, "test-v1")
 

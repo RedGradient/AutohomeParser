@@ -29,6 +29,7 @@ from autohome.vehicle_attributes_normalizer import (
 MAX_UPSERT_ROWS = 500
 INFERENCE_COMPATIBLE_FIELDS = frozenset(
     {
+        "gross_mass_kg",
         "has_permanent_rear_seats",
         "has_rear_side_windows",
         "has_rear_windowed_door",
