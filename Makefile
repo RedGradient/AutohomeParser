@@ -13,6 +13,7 @@ DATABASE_BATCH_SIZE ?= 1000
 SHUTDOWN_TIMEOUT ?= 120
 NORMALIZE_VEHICLE_ATTRIBUTES_ARGS ?=
 AUDIT_VEHICLE_CLASSIFICATIONS_ARGS ?=
+AUDIT_INDIRECT_VEHICLE_ATTRIBUTES_ARGS ?=
 CALCULATE_IMPORT_DUTIES_ARGS ?=
 DATABASE_URL ?= postgresql+psycopg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@127.0.0.1:$(POSTGRES_PORT)/$(POSTGRES_DB)
 
@@ -26,7 +27,7 @@ ETH_TABLE := 10102
 WIFI_PRIORITY := 10101
 ETH_PRIORITY := 10102
 
-.PHONY: help network-up network-down network-status network-test postgres-up parser-run parser-resume database-reset parameters-reset build-modifications normalize-vehicle-attributes audit-vehicle-classifications translate-db calculate-import-duties docker-down
+.PHONY: help network-up network-down network-status network-test postgres-up parser-run parser-resume database-reset parameters-reset build-modifications normalize-vehicle-attributes audit-vehicle-classifications audit-indirect-vehicle-attributes translate-db calculate-import-duties docker-down
 
 help:
 	@echo "Доступные команды:"
@@ -42,6 +43,7 @@ help:
 	@echo "  make build-modifications — нормализовать параметры и собрать модификации"
 	@echo "  make normalize-vehicle-attributes — нормализовать кузовные характеристики"
 	@echo "  make audit-vehicle-classifications — проверить классификацию 8702–8704"
+	@echo "  make audit-indirect-vehicle-attributes — проверить косвенные признаки без записи"
 	@echo "  make translate-db    — перевести уже сохранённые данные"
 	@echo "  make calculate-import-duties — рассчитать ввозную пошлину"
 	@echo "  make docker-down     — остановить контейнеры"
@@ -147,6 +149,11 @@ audit-vehicle-classifications: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
 		.venv/bin/python audit_vehicle_classifications.py \
 		$(AUDIT_VEHICLE_CLASSIFICATIONS_ARGS)
+
+audit-indirect-vehicle-attributes: postgres-up
+	@DATABASE_URL='$(DATABASE_URL)' \
+		.venv/bin/python audit_indirect_vehicle_attributes.py \
+		$(AUDIT_INDIRECT_VEHICLE_ATTRIBUTES_ARGS)
 
 translate-db: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
