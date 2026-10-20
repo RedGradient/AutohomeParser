@@ -59,6 +59,52 @@ class VehicleAttributesBackfillTests(unittest.TestCase):
         self.assertEqual(rows, [])
         self.assertEqual(skipped, 1)
 
+    def test_build_rows_extracts_seats_from_selected_subitem(self):
+        fields = {
+            "vehicle_class": "轻客",
+            "body_description": "客车",
+            "curb_mass_kg": "1980",
+            "gross_mass_kg": "2650",
+            "length_mm": "5100",
+            "width_mm": "1900",
+            "height_mm": "1900",
+            "wheelbase_mm": "3100",
+            "door_count": "-",
+            "seat_count": "-",
+            "body_type": "客车",
+            "body_construction": "承载式",
+        }
+        reverse_ids = {
+            parameter_id: field
+            for parameter_id, field in enumerate(fields, start=1)
+        }
+        parameter_rows = [
+            (
+                101,
+                parameter_id,
+                {
+                    "itemname": value,
+                    "sublist": (
+                        [{"name": "10-12", "value": "●"}]
+                        if field == "seat_count"
+                        else []
+                    ),
+                },
+            )
+            for parameter_id, field in reverse_ids.items()
+            for value in [fields[field]]
+        ]
+
+        rows, skipped = build_normalized_rows(
+            [(101, 10, None)],
+            parameter_rows,
+            reverse_ids,
+        )
+
+        self.assertEqual(skipped, 0)
+        self.assertEqual(rows[0]["seat_count_min"], 10)
+        self.assertEqual(rows[0]["seat_count_max"], 12)
+
     def test_invalid_shard_configuration_is_rejected(self):
         class Args:
             database_url = "sqlite://"

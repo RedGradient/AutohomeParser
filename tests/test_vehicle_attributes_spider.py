@@ -14,12 +14,17 @@ from autohome.vehicle_attributes_normalizer import (
 )
 
 
-def config_response(*, missing_field: str | None = None) -> TextResponse:
+def config_response(
+    *,
+    missing_field: str | None = None,
+    seat_sublist: list[dict] | None = None,
+    body_description: str = "5门7座MPV",
+) -> TextResponse:
     definitions: dict[tuple[str, str], list[dict]] = defaultdict(list)
     parameters = []
     values = {
         "vehicle_class": "轻客",
-        "body_description": "5门7座MPV",
+        "body_description": body_description,
         "curb_mass_kg": "1980",
         "gross_mass_kg": "2650",
         "length_mm": "5100",
@@ -39,9 +44,10 @@ def config_response(*, missing_field: str | None = None) -> TextResponse:
             {"titleid": title_id, "itemname": name, "itemid": title_id}
         )
         if field != missing_field:
-            parameters.append(
-                {"titleid": title_id, "itemname": values[field]}
-            )
+            parameter = {"titleid": title_id, "itemname": values[field]}
+            if field == "seat_count" and seat_sublist is not None:
+                parameter["sublist"] = seat_sublist
+            parameters.append(parameter)
 
     payload = {
         "result": {
@@ -142,6 +148,30 @@ class VehicleAttributesSpiderTests(unittest.TestCase):
         )
         self.assertIs(item["is_special_purpose"], True)
         self.assertEqual(item["vehicle_purpose_type"], "FIRE_FIGHTING")
+
+    def test_full_config_extracts_seats_from_selected_subitem(self):
+        outputs = list(
+            self.spider().parse_config(
+                config_response(
+                    body_description="客车",
+                    seat_sublist=[
+                        {"name": "7", "value": "○"},
+                        {"name": "10-12", "value": "●"},
+                    ],
+                ),
+                series_id=10,
+                requested_spec_id=101,
+                attempts=1,
+            )
+        )
+
+        item = next(
+            output
+            for output in outputs
+            if isinstance(output, SpecVehicleAttributesItem)
+        )
+        self.assertEqual(item["seat_count_min"], 10)
+        self.assertEqual(item["seat_count_max"], 12)
 
 
 if __name__ == "__main__":

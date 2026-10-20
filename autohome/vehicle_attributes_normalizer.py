@@ -3,12 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import re
-from typing import Any
+from typing import Any, Mapping
 
 from autohome.translator import translate_vehicle_attribute_code
 
 
-NORMALIZATION_VERSION = 1
+NORMALIZATION_VERSION = 2
 EMPTY_VALUES = {
     None,
     "",
@@ -83,6 +83,26 @@ def clean_text(value: Any) -> str | None:
         return None
     normalized = " ".join(str(value).split())
     return None if normalized in EMPTY_VALUES else normalized or None
+
+
+def extract_vehicle_attribute_value(field: str, raw_value: Any) -> Any:
+    """Извлечь значение параметра, включая выбранный вариант количества мест."""
+    if not isinstance(raw_value, Mapping):
+        return raw_value
+    direct_value = clean_text(raw_value.get("itemname"))
+    if direct_value is not None or field != "seat_count":
+        return direct_value
+    subitems = raw_value.get("sublist")
+    if not isinstance(subitems, list):
+        return None
+    installed_values = [
+        name
+        for subitem in subitems
+        if isinstance(subitem, Mapping)
+        and str(subitem.get("value") or "").strip() == "●"
+        and (name := clean_text(subitem.get("name"))) is not None
+    ]
+    return "/".join(installed_values) if installed_values else None
 
 
 def warning(code: str, field: str, value: Any) -> dict[str, Any]:

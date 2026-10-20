@@ -21,6 +21,7 @@ from autohome.vehicle_attributes_normalizer import (
     NORMALIZATION_VERSION,
     REQUIRED_SOURCE_FIELDS,
     SEMANTIC_PATHS,
+    extract_vehicle_attribute_value,
     normalize_vehicle_attributes,
 )
 
@@ -163,9 +164,12 @@ def build_normalized_rows(
         for spec_id, _, drive_type in spec_rows
     }
     seen_by_spec: dict[int, set[str]] = {spec_id: set() for spec_id, _, _ in spec_rows}
-    for spec_id, parameter_id, value in parameter_rows:
+    for spec_id, parameter_id, raw_value in parameter_rows:
         field = reverse_parameter_ids[parameter_id]
-        values_by_spec[spec_id][field] = value
+        values_by_spec[spec_id][field] = extract_vehicle_attribute_value(
+            field,
+            raw_value,
+        )
         seen_by_spec[spec_id].add(field)
 
     rows = []
@@ -257,7 +261,7 @@ def backfill(engine, args: argparse.Namespace) -> Counter:
                     select(
                         SpecParameter.spec_id,
                         SpecParameter.parameter_id,
-                        SpecParameter.value,
+                        SpecParameter.raw_json,
                     ).where(
                         SpecParameter.spec_id.in_(spec_ids),
                         SpecParameter.parameter_id.in_(reverse_ids),

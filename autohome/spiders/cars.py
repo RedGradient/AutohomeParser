@@ -64,6 +64,7 @@ from autohome.translator import translate_powertrain_code, translate_powertrain_
 from autohome.vehicle_attributes_normalizer import (
     PATH_TO_FIELD as VEHICLE_ATTRIBUTE_PATH_TO_FIELD,
     REQUIRED_SOURCE_FIELDS as REQUIRED_VEHICLE_ATTRIBUTE_SOURCE_FIELDS,
+    extract_vehicle_attribute_value,
     normalize_vehicle_attributes,
 )
 from autohome.vehicle_attribute_inference import (
@@ -1448,8 +1449,11 @@ class CarsSpider(scrapy.Spider):
                 powertrain_field = local_powertrain_fields.get(title_id)
                 vehicle_attribute_field = local_vehicle_attribute_fields.get(title_id)
                 if vehicle_attribute_field is not None:
-                    vehicle_attribute_values[vehicle_attribute_field] = parameter.get(
-                        "itemname"
+                    vehicle_attribute_values[vehicle_attribute_field] = (
+                        extract_vehicle_attribute_value(
+                            vehicle_attribute_field,
+                            parameter,
+                        )
                     )
                     seen_vehicle_attribute_fields.add(vehicle_attribute_field)
                 if powertrain_field not in SUBITEM_FIELDS:

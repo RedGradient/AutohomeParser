@@ -4,6 +4,7 @@ import unittest
 
 from autohome.vehicle_attributes_normalizer import (
     NORMALIZATION_VERSION,
+    extract_vehicle_attribute_value,
     normalize_vehicle_attributes,
     parse_cargo_dimensions,
     parse_integer_range,
@@ -67,6 +68,44 @@ class NumericVariantTests(unittest.TestCase):
 
         self.assertEqual(result, (599, 1455))
         self.assertEqual(warnings[0]["code"], "MULTIPLE_VALUES")
+
+
+class RawVehicleAttributeValueTests(unittest.TestCase):
+    def test_direct_seat_value_has_priority(self):
+        result = extract_vehicle_attribute_value(
+            "seat_count",
+            {
+                "itemname": "7",
+                "sublist": [{"name": "9", "value": "●"}],
+            },
+        )
+
+        self.assertEqual(result, "7")
+
+    def test_selected_seat_subitem_is_used_when_direct_value_is_empty(self):
+        result = extract_vehicle_attribute_value(
+            "seat_count",
+            {
+                "itemname": "-",
+                "sublist": [
+                    {"name": "7", "value": "○"},
+                    {"name": "10-12", "value": "●"},
+                ],
+            },
+        )
+
+        self.assertEqual(result, "10-12")
+
+    def test_optional_seat_subitem_alone_is_not_treated_as_installed(self):
+        result = extract_vehicle_attribute_value(
+            "seat_count",
+            {
+                "itemname": "-",
+                "sublist": [{"name": "7", "value": "○"}],
+            },
+        )
+
+        self.assertIsNone(result)
 
     def test_range_preserves_bounds(self):
         warnings = []
