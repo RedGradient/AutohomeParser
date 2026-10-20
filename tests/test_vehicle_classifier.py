@@ -140,16 +140,96 @@ class VehicleClassifierTests(unittest.TestCase):
         self.assertEqual(result.status, ClassificationStatus.UNSUPPORTED)
         self.assertEqual(result.tnved_heading, "8705")
 
-    def test_pickup_is_not_guessed_from_body_type(self):
+    def test_pickup_with_long_cargo_bed_is_8704(self):
         result = classify(
             body_type="PICKUP",
             vehicle_class="PICKUP",
             seat_count_min=5,
             seat_count_max=5,
+            wheelbase_mm=3000,
+            cargo_length_min_mm=1600,
+            cargo_length_max_mm=1600,
+        )
+
+        self.assertEqual(result.status, ClassificationStatus.CLASSIFIED)
+        self.assertEqual(result.tnved_heading, "8704")
+        self.assertEqual(
+            result.rule_code,
+            "PICKUP_CARGO_BED_OVER_HALF_WHEELBASE",
+        )
+
+    def test_pickup_over_3500_kg_is_8704(self):
+        result = classify(
+            body_type="PICKUP",
+            vehicle_class="PICKUP",
+            gross_mass_kg=3501,
+        )
+
+        self.assertEqual(result.status, ClassificationStatus.CLASSIFIED)
+        self.assertEqual(result.tnved_heading, "8704")
+        self.assertEqual(result.rule_code, "PICKUP_GROSS_MASS_OVER_3500")
+
+    def test_pickup_with_more_than_two_axles_is_8704(self):
+        result = classify(
+            body_type="PICKUP",
+            vehicle_class="PICKUP",
+            axle_count=3,
+        )
+
+        self.assertEqual(result.status, ClassificationStatus.CLASSIFIED)
+        self.assertEqual(result.tnved_heading, "8704")
+        self.assertEqual(result.rule_code, "PICKUP_MORE_THAN_TWO_AXLES")
+
+    def test_pickup_goods_capacity_formula_can_classify_8704(self):
+        result = classify(
+            body_type="PICKUP",
+            vehicle_class="PICKUP",
+            seat_count_min=5,
+            seat_count_max=5,
+            gross_mass_kg=3000,
+            curb_mass_kg=1800,
+        )
+
+        self.assertEqual(result.status, ClassificationStatus.CLASSIFIED)
+        self.assertEqual(result.tnved_heading, "8704")
+        self.assertEqual(
+            result.rule_code,
+            "PICKUP_GOODS_CAPACITY_EXCEEDS_PASSENGER_CAPACITY",
+        )
+
+    def test_pickup_with_all_8704_conditions_false_is_8703(self):
+        result = classify(
+            body_type="PICKUP",
+            vehicle_class="PICKUP",
+            axle_count=2,
+            seat_count_min=5,
+            seat_count_max=5,
+            gross_mass_kg=2600,
+            curb_mass_kg=2100,
+            wheelbase_mm=3000,
+            cargo_length_min_mm=1400,
+            cargo_length_max_mm=1400,
+        )
+
+        self.assertEqual(result.status, ClassificationStatus.CLASSIFIED)
+        self.assertEqual(result.tnved_heading, "8703")
+        self.assertEqual(result.rule_code, "PICKUP_751_OTHERWISE_8703")
+
+    def test_pickup_requires_axle_count_before_classifying_8703(self):
+        result = classify(
+            body_type="PICKUP",
+            vehicle_class="PICKUP",
+            seat_count_min=5,
+            seat_count_max=5,
+            gross_mass_kg=2600,
+            curb_mass_kg=2100,
+            wheelbase_mm=3000,
+            cargo_length_min_mm=1400,
+            cargo_length_max_mm=1400,
         )
 
         self.assertEqual(result.status, ClassificationStatus.MISSING_DATA)
-        self.assertIn("cargo_length_min_mm", result.missing_fields)
+        self.assertEqual(result.missing_fields, ("axle_count",))
 
     def test_conflicting_body_and_vehicle_class_requires_review(self):
         result = classify(

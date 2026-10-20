@@ -6,7 +6,10 @@ from typing import Any, Mapping
 from .types import ClassificationStatus
 
 
-CLASSIFICATION_RULES_VERSION = "RU-EAEU-VEHICLE-CLASSIFICATION-2026-01-22-v1"
+CLASSIFICATION_RULES_VERSION = "RU-EAEU-VEHICLE-CLASSIFICATION-2026-10-20-v2"
+PICKUP_CLASSIFICATION_SOURCE = "https://adilet.zan.kz/rus/docs/H11T0000751"
+PICKUP_DRIVER_MASS_KG = 75
+PICKUP_PASSENGER_MASS_KG = 68
 
 PASSENGER_BODY_TYPES = frozenset(
     {
@@ -45,6 +48,7 @@ class VehicleClassificationInput:
 
     body_type: str | None
     vehicle_class: str | None
+    axle_count: int | None = None
     seat_count_min: int | None = None
     seat_count_max: int | None = None
     gross_mass_kg: int | None = None
@@ -208,26 +212,152 @@ def _classify_van(
 def _classify_pickup(
     values: VehicleClassificationInput,
 ) -> VehicleClassificationResult:
+    """Классифицировать пикап по Решению КТС от 16.08.2011 № 751."""
+    source = PICKUP_CLASSIFICATION_SOURCE
+    if values.axle_count is not None and values.axle_count > 2:
+        return _result(
+            ClassificationStatus.CLASSIFIED,
+            heading="8704",
+            rule_code="PICKUP_MORE_THAN_TWO_AXLES",
+            source=source,
+            axle_count=values.axle_count,
+        )
+    if values.gross_mass_kg is not None and values.gross_mass_kg > 3500:
+        return _result(
+            ClassificationStatus.CLASSIFIED,
+            heading="8704",
+            rule_code="PICKUP_GROSS_MASS_OVER_3500",
+            source=source,
+            gross_mass_kg=values.gross_mass_kg,
+        )
+
+    invalid: list[str] = []
+    ambiguous: list[str] = []
+
+    if values.axle_count is not None and values.axle_count < 2:
+        invalid.append("axle_count")
+    if values.gross_mass_kg is not None and values.gross_mass_kg <= 0:
+        invalid.append("gross_mass_kg")
+
+    cargo_fields = (
+        values.cargo_length_min_mm,
+        values.cargo_length_max_mm,
+        values.wheelbase_mm,
+    )
+    if all(value is not None for value in cargo_fields):
+        cargo_min = values.cargo_length_min_mm
+        cargo_max = values.cargo_length_max_mm
+        wheelbase = values.wheelbase_mm
+        assert cargo_min is not None and cargo_max is not None
+        assert wheelbase is not None
+        if cargo_min <= 0 or cargo_max < cargo_min or wheelbase <= 0:
+            invalid.extend(
+                [
+                    "cargo_length_min_mm",
+                    "cargo_length_max_mm",
+                    "wheelbase_mm",
+                ]
+            )
+        elif cargo_min * 2 > wheelbase:
+            return _result(
+                ClassificationStatus.CLASSIFIED,
+                heading="8704",
+                rule_code="PICKUP_CARGO_BED_OVER_HALF_WHEELBASE",
+                source=source,
+                formula="cargo_length_min_mm * 2 > wheelbase_mm",
+                cargo_length_min_mm=cargo_min,
+                cargo_length_max_mm=cargo_max,
+                wheelbase_mm=wheelbase,
+            )
+        elif cargo_max * 2 > wheelbase:
+            ambiguous.append("cargo_length_mm")
+
+    mass_fields = (
+        values.gross_mass_kg,
+        values.curb_mass_kg,
+        values.seat_count_min,
+        values.seat_count_max,
+    )
+    if all(value is not None for value in mass_fields):
+        gross_mass = values.gross_mass_kg
+        curb_mass = values.curb_mass_kg
+        seat_min = values.seat_count_min
+        seat_max = values.seat_count_max
+        assert gross_mass is not None and curb_mass is not None
+        assert seat_min is not None and seat_max is not None
+        if (
+            curb_mass <= 0
+            or gross_mass <= curb_mass
+            or seat_min <= 0
+            or seat_max < seat_min
+        ):
+            invalid.extend(
+                [
+                    "gross_mass_kg",
+                    "curb_mass_kg",
+                    "seat_count_min",
+                    "seat_count_max",
+                ]
+            )
+        else:
+            # В Решении № 751 масса M включает водителя массой 75 кг.
+            decision_curb_mass = curb_mass + PICKUP_DRIVER_MASS_KG
+
+            def goods_capacity_exceeds_passenger_capacity(seats: int) -> bool:
+                passengers = max(seats - 1, 0)
+                passenger_mass = passengers * PICKUP_PASSENGER_MASS_KG
+                return (
+                    gross_mass - (decision_curb_mass + passenger_mass)
+                    > passenger_mass
+                )
+
+            formula_true_for_min = goods_capacity_exceeds_passenger_capacity(
+                seat_min
+            )
+            formula_true_for_max = goods_capacity_exceeds_passenger_capacity(
+                seat_max
+            )
+            if formula_true_for_max:
+                passengers = max(seat_max - 1, 0)
+                return _result(
+                    ClassificationStatus.CLASSIFIED,
+                    heading="8704",
+                    rule_code="PICKUP_GOODS_CAPACITY_EXCEEDS_PASSENGER_CAPACITY",
+                    source=source,
+                    formula="P - (M + N * 68) > N * 68",
+                    gross_mass_kg=gross_mass,
+                    source_curb_mass_kg=curb_mass,
+                    decision_curb_mass_kg=decision_curb_mass,
+                    passenger_seat_count=passengers,
+                    passenger_mass_kg=passengers * PICKUP_PASSENGER_MASS_KG,
+                )
+            if formula_true_for_min != formula_true_for_max:
+                ambiguous.append("seat_count")
+
+    if invalid:
+        return _result(
+            ClassificationStatus.AMBIGUOUS,
+            reason="INVALID_PICKUP_CLASSIFICATION_VALUES",
+            source=source,
+            invalid_fields=sorted(set(invalid)),
+        )
+    if ambiguous:
+        return _result(
+            ClassificationStatus.AMBIGUOUS,
+            reason="PICKUP_VARIANTS_CROSS_8703_8704_BOUNDARY",
+            source=source,
+            ambiguous_fields=sorted(set(ambiguous)),
+        )
+
     required = (
-        "seat_count_min",
-        "seat_count_max",
+        "axle_count",
         "gross_mass_kg",
         "curb_mass_kg",
-        "payload_kg_min",
-        "payload_kg_max",
-        "length_mm",
+        "seat_count_min",
+        "seat_count_max",
         "wheelbase_mm",
         "cargo_length_min_mm",
         "cargo_length_max_mm",
-        "cargo_width_min_mm",
-        "cargo_width_max_mm",
-        "cargo_height_min_mm",
-        "cargo_height_max_mm",
-        "has_permanent_rear_seats",
-        "has_rear_side_windows",
-        "has_rear_windowed_door",
-        "has_separate_cargo_compartment",
-        "is_special_purpose",
     )
     missing = [name for name in required if getattr(values, name) is None]
     if missing:
@@ -235,10 +365,13 @@ def _classify_pickup(
             ClassificationStatus.MISSING_DATA,
             missing_fields=missing,
             reason="PICKUP_CLASSIFICATION_FEATURES_REQUIRED",
+            source=source,
         )
     return _result(
-        ClassificationStatus.MANUAL_REVIEW,
-        reason="PICKUP_8703_OR_8704_REQUIRES_DOCUMENT_REVIEW",
+        ClassificationStatus.CLASSIFIED,
+        heading="8703",
+        rule_code="PICKUP_751_OTHERWISE_8703",
+        source=source,
     )
 
 

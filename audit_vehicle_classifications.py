@@ -14,7 +14,11 @@ from autohome.import_duty import (
 from autohome.models import SpecVehicleAttributes
 
 
-INPUT_FIELDS = tuple(VehicleClassificationInput.__dataclass_fields__)
+INPUT_FIELDS = tuple(
+    name
+    for name in VehicleClassificationInput.__dataclass_fields__
+    if hasattr(SpecVehicleAttributes, name)
+)
 
 
 def parse_arguments() -> argparse.Namespace:

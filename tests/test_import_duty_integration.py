@@ -114,6 +114,37 @@ class ImportDutyClassificationIntegrationTests(unittest.TestCase):
             "8702",
         )
 
+    def test_pickup_with_long_cargo_bed_reaches_8704_rate(self):
+        row = database_row(
+            year=2017,
+            energy_type="GASOLINE",
+            engine_displacement_ml=2000,
+            vehicle_class="PICKUP",
+            body_type="PICKUP",
+            gross_mass_kg=3000,
+            curb_mass_kg=2100,
+            wheelbase_mm=3000,
+            cargo_length_min_mm=1600,
+            cargo_length_max_mm=1600,
+            is_special_purpose=False,
+        )
+
+        classification = classify_database_row(row)
+        calculation, payment = make_rows(
+            row,
+            ImporterType.LEGAL_ENTITY,
+            CALCULATION_DATE,
+            RATES,
+            classification,
+        )
+
+        self.assertEqual(classification.tnved_heading, "8704")
+        self.assertEqual(payment["status"], "CALCULATED")
+        self.assertEqual(
+            calculation["input_snapshot_json"]["cargo_length_min_mm"],
+            1600,
+        )
+
     def test_inferred_classification_inputs_are_labeled(self):
         row = database_row(
             is_special_purpose=False,
