@@ -38,6 +38,14 @@ def context(
 
 
 class IndividualDutyTests(unittest.TestCase):
+    def test_liftback_is_supported(self):
+        result = calculate_import_duty(
+            context(ImporterType.INDIVIDUAL, body="LIFTBACK")
+        )
+
+        self.assertEqual(result.status, CalculationStatus.CALCULATED)
+        self.assertEqual(result.amount_rub, Decimal("528000.00"))
+
     def test_under_three_uses_larger_component(self):
         result = calculate_import_duty(context(ImporterType.INDIVIDUAL))
 

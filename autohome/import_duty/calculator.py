@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
+from .classifier import PASSENGER_BODY_TYPES
 from .rates import (
     BUS_8702_BEV_RATE,
     BUS_8702_RATES,
@@ -27,17 +28,7 @@ from .types import (
 )
 
 MONEY = Decimal("0.01")
-SUPPORTED_PASSENGER_BODIES = {
-    "SEDAN",
-    "HATCHBACK",
-    "WAGON",
-    "CROSSOVER_WAGON",
-    "SUV",
-    "MPV",
-    "SPORTS_CAR",
-    "COUPE",
-    "CONVERTIBLE",
-}
+SUPPORTED_PASSENGER_BODIES = PASSENGER_BODY_TYPES
 PERSONAL_COMBUSTION_ENERGIES = {
     "GASOLINE",
     "DIESEL",
