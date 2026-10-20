@@ -282,6 +282,9 @@ make audit-vehicle-classifications
 Поддерживаемые категории транспорта, обязательные данные и границы будущего
 расширения на позиции 8702 и 8704 зафиксированы в
 [`docs/import-duty-vehicle-scope.md`](docs/import-duty-vehicle-scope.md).
+Найденные в `raw_json` косвенные признаки задних сидений, окон, задней двери,
+грузового отсека и специального назначения описаны в
+[`docs/indirect-vehicle-attributes-raw-audit.md`](docs/indirect-vehicle-attributes-raw-audit.md).
 
 Для нормализованных легковых автомобилей можно рассчитать ввозную пошлину при
 импорте из Китая в Россию для физического и юридического лица:
