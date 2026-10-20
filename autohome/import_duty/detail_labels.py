@@ -30,6 +30,9 @@ DETAIL_FIELD_LABELS = {
     "classification_rules_version": "Версия правил классификации",
     "classification_rule_code": "Код правила классификации",
     "classification_missing_fields": "Поля, отсутствующие для классификации",
+    "customs_value_source": "Источник таможенной стоимости",
+    "upper_bound_rub": "Верхняя граница диапазона стоимости, RUB",
+    "fee_rub": "Таможенный сбор, RUB",
 }
 
 
