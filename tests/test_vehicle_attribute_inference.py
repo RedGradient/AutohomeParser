@@ -7,6 +7,7 @@ from autohome.vehicle_attribute_inference import (
     InferenceConfidence,
     RawParameter,
     VehiclePurposeType,
+    apply_vehicle_attribute_inference,
     infer_vehicle_attributes,
 )
 
@@ -254,6 +255,81 @@ class OrdinaryTransportInferenceTests(unittest.TestCase):
 
         self.assertIsNone(result.value("is_special_purpose"))
 
+
+class InferencePersistenceTests(unittest.TestCase):
+    def base_row(self, **overrides):
+        row = {
+            "body_type": "TRUCK",
+            "vehicle_class": "LIGHT_TRUCK",
+            "has_permanent_rear_seats": None,
+            "has_rear_side_windows": None,
+            "has_rear_windowed_door": None,
+            "has_separate_cargo_compartment": None,
+            "is_special_purpose": None,
+            "vehicle_purpose_type": None,
+            "warnings_json": [],
+        }
+        row.update(overrides)
+        return row
+
+    def test_applies_inferred_value_and_serializes_provenance(self):
+        row = apply_vehicle_attribute_inference(self.base_row(), [])
+
+        self.assertIs(row["is_special_purpose"], False)
+        self.assertEqual(row["inference_flags_json"], [INFERRED_INPUTS_USED])
+        details = row["inference_details_json"]["decisions"][
+            "is_special_purpose"
+        ]
+        self.assertEqual(details["outcome"], "APPLIED")
+        self.assertEqual(
+            details["rule_code"],
+            "ORDINARY_TRUCK_BODY_AND_TRANSPORT_CLASS",
+        )
+
+    def test_explicit_value_is_not_overwritten_and_conflict_is_recorded(self):
+        row = apply_vehicle_attribute_inference(
+            self.base_row(is_special_purpose=True),
+            [],
+        )
+
+        self.assertIs(row["is_special_purpose"], True)
+        self.assertEqual(row["inference_flags_json"], [])
+        self.assertEqual(
+            row["inference_details_json"]["decisions"]["is_special_purpose"][
+                "outcome"
+            ],
+            "CONFLICT_EXPLICIT",
+        )
+        self.assertEqual(row["warnings_json"][0]["code"], "INFERENCE_CONFLICT")
+
+    def test_explicit_constructive_value_wins_for_downstream_inference(self):
+        row = apply_vehicle_attribute_inference(
+            self.base_row(
+                body_type="VAN",
+                vehicle_class="UNKNOWN_CLASS",
+                has_permanent_rear_seats=False,
+                has_rear_side_windows=True,
+            ),
+            [
+                parameter(
+                    "后排座椅放倒形式",
+                    sublist=[{"name": "比例放倒", "value": "●"}],
+                )
+            ],
+        )
+
+        self.assertIs(row["has_permanent_rear_seats"], False)
+        self.assertIsNone(row["is_special_purpose"])
+        self.assertEqual(row["warnings_json"][0]["field"], "has_permanent_rear_seats")
+
+    def test_repeated_application_is_idempotent(self):
+        first = apply_vehicle_attribute_inference(self.base_row(), [])
+        second = apply_vehicle_attribute_inference(first, [])
+
+        self.assertEqual(first, second)
+
+
+class OrdinaryTransportInferenceAdditionalTests(unittest.TestCase):
     def test_bus_seat_count_proves_ordinary_passenger_transport(self):
         result = infer_vehicle_attributes(
             [],

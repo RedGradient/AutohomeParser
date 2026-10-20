@@ -66,6 +66,10 @@ from autohome.vehicle_attributes_normalizer import (
     REQUIRED_SOURCE_FIELDS as REQUIRED_VEHICLE_ATTRIBUTE_SOURCE_FIELDS,
     normalize_vehicle_attributes,
 )
+from autohome.vehicle_attribute_inference import (
+    RawParameter,
+    apply_vehicle_attribute_inference,
+)
 
 
 def first(mapping: dict, *keys, default=None):
@@ -252,6 +256,8 @@ class CarsSpider(scrapy.Spider):
         self.pending_specs: dict[int, deque[int]] = {}
         self.spec_series: dict[int, int] = {}
         self.spec_years: dict[int, int | None] = {}
+        self.spec_raw_names: dict[int, str] = {}
+        self.series_raw_names: dict[int, str] = {}
         self.config_request_counts: dict[int, int] = {}
         self.completed_config_spec_ids: set[int] = set()
         self.scheduled_config_spec_ids: set[int] = set()
@@ -569,6 +575,7 @@ class CarsSpider(scrapy.Spider):
                         "name",
                         default=f"series-{series_id}",
                     )
+                    self.series_raw_names[series_id] = str(series_name)
                     yield SeriesItem(
                         id=series_id,
                         brand_id=brand_id,
@@ -1204,6 +1211,15 @@ class CarsSpider(scrapy.Spider):
         for spec_id, obj in specs.items():
             self.spec_series[spec_id] = series_id
             self.spec_years[spec_id] = as_int(obj.get("year"))
+            self.spec_raw_names[spec_id] = str(
+                first(
+                    obj,
+                    "specname",
+                    "specName",
+                    "name",
+                    default=f"spec-{spec_id}",
+                )
+            )
             yield self._spec_item(obj, series_id)
 
         configurable = []
@@ -1314,6 +1330,7 @@ class CarsSpider(scrapy.Spider):
         group_positions: dict[str, int] = {}
         section_positions: dict[str, int] = {}
         local_parameter_ids: dict[int, int] = {}
+        local_parameter_names: dict[int, str] = {}
         local_powertrain_fields: dict[int, str] = {}
         local_vehicle_attribute_fields: dict[int, str] = {}
         for position, group in enumerate(result.get("titlelist") or []):
@@ -1359,6 +1376,7 @@ class CarsSpider(scrapy.Spider):
                         title_id,
                     )
                 local_parameter_ids[title_id] = parameter_id
+                local_parameter_names[title_id] = parameter_name
                 powertrain_field = PATH_TO_FIELD.get(
                     (group_name, section_name, parameter_name)
                 )
@@ -1408,6 +1426,7 @@ class CarsSpider(scrapy.Spider):
             powertrain_values: dict[str, object] = {}
             vehicle_attribute_values: dict[str, object] = {}
             seen_vehicle_attribute_fields: set[str] = set()
+            inference_parameters: list[RawParameter] = []
             for parameter in parameters:
                 title_id = as_int(parameter.get("titleid"))
                 if title_id is None:
@@ -1420,6 +1439,12 @@ class CarsSpider(scrapy.Spider):
                         title_id,
                     )
                     continue
+                inference_parameters.append(
+                    RawParameter(
+                        name=local_parameter_names[title_id],
+                        raw_value=parameter,
+                    )
+                )
                 powertrain_field = local_powertrain_fields.get(title_id)
                 vehicle_attribute_field = local_vehicle_attribute_fields.get(title_id)
                 if vehicle_attribute_field is not None:
@@ -1522,6 +1547,21 @@ class CarsSpider(scrapy.Spider):
                     spec_id,
                     returned_series_id,
                     vehicle_attribute_values,
+                )
+                vehicle_attributes = apply_vehicle_attribute_inference(
+                    vehicle_attributes,
+                    inference_parameters,
+                    spec_name=self.spec_raw_names.get(spec_id)
+                    or str(
+                        first(
+                            spec_data,
+                            "specname",
+                            "specName",
+                            "name",
+                            default="",
+                        )
+                    ),
+                    series_name=self.series_raw_names.get(returned_series_id),
                 )
                 yield SpecVehicleAttributesItem(**vehicle_attributes)
             yield SpecModificationItem(

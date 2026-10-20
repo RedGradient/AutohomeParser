@@ -47,6 +47,9 @@ def database_row(**overrides):
         "has_rear_windowed_door": None,
         "has_separate_cargo_compartment": None,
         "is_special_purpose": None,
+        "inference_details_json": None,
+        "inference_flags_json": None,
+        "inference_rules_version": None,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -109,6 +112,41 @@ class ImportDutyClassificationIntegrationTests(unittest.TestCase):
         self.assertEqual(
             calculation["input_snapshot_json"]["classification_tnved_heading"],
             "8702",
+        )
+
+    def test_inferred_classification_inputs_are_labeled(self):
+        row = database_row(
+            is_special_purpose=False,
+            inference_flags_json=["INFERRED_INPUTS_USED"],
+            inference_rules_version="test-rules-v1",
+            inference_details_json={
+                "decisions": {
+                    "is_special_purpose": {
+                        "outcome": "APPLIED",
+                        "rule_code": "ORDINARY_PASSENGER_BODY_CLASS_AND_SEATS",
+                    }
+                }
+            },
+        )
+
+        calculation, _ = make_rows(
+            row,
+            ImporterType.INDIVIDUAL,
+            CALCULATION_DATE,
+            RATES,
+        )
+
+        warning = next(
+            item
+            for item in calculation["warnings_json"]
+            if item["code"] == "INFERRED_INPUTS_USED"
+        )
+        self.assertEqual(warning["fields"], ["is_special_purpose"])
+        self.assertEqual(
+            calculation["input_snapshot_json"][
+                "vehicle_attribute_inference_rules_version"
+            ],
+            "test-rules-v1",
         )
 
 

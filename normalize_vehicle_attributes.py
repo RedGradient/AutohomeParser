@@ -26,6 +26,15 @@ from autohome.vehicle_attributes_normalizer import (
 
 
 MAX_UPSERT_ROWS = 500
+INFERENCE_COMPATIBLE_FIELDS = frozenset(
+    {
+        "has_permanent_rear_seats",
+        "has_rear_side_windows",
+        "has_rear_windowed_door",
+        "has_separate_cargo_compartment",
+        "is_special_purpose",
+    }
+)
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -193,9 +202,16 @@ def upsert_rows(connection, rows: list[dict]) -> None:
             column.name for column in SpecVehicleAttributes.__table__.primary_key
         }
         update_columns = {
-            column.name: getattr(statement.excluded, column.name)
-            for column in SpecVehicleAttributes.__table__.columns
-            if column.name not in primary_keys
+            name: (
+                func.coalesce(
+                    getattr(statement.excluded, name),
+                    getattr(SpecVehicleAttributes.__table__.c, name),
+                )
+                if name in INFERENCE_COMPATIBLE_FIELDS
+                else getattr(statement.excluded, name)
+            )
+            for name in batch[0]
+            if name not in primary_keys
         }
         connection.execute(
             statement.on_conflict_do_update(

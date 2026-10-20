@@ -7,7 +7,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from hashlib import blake2b
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -30,13 +30,14 @@ from autohome.import_duty.types import (
     DutyResult,
 )
 from autohome.models import (
-    Base,
     CustomsCalculation,
     CustomsPaymentResult,
     Spec,
     SpecPowertrain,
     SpecVehicleAttributes,
 )
+from autohome.vehicle_attribute_inference import INFERRED_INPUTS_USED
+from autohome.vehicle_attribute_schema import ensure_vehicle_attribute_schema
 
 MAX_UPSERT_ROWS = 2000
 
@@ -226,6 +227,24 @@ def make_rows(
         row.id, importer, calculation_date, price_source
     )
     now = datetime.now(timezone.utc)
+    inference_flags = getattr(row, "inference_flags_json", None) or []
+    inference_details = getattr(row, "inference_details_json", None) or {}
+    calculation_warnings = list(result.warnings)
+    if INFERRED_INPUTS_USED in inference_flags:
+        applied_fields = sorted(
+            field_name
+            for field_name, decision in (
+                inference_details.get("decisions") or {}
+            ).items()
+            if decision.get("outcome") == "APPLIED"
+        )
+        calculation_warnings.append(
+            {
+                "code": INFERRED_INPUTS_USED,
+                "message": "В расчёте использованы косвенно определённые признаки.",
+                "fields": applied_fields,
+            }
+        )
     calculation = {
         "id": calculation_id,
         "spec_id": row.id,
@@ -276,8 +295,15 @@ def make_rows(
             "classification_rule_code": classification.rule_code,
             "classification_missing_fields": list(classification.missing_fields),
             "classification_details": classification.details,
+            "vehicle_attribute_inference_flags": inference_flags,
+            "vehicle_attribute_inference_rules_version": getattr(
+                row,
+                "inference_rules_version",
+                None,
+            ),
+            "vehicle_attribute_inference_details": inference_details,
         },
-        "warnings_json": result.warnings,
+        "warnings_json": calculation_warnings,
         "calculated_at": now,
     }
     payment = {
@@ -348,7 +374,21 @@ def main() -> int:
     rates = resolve_rates(args)
     engine = create_engine(args.database_url, pool_pre_ping=True)
     if not args.dry_run:
-        Base.metadata.create_all(engine)
+        ensure_vehicle_attribute_schema(engine)
+
+    existing_vehicle_attribute_columns = {
+        column["name"]
+        for column in inspect(engine).get_columns("spec_vehicle_attributes")
+    }
+    inference_select_columns = [
+        getattr(SpecVehicleAttributes, name)
+        for name in (
+            "inference_details_json",
+            "inference_flags_json",
+            "inference_rules_version",
+        )
+        if name in existing_vehicle_attribute_columns
+    ]
 
     query = (
         select(
@@ -381,6 +421,7 @@ def main() -> int:
             SpecVehicleAttributes.has_rear_windowed_door,
             SpecVehicleAttributes.has_separate_cargo_compartment,
             SpecVehicleAttributes.is_special_purpose,
+            *inference_select_columns,
         )
         .outerjoin(SpecPowertrain, SpecPowertrain.spec_id == Spec.id)
         .outerjoin(

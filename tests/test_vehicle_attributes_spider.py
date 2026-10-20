@@ -96,6 +96,17 @@ class VehicleAttributesSpiderTests(unittest.TestCase):
         self.assertEqual(item["door_count"], 5)
         self.assertEqual(item["gross_mass_kg"], 2650)
         self.assertEqual(item["cargo_length_min_mm"], 2100)
+        self.assertIs(item["is_special_purpose"], False)
+        self.assertEqual(
+            item["inference_flags_json"],
+            ["INFERRED_INPUTS_USED"],
+        )
+        self.assertEqual(
+            item["inference_details_json"]["decisions"]["is_special_purpose"][
+                "rule_code"
+            ],
+            "ORDINARY_VAN_BODY_AND_TRANSPORT_CLASS",
+        )
 
     def test_partial_config_does_not_yield_attributes_that_could_wipe_data(self):
         outputs = list(
@@ -110,6 +121,27 @@ class VehicleAttributesSpiderTests(unittest.TestCase):
         self.assertFalse(
             any(isinstance(output, SpecVehicleAttributesItem) for output in outputs)
         )
+
+    def test_full_config_applies_special_purpose_name_inference(self):
+        spider = self.spider()
+        spider.spec_raw_names[101] = "2026款 消防车"
+
+        outputs = list(
+            spider.parse_config(
+                config_response(),
+                series_id=10,
+                requested_spec_id=101,
+                attempts=1,
+            )
+        )
+
+        item = next(
+            output
+            for output in outputs
+            if isinstance(output, SpecVehicleAttributesItem)
+        )
+        self.assertIs(item["is_special_purpose"], True)
+        self.assertEqual(item["vehicle_purpose_type"], "FIRE_FIGHTING")
 
 
 if __name__ == "__main__":

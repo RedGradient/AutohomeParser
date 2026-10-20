@@ -50,7 +50,6 @@ from autohome.items import (
 )
 from autohome.models import (
     AttentionRanking,
-    Base,
     Brand,
     BrandMonthlySale,
     BrandManufacturer,
@@ -80,6 +79,7 @@ from autohome.models import (
     ResaleValueRanking,
     TechnologyRanking,
 )
+from autohome.vehicle_attribute_schema import ensure_vehicle_attribute_schema
 from autohome.translator import (
     translate_brand_name,
     translate_color_name,
@@ -257,7 +257,7 @@ class SqlAlchemyPipeline:
         self.engine = create_engine(self.database_url, pool_pre_ping=True)
         if self.engine.dialect.name == "sqlite":
             event.listen(self.engine, "connect", self._configure_sqlite)
-        Base.metadata.create_all(self.engine)
+        ensure_vehicle_attribute_schema(self.engine)
 
     @staticmethod
     def _configure_sqlite(dbapi_connection, _):

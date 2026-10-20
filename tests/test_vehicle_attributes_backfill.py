@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, insert, select
 
 from autohome.models import Base, SpecVehicleAttributes
 from autohome.vehicle_attributes_normalizer import normalize_vehicle_attributes
@@ -90,6 +90,36 @@ class VehicleAttributesBackfillTests(unittest.TestCase):
 
         engine.dispose()
         self.assertEqual(count, 501)
+
+    def test_normalization_upsert_preserves_inference_metadata(self):
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        original = normalize_vehicle_attributes(
+            1,
+            10,
+            {"vehicle_class": "PICKUP", "body_type": "PICKUP"},
+        )
+        original.update(
+            is_special_purpose=False,
+            inference_details_json={"decisions": {}},
+            inference_flags_json=["INFERRED_INPUTS_USED"],
+            inference_rules_version="test-v1",
+        )
+        refreshed = normalize_vehicle_attributes(
+            1,
+            10,
+            {"vehicle_class": "PICKUP", "body_type": "PICKUP"},
+        )
+
+        with engine.begin() as connection:
+            connection.execute(insert(SpecVehicleAttributes), original)
+            upsert_rows(connection, [refreshed])
+            row = connection.execute(select(SpecVehicleAttributes)).one()
+
+        engine.dispose()
+        self.assertIs(row.is_special_purpose, False)
+        self.assertEqual(row.inference_flags_json, ["INFERRED_INPUTS_USED"])
+        self.assertEqual(row.inference_rules_version, "test-v1")
 
 
 if __name__ == "__main__":

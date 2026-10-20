@@ -106,6 +106,18 @@ class VehicleAttributeInferenceResult:
         return decision.value if decision is not None else None
 
 
+INFERRED_STORAGE_FIELDS = frozenset(
+    {
+        "has_permanent_rear_seats",
+        "has_rear_side_windows",
+        "has_rear_windowed_door",
+        "has_separate_cargo_compartment",
+        "is_special_purpose",
+        "vehicle_purpose_type",
+    }
+)
+
+
 TAILGATE_BODY_TYPES = frozenset(
     {
         "HATCHBACK",
@@ -778,14 +790,16 @@ def infer_vehicle_attributes(
                 evidence=purpose.evidence,
             )
     else:
-        def inferred_or_stored(
+        def stored_or_inferred(
             field_name: str,
             stored_value: bool | None,
         ) -> bool | None:
+            if stored_value is not None:
+                return stored_value
             decision = decisions.get(field_name)
             if decision is not None and isinstance(decision.value, bool):
                 return decision.value
-            return stored_value
+            return None
 
         ordinary_transport = infer_ordinary_transport(
             body_type=body_type,
@@ -798,16 +812,16 @@ def infer_vehicle_attributes(
             cargo_length_min_mm=cargo_length_min_mm,
             cargo_width_min_mm=cargo_width_min_mm,
             cargo_height_min_mm=cargo_height_min_mm,
-            has_permanent_rear_seats=inferred_or_stored(
+            has_permanent_rear_seats=stored_or_inferred(
                 "has_permanent_rear_seats", has_permanent_rear_seats
             ),
-            has_rear_side_windows=inferred_or_stored(
+            has_rear_side_windows=stored_or_inferred(
                 "has_rear_side_windows", has_rear_side_windows
             ),
-            has_rear_windowed_door=inferred_or_stored(
+            has_rear_windowed_door=stored_or_inferred(
                 "has_rear_windowed_door", has_rear_windowed_door
             ),
-            has_separate_cargo_compartment=inferred_or_stored(
+            has_separate_cargo_compartment=stored_or_inferred(
                 "has_separate_cargo_compartment",
                 has_separate_cargo_compartment,
             ),
@@ -823,3 +837,119 @@ def infer_vehicle_attributes(
         warnings=warnings,
         flags=flags,
     )
+
+
+def _json_value(value: Any) -> Any:
+    return getattr(value, "value", value)
+
+
+def _previously_inferred_fields(row: Mapping[str, Any]) -> set[str]:
+    details = row.get("inference_details_json")
+    if not isinstance(details, Mapping):
+        return set()
+    decisions = details.get("decisions")
+    if not isinstance(decisions, Mapping):
+        return set()
+    return {
+        str(field_name)
+        for field_name, decision in decisions.items()
+        if isinstance(decision, Mapping) and decision.get("outcome") == "APPLIED"
+    }
+
+
+def apply_vehicle_attribute_inference(
+    row: Mapping[str, Any],
+    parameters: Iterable[RawParameter],
+    *,
+    spec_name: str | None = None,
+    series_name: str | None = None,
+) -> dict[str, Any]:
+    """Применить вывод к строке, не заменяя явно заданные значения."""
+    updated = dict(row)
+    previous_inferred = _previously_inferred_fields(row)
+    inference_input = dict(updated)
+    for field_name in previous_inferred:
+        inference_input[field_name] = None
+    result = infer_vehicle_attributes(
+        parameters,
+        body_type=inference_input.get("body_type"),
+        vehicle_class=inference_input.get("vehicle_class"),
+        seat_count_min=inference_input.get("seat_count_min"),
+        seat_count_max=inference_input.get("seat_count_max"),
+        gross_mass_kg=inference_input.get("gross_mass_kg"),
+        payload_kg_min=inference_input.get("payload_kg_min"),
+        payload_kg_max=inference_input.get("payload_kg_max"),
+        cargo_length_min_mm=inference_input.get("cargo_length_min_mm"),
+        cargo_width_min_mm=inference_input.get("cargo_width_min_mm"),
+        cargo_height_min_mm=inference_input.get("cargo_height_min_mm"),
+        has_permanent_rear_seats=inference_input.get("has_permanent_rear_seats"),
+        has_rear_side_windows=inference_input.get("has_rear_side_windows"),
+        has_rear_windowed_door=inference_input.get("has_rear_windowed_door"),
+        has_separate_cargo_compartment=inference_input.get(
+            "has_separate_cargo_compartment"
+        ),
+        spec_name=spec_name,
+        series_name=series_name,
+    )
+
+    warnings = [
+        warning
+        for warning in (updated.get("warnings_json") or [])
+        if not (
+            isinstance(warning, Mapping)
+            and warning.get("code") == "INFERENCE_CONFLICT"
+        )
+    ]
+    serialized_decisions: dict[str, dict[str, Any]] = {}
+    applied_fields: set[str] = set()
+    for field_name in previous_inferred - result.decisions.keys():
+        if field_name in INFERRED_STORAGE_FIELDS:
+            updated[field_name] = None
+    for field_name, decision in result.decisions.items():
+        if field_name not in INFERRED_STORAGE_FIELDS:
+            continue
+        inferred_value = _json_value(decision.value)
+        current_value = updated.get(field_name)
+        can_replace = current_value is None or field_name in previous_inferred
+        if can_replace:
+            updated[field_name] = inferred_value
+            outcome = "APPLIED"
+            applied_fields.add(field_name)
+        elif current_value == inferred_value:
+            outcome = "CONFIRMED_EXPLICIT"
+        else:
+            outcome = "CONFLICT_EXPLICIT"
+            warnings.append(
+                {
+                    "code": "INFERENCE_CONFLICT",
+                    "field": field_name,
+                    "explicit_value": current_value,
+                    "inferred_value": inferred_value,
+                    "rule_code": decision.rule_code,
+                }
+            )
+        serialized_decisions[field_name] = {
+            "value": inferred_value,
+            "outcome": outcome,
+            "rule_code": decision.rule_code,
+            "confidence": decision.confidence.value,
+            "evidence": [
+                {
+                    "source": evidence.source,
+                    "marker": evidence.marker,
+                    "raw_value": evidence.raw_value,
+                }
+                for evidence in decision.evidence
+            ],
+        }
+
+    updated["warnings_json"] = warnings
+    updated["inference_details_json"] = {
+        "decisions": serialized_decisions,
+        "warnings": list(result.warnings),
+    }
+    updated["inference_flags_json"] = (
+        [INFERRED_INPUTS_USED] if applied_fields else []
+    )
+    updated["inference_rules_version"] = result.rules_version
+    return updated

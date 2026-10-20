@@ -309,6 +309,10 @@ class SpecVehicleAttributes(Base):
     has_rear_windowed_door: Mapped[bool | None] = mapped_column(Boolean)
     has_separate_cargo_compartment: Mapped[bool | None] = mapped_column(Boolean)
     is_special_purpose: Mapped[bool | None] = mapped_column(Boolean, index=True)
+    vehicle_purpose_type: Mapped[str | None] = mapped_column(String(50), index=True)
+    inference_details_json: Mapped[dict[str, Any] | None] = mapped_column(JSON_TYPE)
+    inference_flags_json: Mapped[list[str] | None] = mapped_column(JSON_TYPE)
+    inference_rules_version: Mapped[str | None] = mapped_column(String(100))
     is_complete: Mapped[bool] = mapped_column(Boolean, nullable=False, index=True)
     missing_fields_json: Mapped[list[str]] = mapped_column(JSON_TYPE, nullable=False)
     warnings_json: Mapped[list[dict[str, Any]]] = mapped_column(
