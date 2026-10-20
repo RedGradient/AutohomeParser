@@ -68,6 +68,9 @@ class IndirectVehicleAttributesAuditTests(unittest.TestCase):
                         "spec_id": 20,
                         "series_id": 2,
                         "body_type": "VAN",
+                        "vehicle_class": "LIGHT_COMMERCIAL_VAN",
+                        "seat_count_min": 4,
+                        "seat_count_max": 4,
                         "is_complete": True,
                         "missing_fields_json": [],
                         "warnings_json": [],
@@ -115,6 +118,13 @@ class IndirectVehicleAttributesAuditTests(unittest.TestCase):
         )
         self.assertEqual(counters["value"][("is_special_purpose", "true")], 1)
         self.assertEqual(counters["value"][("is_special_purpose", "false")], 1)
+        self.assertEqual(counters["special_purpose"]["true"], 1)
+        self.assertEqual(counters["special_purpose"]["false"], 1)
+        self.assertEqual(
+            counters["non_passenger_special_purpose"][("TRUCK", "true")],
+            1,
+        )
+        self.assertFalse(counters["unresolved_body_class"])
 
 
 if __name__ == "__main__":

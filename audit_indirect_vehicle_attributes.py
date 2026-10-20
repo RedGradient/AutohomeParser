@@ -50,9 +50,33 @@ def _parameter_name(raw_json: Any) -> str:
     return str(raw_json.get("itemname") or "")
 
 
+def _inference_arguments(row) -> dict[str, Any]:
+    return {
+        "body_type": row.body_type,
+        "vehicle_class": row.vehicle_class,
+        "seat_count_min": row.seat_count_min,
+        "seat_count_max": row.seat_count_max,
+        "gross_mass_kg": row.gross_mass_kg,
+        "payload_kg_min": row.payload_kg_min,
+        "payload_kg_max": row.payload_kg_max,
+        "cargo_length_min_mm": row.cargo_length_min_mm,
+        "cargo_width_min_mm": row.cargo_width_min_mm,
+        "cargo_height_min_mm": row.cargo_height_min_mm,
+        "has_permanent_rear_seats": row.has_permanent_rear_seats,
+        "has_rear_side_windows": row.has_rear_side_windows,
+        "has_rear_windowed_door": row.has_rear_windowed_door,
+        "has_separate_cargo_compartment": row.has_separate_cargo_compartment,
+        "spec_name": _raw_name(row.raw_json),
+        "series_name": _raw_name(row.series_raw_json),
+    }
+
+
 def _record_result(
     counters: dict[str, Counter],
     result: VehicleAttributeInferenceResult,
+    *,
+    body_type: str | None,
+    vehicle_class: str | None,
 ) -> None:
     for field_name, decision in result.decisions.items():
         value = getattr(decision.value, "value", decision.value)
@@ -61,6 +85,26 @@ def _record_result(
         counters["rule"][decision.rule_code] += 1
         counters["confidence"][decision.confidence.value] += 1
     counters["warning"].update(result.warnings)
+    special_value = result.value("is_special_purpose")
+    special_label = "null" if special_value is None else str(special_value).lower()
+    counters["special_purpose"][special_label] += 1
+    if body_type in {"VAN", "PICKUP", "TRUCK"}:
+        counters["non_passenger_special_purpose"][(body_type, special_label)] += 1
+        profile = "".join(
+            "1" if result.value(field_name) is True else "0"
+            for field_name in (
+                "has_permanent_rear_seats",
+                "has_rear_side_windows",
+                "has_rear_windowed_door",
+                "has_separate_cargo_compartment",
+            )
+        )
+        counters["constructive_profile"][(body_type, profile)] += 1
+        if special_value is None:
+            counters["unresolved_body_class"][(
+                body_type,
+                vehicle_class or "NULL",
+            )] += 1
 
 
 def audit_inferences(engine, limit: int | None = None) -> dict[str, Counter]:
@@ -71,6 +115,10 @@ def audit_inferences(engine, limit: int | None = None) -> dict[str, Counter]:
         "rule": Counter(),
         "confidence": Counter(),
         "warning": Counter(),
+        "special_purpose": Counter(),
+        "non_passenger_special_purpose": Counter(),
+        "unresolved_body_class": Counter(),
+        "constructive_profile": Counter(),
     }
     candidate_names = {rule.raw_name for rule in PARAMETER_INFERENCE_RULES}
 
@@ -81,6 +129,19 @@ def audit_inferences(engine, limit: int | None = None) -> dict[str, Counter]:
                 Spec.raw_json,
                 Series.raw_json.label("series_raw_json"),
                 SpecVehicleAttributes.body_type,
+                SpecVehicleAttributes.vehicle_class,
+                SpecVehicleAttributes.seat_count_min,
+                SpecVehicleAttributes.seat_count_max,
+                SpecVehicleAttributes.gross_mass_kg,
+                SpecVehicleAttributes.payload_kg_min,
+                SpecVehicleAttributes.payload_kg_max,
+                SpecVehicleAttributes.cargo_length_min_mm,
+                SpecVehicleAttributes.cargo_width_min_mm,
+                SpecVehicleAttributes.cargo_height_min_mm,
+                SpecVehicleAttributes.has_permanent_rear_seats,
+                SpecVehicleAttributes.has_rear_side_windows,
+                SpecVehicleAttributes.has_rear_windowed_door,
+                SpecVehicleAttributes.has_separate_cargo_compartment,
             )
             .outerjoin(Series, Series.id == Spec.series_id)
             .outerjoin(SpecVehicleAttributes, SpecVehicleAttributes.spec_id == Spec.id)
@@ -89,14 +150,7 @@ def audit_inferences(engine, limit: int | None = None) -> dict[str, Counter]:
         if limit is not None:
             base_statement = base_statement.limit(limit)
         base_rows = list(connection.execute(base_statement))
-        metadata = {
-            row.id: (
-                row.body_type,
-                _raw_name(row.raw_json),
-                _raw_name(row.series_raw_json),
-            )
-            for row in base_rows
-        }
+        metadata = {row.id: row for row in base_rows}
         counters["summary"]["specs"] = len(metadata)
 
         definitions = connection.execute(
@@ -109,32 +163,34 @@ def audit_inferences(engine, limit: int | None = None) -> dict[str, Counter]:
         }
         counters["summary"]["candidate_definitions"] = len(parameter_names)
 
-        if not metadata or not parameter_names:
+        if not metadata:
             return counters
 
-        parameter_statement = (
-            select(
-                SpecParameter.spec_id,
-                SpecParameter.parameter_id,
-                SpecParameter.raw_json,
+        if parameter_names:
+            parameter_statement = (
+                select(
+                    SpecParameter.spec_id,
+                    SpecParameter.parameter_id,
+                    SpecParameter.raw_json,
+                )
+                .where(SpecParameter.parameter_id.in_(parameter_names))
+                .order_by(SpecParameter.spec_id, SpecParameter.parameter_id)
             )
-            .where(SpecParameter.parameter_id.in_(parameter_names))
-            .order_by(SpecParameter.spec_id, SpecParameter.parameter_id)
-        )
-        if limit is not None:
-            parameter_statement = parameter_statement.where(
-                SpecParameter.spec_id.in_(metadata)
-            )
-        parameter_rows = connection.execution_options(stream_results=True).execute(
-            parameter_statement
-        )
+            if limit is not None:
+                parameter_statement = parameter_statement.where(
+                    SpecParameter.spec_id.in_(metadata)
+                )
+            parameter_rows = connection.execution_options(
+                stream_results=True
+            ).execute(parameter_statement)
+        else:
+            parameter_rows = ()
 
         processed: set[int] = set()
         for spec_id, rows in groupby(parameter_rows, key=lambda row: row.spec_id):
             base = metadata.get(spec_id)
             if base is None:
                 continue
-            body_type, spec_name, series_name = base
             parameters = [
                 RawParameter(
                     name=parameter_names[row.parameter_id],
@@ -144,23 +200,29 @@ def audit_inferences(engine, limit: int | None = None) -> dict[str, Counter]:
             ]
             result = infer_vehicle_attributes(
                 parameters,
-                body_type=body_type,
-                spec_name=spec_name,
-                series_name=series_name,
+                **_inference_arguments(base),
             )
-            _record_result(counters, result)
+            _record_result(
+                counters,
+                result,
+                body_type=base.body_type,
+                vehicle_class=base.vehicle_class,
+            )
             processed.add(spec_id)
 
-        for spec_id, (body_type, spec_name, series_name) in metadata.items():
+        for spec_id, base in metadata.items():
             if spec_id in processed:
                 continue
             result = infer_vehicle_attributes(
                 (),
-                body_type=body_type,
-                spec_name=spec_name,
-                series_name=series_name,
+                **_inference_arguments(base),
             )
-            _record_result(counters, result)
+            _record_result(
+                counters,
+                result,
+                body_type=base.body_type,
+                vehicle_class=base.vehicle_class,
+            )
 
     counters["summary"]["processed"] = len(metadata)
     return counters
@@ -196,6 +258,19 @@ def main() -> int:
     print_counter("Выведенные значения:", counters["value"])
     print_counter("Сработавшие правила:", counters["rule"])
     print_counter("Надёжность:", counters["confidence"])
+    print_counter("Итог is_special_purpose:", counters["special_purpose"])
+    print_counter(
+        "Итог для VAN/PICKUP/TRUCK:",
+        counters["non_passenger_special_purpose"],
+    )
+    print_counter(
+        "Неразрешённые VAN/PICKUP/TRUCK по кузову и классу:",
+        counters["unresolved_body_class"],
+    )
+    print_counter(
+        "Профили конструктивных признаков (сиденья/окна/задняя дверь/грузовой отсек):",
+        counters["constructive_profile"],
+    )
     print_counter("Предупреждения:", counters["warning"])
     return 0
 

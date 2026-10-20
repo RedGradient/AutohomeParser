@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from autohome.vehicle_attribute_inference import (
+    INFERRED_INPUTS_USED,
     InferenceConfidence,
     RawParameter,
     VehiclePurposeType,
@@ -222,6 +223,195 @@ class PurposeInferenceTests(unittest.TestCase):
             VehiclePurposeType.UNKNOWN_SPECIAL,
         )
         self.assertIn("CONFLICTING_PURPOSE_MARKERS", result.warnings)
+
+
+class OrdinaryTransportInferenceTests(unittest.TestCase):
+    def test_passenger_body_class_and_seats_prove_not_8705(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="SUV",
+            vehicle_class="MIDSIZE_SUV",
+            seat_count_min=5,
+            seat_count_max=7,
+        )
+
+        decision = result.decisions["is_special_purpose"]
+        self.assertIs(decision.value, False)
+        self.assertEqual(
+            decision.rule_code,
+            "ORDINARY_PASSENGER_BODY_CLASS_AND_SEATS",
+        )
+        self.assertIn(INFERRED_INPUTS_USED, result.flags)
+
+    def test_passenger_body_without_matching_class_remains_unknown(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="SUV",
+            vehicle_class="LIGHT_TRUCK",
+            seat_count_min=5,
+            seat_count_max=5,
+        )
+
+        self.assertIsNone(result.value("is_special_purpose"))
+
+    def test_bus_seat_count_proves_ordinary_passenger_transport(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="VAN",
+            vehicle_class="LIGHT_COMMERCIAL_VAN",
+            seat_count_min=11,
+            seat_count_max=11,
+        )
+
+        decision = result.decisions["is_special_purpose"]
+        self.assertIs(decision.value, False)
+        self.assertEqual(
+            decision.rule_code,
+            "ORDINARY_PASSENGER_VAN_AT_LEAST_10_SEATS",
+        )
+
+    def test_small_passenger_van_requires_positive_construction_signals(self):
+        result = infer_vehicle_attributes(
+            [
+                parameter(
+                    "后排座椅放倒形式",
+                    sublist=[{"name": "比例放倒", "value": "●"}],
+                ),
+                parameter("前/后电动车窗", itemname="前●/后●"),
+                parameter("后雨刷", itemname="●"),
+            ],
+            body_type="VAN",
+            vehicle_class="MICROVAN",
+            seat_count_min=5,
+            seat_count_max=5,
+        )
+
+        self.assertIs(result.value("is_special_purpose"), False)
+        self.assertEqual(
+            result.decisions["is_special_purpose"].rule_code,
+            "ORDINARY_PASSENGER_VAN_BY_CONSTRUCTION",
+        )
+        self.assertEqual(
+            result.decisions["is_special_purpose"].evidence[0].source,
+            "spec_parameters.raw_json",
+        )
+
+    def test_van_body_and_normal_transport_class_prove_not_8705(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="VAN",
+            vehicle_class="LIGHT_COMMERCIAL_VAN",
+        )
+
+        decision = result.decisions["is_special_purpose"]
+        self.assertIs(decision.value, False)
+        self.assertEqual(
+            decision.rule_code,
+            "ORDINARY_VAN_BODY_AND_TRANSPORT_CLASS",
+        )
+        self.assertEqual(decision.confidence, InferenceConfidence.MEDIUM)
+
+    def test_goods_body_class_cargo_and_payload_prove_not_8705(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="TRUCK",
+            vehicle_class="LIGHT_TRUCK",
+            gross_mass_kg=4495,
+            payload_kg_min=1495,
+            payload_kg_max=1495,
+            cargo_length_min_mm=4200,
+            cargo_width_min_mm=2100,
+            cargo_height_min_mm=400,
+        )
+
+        decision = result.decisions["is_special_purpose"]
+        self.assertIs(decision.value, False)
+        self.assertEqual(
+            decision.rule_code,
+            "ORDINARY_GOODS_BODY_CLASS_CARGO_AND_PAYLOAD",
+        )
+
+    def test_goods_transport_name_proves_not_8705(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="TRUCK",
+            vehicle_class="LIGHT_TRUCK",
+            spec_name="随车起重运输车",
+        )
+
+        self.assertIs(result.value("is_special_purpose"), False)
+        self.assertEqual(
+            result.decisions["is_special_purpose"].rule_code,
+            "ORDINARY_GOODS_TRANSPORT_BY_NAME",
+        )
+
+    def test_pickup_body_and_class_prove_not_8705(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="PICKUP",
+            vehicle_class="PICKUP",
+        )
+
+        self.assertIs(result.value("is_special_purpose"), False)
+        self.assertEqual(
+            result.decisions["is_special_purpose"].rule_code,
+            "ORDINARY_PICKUP_BODY_AND_CLASS",
+        )
+
+    def test_truck_body_and_transport_class_prove_not_8705(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="TRUCK",
+            vehicle_class="MINI_TRUCK",
+        )
+
+        decision = result.decisions["is_special_purpose"]
+        self.assertIs(decision.value, False)
+        self.assertEqual(
+            decision.rule_code,
+            "ORDINARY_TRUCK_BODY_AND_TRANSPORT_CLASS",
+        )
+        self.assertEqual(decision.confidence, InferenceConfidence.MEDIUM)
+
+    def test_generic_special_marker_blocks_ordinary_transport_fallback(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="TRUCK",
+            vehicle_class="MINI_TRUCK",
+            spec_name="专用车",
+        )
+
+        self.assertEqual(
+            result.value("vehicle_purpose_type"),
+            VehiclePurposeType.UNKNOWN_SPECIAL,
+        )
+        self.assertIsNone(result.value("is_special_purpose"))
+
+    def test_explicit_8705_marker_overrides_ordinary_goods_signals(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="TRUCK",
+            vehicle_class="LIGHT_TRUCK",
+            gross_mass_kg=12000,
+            payload_kg_min=5000,
+            payload_kg_max=5000,
+            cargo_length_min_mm=5000,
+            cargo_width_min_mm=2200,
+            cargo_height_min_mm=500,
+            spec_name="消防车",
+        )
+
+        self.assertIs(result.value("is_special_purpose"), True)
+
+    def test_missing_positive_transport_evidence_remains_unknown(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="TRUCK",
+            vehicle_class=None,
+            gross_mass_kg=4495,
+        )
+
+        self.assertIsNone(result.value("is_special_purpose"))
 
 
 if __name__ == "__main__":

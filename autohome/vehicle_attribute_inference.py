@@ -6,6 +6,10 @@ import re
 from typing import Any, Iterable, Mapping
 
 
+VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-20-v1"
+INFERRED_INPUTS_USED = "INFERRED_INPUTS_USED"
+
+
 class VehiclePurposeType(StrEnum):
     """Нормализованное назначение транспортного средства."""
 
@@ -94,6 +98,8 @@ class VehicleAttributeInferenceResult:
 
     decisions: dict[str, InferenceDecision] = field(default_factory=dict)
     warnings: tuple[str, ...] = ()
+    flags: tuple[str, ...] = ()
+    rules_version: str = VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION
 
     def value(self, field_name: str) -> bool | VehiclePurposeType | None:
         decision = self.decisions.get(field_name)
@@ -112,6 +118,32 @@ TAILGATE_BODY_TYPES = frozenset(
     }
 )
 CARGO_BOX_BODY_TYPES = frozenset({"PICKUP", "TRUCK"})
+PASSENGER_BODY_TYPES = frozenset(
+    {
+        "SEDAN",
+        "HATCHBACK",
+        "LIFTBACK",
+        "WAGON",
+        "CROSSOVER_WAGON",
+        "SUV",
+        "SPORTS_CAR",
+        "COUPE",
+        "CONVERTIBLE",
+        "MPV",
+    }
+)
+PASSENGER_CLASS_SUFFIXES = ("_CAR", "_SUV", "_MPV")
+PASSENGER_CLASSES = frozenset({"MPV"})
+VAN_CLASSES = frozenset({"MICROVAN", "LIGHT_COMMERCIAL_VAN"})
+PICKUP_CLASSES = frozenset({"PICKUP", "PREMIUM_PICKUP"})
+TRUCK_CLASSES = frozenset({"MINI_TRUCK", "LIGHT_TRUCK"})
+GOODS_TRANSPORT_MARKERS = (
+    "载货",
+    "运输车",
+    "厢式货车",
+    "栏板",
+    "仓栅",
+)
 
 
 PARAMETER_INFERENCE_RULES = (
@@ -472,10 +504,259 @@ def special_purpose_value(purpose_type: VehiclePurposeType) -> bool | None:
     return None
 
 
+def _normalized_evidence(field_name: str, value: Any) -> InferenceEvidence:
+    return InferenceEvidence(
+        source="spec_vehicle_attributes",
+        marker=field_name,
+        raw_value=value,
+    )
+
+
+def _attribute_evidence(
+    field_name: str,
+    value: bool,
+    inferred_attributes: Mapping[str, InferenceDecision],
+) -> tuple[InferenceEvidence, ...]:
+    decision = inferred_attributes.get(field_name)
+    if decision is not None and decision.value is value:
+        return decision.evidence
+    return (_normalized_evidence(field_name, value),)
+
+
+def _name_marker_evidence(
+    marker: str,
+    *,
+    spec_name: str | None,
+    series_name: str | None,
+) -> tuple[InferenceEvidence, ...]:
+    evidence = []
+    for source, raw_name in (
+        ("specs.raw_json.name", _text(spec_name)),
+        ("series.raw_json.name", _text(series_name)),
+    ):
+        if marker in raw_name:
+            evidence.append(
+                InferenceEvidence(source=source, marker=marker, raw_value=raw_name)
+            )
+    return tuple(evidence)
+
+
+def _is_passenger_class(vehicle_class: str | None) -> bool:
+    return bool(
+        vehicle_class
+        and (
+            vehicle_class in PASSENGER_CLASSES
+            or vehicle_class.endswith(PASSENGER_CLASS_SUFFIXES)
+        )
+    )
+
+
+def infer_ordinary_transport(
+    *,
+    body_type: str | None,
+    vehicle_class: str | None,
+    seat_count_min: int | None,
+    seat_count_max: int | None,
+    gross_mass_kg: int | None,
+    payload_kg_min: int | None,
+    payload_kg_max: int | None,
+    cargo_length_min_mm: int | None,
+    cargo_width_min_mm: int | None,
+    cargo_height_min_mm: int | None,
+    has_permanent_rear_seats: bool | None,
+    has_rear_side_windows: bool | None,
+    has_rear_windowed_door: bool | None,
+    has_separate_cargo_compartment: bool | None,
+    spec_name: str | None,
+    series_name: str | None,
+    inferred_attributes: Mapping[str, InferenceDecision],
+) -> InferenceDecision | None:
+    """Подтвердить обычную перевозку людей или грузов положительными данными."""
+    seats_are_valid = (
+        seat_count_min is not None
+        and seat_count_max is not None
+        and 1 <= seat_count_min <= seat_count_max
+    )
+    if (
+        body_type in PASSENGER_BODY_TYPES
+        and _is_passenger_class(vehicle_class)
+        and seats_are_valid
+    ):
+        return InferenceDecision(
+            value=False,
+            rule_code="ORDINARY_PASSENGER_BODY_CLASS_AND_SEATS",
+            confidence=InferenceConfidence.HIGH,
+            evidence=(
+                _normalized_evidence("body_type", body_type),
+                _normalized_evidence("vehicle_class", vehicle_class),
+                _normalized_evidence("seat_count_min", seat_count_min),
+                _normalized_evidence("seat_count_max", seat_count_max),
+            ),
+        )
+
+    if body_type == "VAN" and vehicle_class in VAN_CLASSES:
+        if seats_are_valid and seat_count_min >= 10:
+            return InferenceDecision(
+                value=False,
+                rule_code="ORDINARY_PASSENGER_VAN_AT_LEAST_10_SEATS",
+                confidence=InferenceConfidence.HIGH,
+                evidence=(
+                    _normalized_evidence("body_type", body_type),
+                    _normalized_evidence("vehicle_class", vehicle_class),
+                    _normalized_evidence("seat_count_min", seat_count_min),
+                    _normalized_evidence("seat_count_max", seat_count_max),
+                ),
+            )
+        if (
+            has_permanent_rear_seats is True
+            and has_rear_side_windows is True
+        ):
+            return InferenceDecision(
+                value=False,
+                rule_code="ORDINARY_PASSENGER_VAN_BY_CONSTRUCTION",
+                confidence=InferenceConfidence.HIGH,
+                evidence=(
+                    *_attribute_evidence(
+                        "has_permanent_rear_seats",
+                        True,
+                        inferred_attributes,
+                    ),
+                    *_attribute_evidence(
+                        "has_rear_side_windows",
+                        True,
+                        inferred_attributes,
+                    ),
+                ),
+            )
+
+        return InferenceDecision(
+            value=False,
+            rule_code="ORDINARY_VAN_BODY_AND_TRANSPORT_CLASS",
+            confidence=InferenceConfidence.MEDIUM,
+            evidence=(
+                _normalized_evidence("body_type", body_type),
+                _normalized_evidence("vehicle_class", vehicle_class),
+            ),
+        )
+
+    truck_transport_classes = TRUCK_CLASSES | VAN_CLASSES | PICKUP_CLASSES
+    body_and_class_are_goods = (
+        body_type == "PICKUP" and vehicle_class in PICKUP_CLASSES
+    ) or (body_type == "TRUCK" and vehicle_class in truck_transport_classes)
+    if not body_and_class_are_goods:
+        return None
+
+    for marker in GOODS_TRANSPORT_MARKERS:
+        name_evidence = _name_marker_evidence(
+            marker,
+            spec_name=spec_name,
+            series_name=series_name,
+        )
+        if name_evidence:
+            return InferenceDecision(
+                value=False,
+                rule_code="ORDINARY_GOODS_TRANSPORT_BY_NAME",
+                confidence=InferenceConfidence.HIGH,
+                evidence=(
+                    _normalized_evidence("body_type", body_type),
+                    _normalized_evidence("vehicle_class", vehicle_class),
+                    *name_evidence,
+                ),
+            )
+
+    cargo_dimensions_present = all(
+        value is not None and value > 0
+        for value in (
+            cargo_length_min_mm,
+            cargo_width_min_mm,
+            cargo_height_min_mm,
+        )
+    )
+    payload_present = any(
+        value is not None and value > 0
+        for value in (payload_kg_min, payload_kg_max)
+    )
+    if (
+        cargo_dimensions_present
+        and payload_present
+        and gross_mass_kg is not None
+        and gross_mass_kg > 0
+    ):
+        evidence = [
+            _normalized_evidence("body_type", body_type),
+            _normalized_evidence("vehicle_class", vehicle_class),
+            _normalized_evidence("gross_mass_kg", gross_mass_kg),
+            _normalized_evidence("cargo_length_min_mm", cargo_length_min_mm),
+            _normalized_evidence("cargo_width_min_mm", cargo_width_min_mm),
+            _normalized_evidence("cargo_height_min_mm", cargo_height_min_mm),
+        ]
+        if payload_kg_min is not None:
+            evidence.append(_normalized_evidence("payload_kg_min", payload_kg_min))
+        if payload_kg_max is not None:
+            evidence.append(_normalized_evidence("payload_kg_max", payload_kg_max))
+        if has_separate_cargo_compartment is True:
+            evidence.append(
+                _normalized_evidence("has_separate_cargo_compartment", True)
+            )
+        return InferenceDecision(
+            value=False,
+            rule_code="ORDINARY_GOODS_BODY_CLASS_CARGO_AND_PAYLOAD",
+            confidence=InferenceConfidence.HIGH,
+            evidence=tuple(evidence),
+        )
+    if body_type == "PICKUP":
+        return InferenceDecision(
+            value=False,
+            rule_code="ORDINARY_PICKUP_BODY_AND_CLASS",
+            confidence=InferenceConfidence.HIGH,
+            evidence=(
+                _normalized_evidence("body_type", body_type),
+                _normalized_evidence("vehicle_class", vehicle_class),
+            ),
+        )
+    if cargo_dimensions_present:
+        return InferenceDecision(
+            value=False,
+            rule_code="ORDINARY_TRUCK_WITH_CARGO_BOX",
+            confidence=InferenceConfidence.HIGH,
+            evidence=(
+                _normalized_evidence("body_type", body_type),
+                _normalized_evidence("vehicle_class", vehicle_class),
+                _normalized_evidence("cargo_length_min_mm", cargo_length_min_mm),
+                _normalized_evidence("cargo_width_min_mm", cargo_width_min_mm),
+                _normalized_evidence("cargo_height_min_mm", cargo_height_min_mm),
+            ),
+        )
+    if body_type == "TRUCK":
+        return InferenceDecision(
+            value=False,
+            rule_code="ORDINARY_TRUCK_BODY_AND_TRANSPORT_CLASS",
+            confidence=InferenceConfidence.MEDIUM,
+            evidence=(
+                _normalized_evidence("body_type", body_type),
+                _normalized_evidence("vehicle_class", vehicle_class),
+            ),
+        )
+    return None
+
+
 def infer_vehicle_attributes(
     parameters: Iterable[RawParameter],
     *,
     body_type: str | None,
+    vehicle_class: str | None = None,
+    seat_count_min: int | None = None,
+    seat_count_max: int | None = None,
+    gross_mass_kg: int | None = None,
+    payload_kg_min: int | None = None,
+    payload_kg_max: int | None = None,
+    cargo_length_min_mm: int | None = None,
+    cargo_width_min_mm: int | None = None,
+    cargo_height_min_mm: int | None = None,
+    has_permanent_rear_seats: bool | None = None,
+    has_rear_side_windows: bool | None = None,
+    has_rear_windowed_door: bool | None = None,
+    has_separate_cargo_compartment: bool | None = None,
     spec_name: str | None = None,
     series_name: str | None = None,
 ) -> VehicleAttributeInferenceResult:
@@ -496,4 +777,49 @@ def infer_vehicle_attributes(
                 confidence=purpose.confidence,
                 evidence=purpose.evidence,
             )
-    return VehicleAttributeInferenceResult(decisions=decisions, warnings=warnings)
+    else:
+        def inferred_or_stored(
+            field_name: str,
+            stored_value: bool | None,
+        ) -> bool | None:
+            decision = decisions.get(field_name)
+            if decision is not None and isinstance(decision.value, bool):
+                return decision.value
+            return stored_value
+
+        ordinary_transport = infer_ordinary_transport(
+            body_type=body_type,
+            vehicle_class=vehicle_class,
+            seat_count_min=seat_count_min,
+            seat_count_max=seat_count_max,
+            gross_mass_kg=gross_mass_kg,
+            payload_kg_min=payload_kg_min,
+            payload_kg_max=payload_kg_max,
+            cargo_length_min_mm=cargo_length_min_mm,
+            cargo_width_min_mm=cargo_width_min_mm,
+            cargo_height_min_mm=cargo_height_min_mm,
+            has_permanent_rear_seats=inferred_or_stored(
+                "has_permanent_rear_seats", has_permanent_rear_seats
+            ),
+            has_rear_side_windows=inferred_or_stored(
+                "has_rear_side_windows", has_rear_side_windows
+            ),
+            has_rear_windowed_door=inferred_or_stored(
+                "has_rear_windowed_door", has_rear_windowed_door
+            ),
+            has_separate_cargo_compartment=inferred_or_stored(
+                "has_separate_cargo_compartment",
+                has_separate_cargo_compartment,
+            ),
+            spec_name=spec_name,
+            series_name=series_name,
+            inferred_attributes=decisions,
+        )
+        if ordinary_transport is not None:
+            decisions["is_special_purpose"] = ordinary_transport
+    flags = (INFERRED_INPUTS_USED,) if decisions else ()
+    return VehicleAttributeInferenceResult(
+        decisions=decisions,
+        warnings=warnings,
+        flags=flags,
+    )
