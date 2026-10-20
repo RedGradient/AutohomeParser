@@ -59,13 +59,14 @@ class ImportDutyClassificationIntegrationTests(unittest.TestCase):
     def test_classification_failure_blocks_old_passenger_formula(self):
         row = database_row(seat_count_min=None, seat_count_max=None)
 
-        calculation, payment = make_rows(
+        calculation, payments = make_rows(
             row,
             ImporterType.LEGAL_ENTITY,
             CALCULATION_DATE,
             RATES,
         )
 
+        payment = next(p for p in payments if p["payment_type"] == "IMPORT_DUTY")
         self.assertEqual(payment["status"], "MISSING_DATA")
         self.assertIsNone(payment["amount_rub"])
         self.assertEqual(calculation["classification_status"], "MISSING_DATA")
@@ -88,7 +89,7 @@ class ImportDutyClassificationIntegrationTests(unittest.TestCase):
         )
 
         classification = classify_database_row(row)
-        calculation, payment = make_rows(
+        calculation, payments = make_rows(
             row,
             ImporterType.LEGAL_ENTITY,
             CALCULATION_DATE,
@@ -96,6 +97,7 @@ class ImportDutyClassificationIntegrationTests(unittest.TestCase):
             classification,
         )
 
+        payment = next(p for p in payments if p["payment_type"] == "IMPORT_DUTY")
         self.assertEqual(classification.tnved_heading, "8702")
         self.assertEqual(payment["status"], "CALCULATED")
         self.assertEqual(payment["amount_rub"], Decimal("1797000.00"))
@@ -130,7 +132,7 @@ class ImportDutyClassificationIntegrationTests(unittest.TestCase):
         )
 
         classification = classify_database_row(row)
-        calculation, payment = make_rows(
+        calculation, payments = make_rows(
             row,
             ImporterType.LEGAL_ENTITY,
             CALCULATION_DATE,
@@ -138,12 +140,49 @@ class ImportDutyClassificationIntegrationTests(unittest.TestCase):
             classification,
         )
 
+        payment = next(p for p in payments if p["payment_type"] == "IMPORT_DUTY")
         self.assertEqual(classification.tnved_heading, "8704")
         self.assertEqual(payment["status"], "CALCULATED")
         self.assertEqual(
             calculation["input_snapshot_json"]["cargo_length_min_mm"],
             1600,
         )
+
+    def test_customs_fee_is_added_as_separate_payment(self):
+        calculation, payments = make_rows(
+            database_row(guide_price_yuan=Decimal("150000")),
+            ImporterType.INDIVIDUAL,
+            CALCULATION_DATE,
+            RATES,
+        )
+
+        fee = next(p for p in payments if p["payment_type"] == "CUSTOMS_FEE")
+        self.assertEqual(calculation["customs_value_rub"], Decimal("1650000.00"))
+        self.assertEqual(fee["status"], "CALCULATED")
+        self.assertEqual(fee["amount_rub"], Decimal("13541.00"))
+        self.assertEqual(fee["rule_code"], "CUSTOMS_FEE_2026_1200K_2700K")
+        self.assertEqual(
+            fee["details_json"]["field_labels"]["fee_rub"],
+            "Таможенный сбор, RUB",
+        )
+        self.assertIn(
+            "INCOMPLETE_CUSTOMS_VALUE",
+            {warning["code"] for warning in calculation["warnings_json"]},
+        )
+
+    def test_customs_fee_reports_missing_value_without_vehicle_price(self):
+        _, payments = make_rows(
+            database_row(guide_price_yuan=None, dealer_price_yuan=None, year=2017),
+            ImporterType.INDIVIDUAL,
+            CALCULATION_DATE,
+            RATES,
+        )
+
+        fee = next(p for p in payments if p["payment_type"] == "CUSTOMS_FEE")
+        duty = next(p for p in payments if p["payment_type"] == "IMPORT_DUTY")
+        self.assertEqual(duty["status"], "CALCULATED")
+        self.assertEqual(fee["status"], "MISSING_DATA")
+        self.assertIsNone(fee["amount_rub"])
 
     def test_inferred_classification_inputs_are_labeled(self):
         row = database_row(

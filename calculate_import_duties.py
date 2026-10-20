@@ -18,6 +18,7 @@ from autohome.import_duty import (
     ImporterType,
     VehicleClassificationInput,
     calculate_import_duty,
+    calculate_customs_fee,
     classify_vehicle,
 )
 from autohome.import_duty.calculator import assumed_production_date, completed_months
@@ -181,7 +182,7 @@ def make_rows(
     rates,
     classification=None,
 ):
-    """Рассчитать один сценарий и сериализовать две строки БД."""
+    """Рассчитать один сценарий и сериализовать его строки платежей."""
     if classification is None:
         classification = classify_database_row(row)
     price_cny, price_source = select_vehicle_price(
@@ -223,6 +224,7 @@ def make_rows(
         customs_value_rub = (price_cny * rates["CNY"].rub_per_unit).quantize(
             Decimal("0.01")
         )
+    customs_fee_result = calculate_customs_fee(customs_value_rub)
     calculation_id = stable_calculation_id(
         row.id, importer, calculation_date, price_source
     )
@@ -230,6 +232,17 @@ def make_rows(
     inference_flags = getattr(row, "inference_flags_json", None) or []
     inference_details = getattr(row, "inference_details_json", None) or {}
     calculation_warnings = list(result.warnings)
+    if customs_fee_result.status == CalculationStatus.CALCULATED:
+        calculation_warnings.append(
+            {
+                "code": "INCOMPLETE_CUSTOMS_VALUE",
+                "message": (
+                    "Таможенная стоимость рассчитана только по цене автомобиля "
+                    "и не включает доставку, страхование и другие расходы."
+                ),
+                "fields": ["customs_value_rub"],
+            }
+        )
     if INFERRED_INPUTS_USED in inference_flags:
         applied_fields = sorted(
             field_name
@@ -318,15 +331,25 @@ def make_rows(
         "warnings_json": calculation_warnings,
         "calculated_at": now,
     }
-    payment = {
-        "calculation_id": calculation_id,
-        "payment_type": "IMPORT_DUTY",
-        "amount_rub": result.amount_rub,
-        "status": result.status.value,
-        "rule_code": result.rule_code,
-        "details_json": add_detail_field_labels(result.details),
-    }
-    return calculation, payment
+    payments = [
+        {
+            "calculation_id": calculation_id,
+            "payment_type": "IMPORT_DUTY",
+            "amount_rub": result.amount_rub,
+            "status": result.status.value,
+            "rule_code": result.rule_code,
+            "details_json": add_detail_field_labels(result.details),
+        },
+        {
+            "calculation_id": calculation_id,
+            "payment_type": "CUSTOMS_FEE",
+            "amount_rub": customs_fee_result.amount_rub,
+            "status": customs_fee_result.status.value,
+            "rule_code": customs_fee_result.rule_code,
+            "details_json": add_detail_field_labels(customs_fee_result.details),
+        },
+    ]
+    return calculation, payments
 
 
 def dialect_insert(engine, model):
@@ -339,13 +362,10 @@ def dialect_insert(engine, model):
 
 
 def upsert_batch(engine, calculations: list[dict], payments: list[dict]) -> None:
-    """Атомарно записать пакет сценариев и результатов пошлины."""
-    if len(calculations) != len(payments):
-        raise ValueError("Число расчётов и результатов платежей не совпадает")
+    """Атомарно записать пакет сценариев и связанных платежей."""
     with engine.begin() as connection:
         for start in range(0, len(calculations), MAX_UPSERT_ROWS):
             calculation_chunk = calculations[start : start + MAX_UPSERT_ROWS]
-            payment_chunk = payments[start : start + MAX_UPSERT_ROWS]
             calculation_insert = dialect_insert(engine, CustomsCalculation).values(
                 calculation_chunk
             )
@@ -354,6 +374,13 @@ def upsert_batch(engine, calculations: list[dict], payments: list[dict]) -> None
                 for column in CustomsCalculation.__table__.columns
                 if column.name != "id"
             }
+            connection.execute(
+                calculation_insert.on_conflict_do_update(
+                    index_elements=["id"], set_=calculation_update
+                )
+            )
+        for start in range(0, len(payments), MAX_UPSERT_ROWS):
+            payment_chunk = payments[start : start + MAX_UPSERT_ROWS]
             payment_insert = dialect_insert(engine, CustomsPaymentResult).values(
                 payment_chunk
             )
@@ -362,11 +389,6 @@ def upsert_batch(engine, calculations: list[dict], payments: list[dict]) -> None
                 for column in CustomsPaymentResult.__table__.columns
                 if column.name not in {"calculation_id", "payment_type"}
             }
-            connection.execute(
-                calculation_insert.on_conflict_do_update(
-                    index_elements=["id"], set_=calculation_update
-                )
-            )
             connection.execute(
                 payment_insert.on_conflict_do_update(
                     index_elements=["calculation_id", "payment_type"],
@@ -459,7 +481,7 @@ def main() -> int:
                 if classification.tnved_heading:
                     counts[f"HEADING:{classification.tnved_heading}"] += 1
                 for importer in importers:
-                    calculation, payment = make_rows(
+                    calculation, scenario_payments = make_rows(
                         row,
                         importer,
                         args.calculation_date,
@@ -467,8 +489,11 @@ def main() -> int:
                         classification,
                     )
                     calculations.append(calculation)
-                    payments.append(payment)
-                    counts[f"{importer.value}:{payment['status']}"] += 1
+                    payments.extend(scenario_payments)
+                    for payment in scenario_payments:
+                        counts[
+                            f"{importer.value}:{payment['payment_type']}:{payment['status']}"
+                        ] += 1
                 if len(calculations) >= args.batch_size:
                     if not args.dry_run:
                         upsert_batch(engine, calculations, payments)
