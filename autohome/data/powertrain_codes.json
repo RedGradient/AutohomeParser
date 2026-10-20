@@ -8,6 +8,8 @@
     "Электромобиль": "BEV",
     "油电混合": "HEV",
     "Гибрид": "HEV",
+    "汽油电驱": "HEV",
+    "Последовательный бензиновый гибрид": "HEV",
     "插电式混合动力": "PHEV",
     "Подключаемый гибрид": "PHEV",
     "增程式": "EREV",
@@ -146,11 +148,14 @@
     "转子": "ROTARY"
   },
   "body_type": {
+    "三厢跨界车": "SEDAN",
     "三厢车": "SEDAN",
+    "两厢跨界车": "HATCHBACK",
     "两厢车": "HATCHBACK",
     "掀背车": "HATCHBACK",
     "旅行车": "WAGON",
     "旅行跨界车": "CROSSOVER_WAGON",
+    "SUV跨界车": "SUV",
     "SUV": "SUV",
     "MPV": "MPV",
     "跑车": "SPORTS_CAR",

@@ -273,6 +273,57 @@ class SpecPowertrain(Base):
     )
 
 
+class SpecVehicleAttributes(Base):
+    """Нормализованные кузовные и классификационные признаки комплектации."""
+
+    __tablename__ = "spec_vehicle_attributes"
+
+    spec_id: Mapped[int] = mapped_column(ForeignKey("specs.id"), primary_key=True)
+    series_id: Mapped[int] = mapped_column(ForeignKey("series.id"), index=True)
+    vehicle_class: Mapped[str | None] = mapped_column(String(100), index=True)
+    body_type: Mapped[str | None] = mapped_column(String(50), index=True)
+    body_construction: Mapped[str | None] = mapped_column(String(50), index=True)
+    seat_count_min: Mapped[int | None] = mapped_column(Integer)
+    seat_count_max: Mapped[int | None] = mapped_column(Integer)
+    door_count: Mapped[int | None] = mapped_column(Integer)
+    curb_mass_kg: Mapped[int | None] = mapped_column(Integer)
+    gross_mass_kg: Mapped[int | None] = mapped_column(Integer, index=True)
+    payload_kg_min: Mapped[int | None] = mapped_column(Integer)
+    payload_kg_max: Mapped[int | None] = mapped_column(Integer)
+    length_mm: Mapped[int | None] = mapped_column(Integer)
+    width_mm: Mapped[int | None] = mapped_column(Integer)
+    height_mm: Mapped[int | None] = mapped_column(Integer)
+    wheelbase_mm: Mapped[int | None] = mapped_column(Integer)
+    cargo_length_min_mm: Mapped[int | None] = mapped_column(Integer)
+    cargo_length_max_mm: Mapped[int | None] = mapped_column(Integer)
+    cargo_width_min_mm: Mapped[int | None] = mapped_column(Integer)
+    cargo_width_max_mm: Mapped[int | None] = mapped_column(Integer)
+    cargo_height_min_mm: Mapped[int | None] = mapped_column(Integer)
+    cargo_height_max_mm: Mapped[int | None] = mapped_column(Integer)
+    ground_clearance_mm: Mapped[int | None] = mapped_column(Integer)
+    ground_clearance_laden_mm: Mapped[int | None] = mapped_column(Integer)
+    ground_clearance_unladen_mm: Mapped[int | None] = mapped_column(Integer)
+    is_four_wheel_drive: Mapped[bool | None] = mapped_column(Boolean, index=True)
+    has_permanent_rear_seats: Mapped[bool | None] = mapped_column(Boolean)
+    has_rear_side_windows: Mapped[bool | None] = mapped_column(Boolean)
+    has_rear_windowed_door: Mapped[bool | None] = mapped_column(Boolean)
+    has_separate_cargo_compartment: Mapped[bool | None] = mapped_column(Boolean)
+    is_special_purpose: Mapped[bool | None] = mapped_column(Boolean, index=True)
+    vehicle_purpose_type: Mapped[str | None] = mapped_column(String(50), index=True)
+    inference_details_json: Mapped[dict[str, Any] | None] = mapped_column(JSON_TYPE)
+    inference_flags_json: Mapped[list[str] | None] = mapped_column(JSON_TYPE)
+    inference_rules_version: Mapped[str | None] = mapped_column(String(100))
+    is_complete: Mapped[bool] = mapped_column(Boolean, nullable=False, index=True)
+    missing_fields_json: Mapped[list[str]] = mapped_column(JSON_TYPE, nullable=False)
+    warnings_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON_TYPE, nullable=False
+    )
+    normalization_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    normalized_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class Modification(Base):
     """Одна нормализованная модификация внутри серии и модельного года."""
 
@@ -313,6 +364,72 @@ class Modification(Base):
     generated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class CustomsCalculation(Base):
+    """Один воспроизводимый сценарий расчёта таможенных платежей."""
+
+    __tablename__ = "customs_calculations"
+    __table_args__ = (
+        UniqueConstraint(
+            "spec_id",
+            "importer_type",
+            "calculation_date",
+            "rules_version",
+            "price_source",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    spec_id: Mapped[int] = mapped_column(ForeignKey("specs.id"), index=True)
+    importer_type: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    calculation_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    rules_version: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    price_source: Mapped[str] = mapped_column(String(30), nullable=False)
+    vehicle_price_cny: Mapped[Decimal | None] = mapped_column(PRICE_TYPE)
+    customs_value_rub: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    cny_rate_nominal: Mapped[int | None] = mapped_column(Integer)
+    cny_rate_rub: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    cny_rate_date: Mapped[date | None] = mapped_column(Date)
+    eur_rate_nominal: Mapped[int | None] = mapped_column(Integer)
+    eur_rate_rub: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    eur_rate_date: Mapped[date | None] = mapped_column(Date)
+    model_year: Mapped[int | None] = mapped_column(Integer)
+    assumed_production_date: Mapped[date | None] = mapped_column(Date)
+    age_months: Mapped[int | None] = mapped_column(Integer)
+    energy_type: Mapped[str | None] = mapped_column(String(50), index=True)
+    body_type: Mapped[str | None] = mapped_column(String(50), index=True)
+    engine_displacement_ml: Mapped[int | None] = mapped_column(Integer)
+    tnved_code: Mapped[str | None] = mapped_column(String(20), index=True)
+    classification_status: Mapped[str] = mapped_column(
+        String(30), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    input_snapshot_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON_TYPE, nullable=False
+    )
+    warnings_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON_TYPE, nullable=False
+    )
+    calculated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class CustomsPaymentResult(Base):
+    """Результат одного вида платежа внутри таможенного расчёта."""
+
+    __tablename__ = "customs_payment_results"
+    __table_args__ = (PrimaryKeyConstraint("calculation_id", "payment_type"),)
+
+    calculation_id: Mapped[int] = mapped_column(
+        ForeignKey("customs_calculations.id"), index=True
+    )
+    payment_type: Mapped[str] = mapped_column(String(50), index=True)
+    amount_rub: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    status: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    rule_code: Mapped[str | None] = mapped_column(String(150))
+    details_json: Mapped[dict[str, Any]] = mapped_column(JSON_TYPE, nullable=False)
 
 
 class SeriesMonthlySale(Base):

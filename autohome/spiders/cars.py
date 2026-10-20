@@ -42,6 +42,7 @@ from autohome.items import (
     SpecModificationItem,
     SpecParameterItem,
     SpecPowertrainItem,
+    SpecVehicleAttributesItem,
     ResaleValueRankingItem,
     TechnologyRankingItem,
 )
@@ -60,6 +61,16 @@ from autohome.powertrain_normalizer import (
     normalize_powertrain,
 )
 from autohome.translator import translate_powertrain_code, translate_powertrain_field
+from autohome.vehicle_attributes_normalizer import (
+    PATH_TO_FIELD as VEHICLE_ATTRIBUTE_PATH_TO_FIELD,
+    REQUIRED_SOURCE_FIELDS as REQUIRED_VEHICLE_ATTRIBUTE_SOURCE_FIELDS,
+    extract_vehicle_attribute_value,
+    normalize_vehicle_attributes,
+)
+from autohome.vehicle_attribute_inference import (
+    RawParameter,
+    apply_vehicle_attribute_inference,
+)
 
 
 def first(mapping: dict, *keys, default=None):
@@ -111,6 +122,14 @@ def yuan_from_text(value: object) -> Decimal | None:
     if "万" in str(value):
         amount *= Decimal("10000")
     return amount
+
+
+def has_vehicle_price(guide_price: object, dealer_price: object) -> bool:
+    """Проверить наличие хотя бы одной положительной цены автомобиля."""
+    return any(
+        price is not None and price > 0
+        for price in (yuan_from_text(guide_price), yuan_from_text(dealer_price))
+    )
 
 
 def text_after_colon(value: object) -> str | None:
@@ -238,6 +257,8 @@ class CarsSpider(scrapy.Spider):
         self.pending_specs: dict[int, deque[int]] = {}
         self.spec_series: dict[int, int] = {}
         self.spec_years: dict[int, int | None] = {}
+        self.spec_raw_names: dict[int, str] = {}
+        self.series_raw_names: dict[int, str] = {}
         self.config_request_counts: dict[int, int] = {}
         self.completed_config_spec_ids: set[int] = set()
         self.scheduled_config_spec_ids: set[int] = set()
@@ -555,6 +576,7 @@ class CarsSpider(scrapy.Spider):
                         "name",
                         default=f"series-{series_id}",
                     )
+                    self.series_raw_names[series_id] = str(series_name)
                     yield SeriesItem(
                         id=series_id,
                         brand_id=brand_id,
@@ -1166,11 +1188,39 @@ class CarsSpider(scrapy.Spider):
             # Пропускаем обёртки, которые только ссылаются на комплектацию.
             if not any(k in obj for k in ("name", "specname", "specName", "price", "year")):
                 continue
-            specs.setdefault(spec_id, obj)
+            current = specs.get(spec_id)
+            if current is None or (
+                not self._spec_has_price(current) and self._spec_has_price(obj)
+            ):
+                specs[spec_id] = obj
+
+        skipped_spec_ids = {
+            spec_id for spec_id, obj in specs.items() if not self._spec_has_price(obj)
+        }
+        if skipped_spec_ids:
+            self.logger.info(
+                "Серия %d: пропущено комплектаций без цены: %d",
+                series_id,
+                len(skipped_spec_ids),
+            )
+            specs = {
+                spec_id: obj
+                for spec_id, obj in specs.items()
+                if spec_id not in skipped_spec_ids
+            }
 
         for spec_id, obj in specs.items():
             self.spec_series[spec_id] = series_id
             self.spec_years[spec_id] = as_int(obj.get("year"))
+            self.spec_raw_names[spec_id] = str(
+                first(
+                    obj,
+                    "specname",
+                    "specName",
+                    "name",
+                    default=f"spec-{spec_id}",
+                )
+            )
             yield self._spec_item(obj, series_id)
 
         configurable = []
@@ -1281,7 +1331,9 @@ class CarsSpider(scrapy.Spider):
         group_positions: dict[str, int] = {}
         section_positions: dict[str, int] = {}
         local_parameter_ids: dict[int, int] = {}
+        local_parameter_names: dict[int, str] = {}
         local_powertrain_fields: dict[int, str] = {}
+        local_vehicle_attribute_fields: dict[int, str] = {}
         for position, group in enumerate(result.get("titlelist") or []):
             group_name = str(group.get("groupname") or "")
             section_name = str(group.get("itemtype") or "")
@@ -1325,11 +1377,19 @@ class CarsSpider(scrapy.Spider):
                         title_id,
                     )
                 local_parameter_ids[title_id] = parameter_id
+                local_parameter_names[title_id] = parameter_name
                 powertrain_field = PATH_TO_FIELD.get(
                     (group_name, section_name, parameter_name)
                 )
                 if powertrain_field is not None:
                     local_powertrain_fields[title_id] = powertrain_field
+                vehicle_attribute_field = VEHICLE_ATTRIBUTE_PATH_TO_FIELD.get(
+                    (group_name, section_name, parameter_name)
+                )
+                if vehicle_attribute_field is not None:
+                    local_vehicle_attribute_fields[title_id] = (
+                        vehicle_attribute_field
+                    )
                 yield ParameterDefinitionItem(
                     id=parameter_id,
                     semantic_key=semantic_key,
@@ -1356,9 +1416,18 @@ class CarsSpider(scrapy.Spider):
             # Эндпоинт списка содержит более полные данные о годе, цене дилера
             # и изображении. Здесь создаём запись только при её отсутствии.
             if spec_id not in self.spec_series and not self.resume_configs:
+                if not self._spec_has_price(spec_data):
+                    self.logger.info(
+                        "Пропущена комплектация spec_id=%d без цены из ответа конфигурации",
+                        spec_id,
+                    )
+                    continue
                 yield self._spec_item(spec_data, returned_series_id)
 
             powertrain_values: dict[str, object] = {}
+            vehicle_attribute_values: dict[str, object] = {}
+            seen_vehicle_attribute_fields: set[str] = set()
+            inference_parameters: list[RawParameter] = []
             for parameter in parameters:
                 title_id = as_int(parameter.get("titleid"))
                 if title_id is None:
@@ -1371,7 +1440,22 @@ class CarsSpider(scrapy.Spider):
                         title_id,
                     )
                     continue
+                inference_parameters.append(
+                    RawParameter(
+                        name=local_parameter_names[title_id],
+                        raw_value=parameter,
+                    )
+                )
                 powertrain_field = local_powertrain_fields.get(title_id)
+                vehicle_attribute_field = local_vehicle_attribute_fields.get(title_id)
+                if vehicle_attribute_field is not None:
+                    vehicle_attribute_values[vehicle_attribute_field] = (
+                        extract_vehicle_attribute_value(
+                            vehicle_attribute_field,
+                            parameter,
+                        )
+                    )
+                    seen_vehicle_attribute_fields.add(vehicle_attribute_field)
                 if powertrain_field not in SUBITEM_FIELDS:
                     if powertrain_field is not None:
                         raw_value = parameter.get("itemname")
@@ -1448,6 +1532,42 @@ class CarsSpider(scrapy.Spider):
             modification = modification_row(powertrain)
             yield ModificationItem(**modification)
             yield SpecPowertrainItem(**powertrain)
+            missing_attribute_sources = (
+                REQUIRED_VEHICLE_ATTRIBUTE_SOURCE_FIELDS
+                - seen_vehicle_attribute_fields
+            )
+            if missing_attribute_sources:
+                self.logger.warning(
+                    "Нормализация характеристик spec_id=%d пропущена: "
+                    "частичный ответ без полей %s",
+                    spec_id,
+                    ", ".join(sorted(missing_attribute_sources)),
+                )
+            else:
+                vehicle_attribute_values["drive_type"] = powertrain_values.get(
+                    "drive_type"
+                )
+                vehicle_attributes = normalize_vehicle_attributes(
+                    spec_id,
+                    returned_series_id,
+                    vehicle_attribute_values,
+                )
+                vehicle_attributes = apply_vehicle_attribute_inference(
+                    vehicle_attributes,
+                    inference_parameters,
+                    spec_name=self.spec_raw_names.get(spec_id)
+                    or str(
+                        first(
+                            spec_data,
+                            "specname",
+                            "specName",
+                            "name",
+                            default="",
+                        )
+                    ),
+                    series_name=self.series_raw_names.get(returned_series_id),
+                )
+                yield SpecVehicleAttributesItem(**vehicle_attributes)
             yield SpecModificationItem(
                 spec_id=spec_id,
                 modification_id=modification["id"],
@@ -1490,6 +1610,14 @@ class CarsSpider(scrapy.Spider):
         # Продолжаем серию после исчерпания стандартных повторов Scrapy.
         self.processed_spec_ids.add(requested_spec_id)
         yield from self._next_config_outputs(series_id)
+
+    @staticmethod
+    def _spec_has_price(obj: dict) -> bool:
+        """Проверить цены комплектации во входном объекте API."""
+        return has_vehicle_price(
+            first(obj, "minprice", "price"),
+            first(obj, "dealerprice", "dealerPrice"),
+        )
 
     @staticmethod
     def _spec_item(obj: dict, series_id: int):

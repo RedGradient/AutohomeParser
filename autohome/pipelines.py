@@ -9,6 +9,7 @@ import random
 import re
 import time
 
+from scrapy.exceptions import DropItem
 from sqlalchemy import bindparam, create_engine, event, func, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -43,12 +44,12 @@ from autohome.items import (
     SpecModificationItem,
     SpecParameterItem,
     SpecPowertrainItem,
+    SpecVehicleAttributesItem,
     ResaleValueRankingItem,
     TechnologyRankingItem,
 )
 from autohome.models import (
     AttentionRanking,
-    Base,
     Brand,
     BrandMonthlySale,
     BrandManufacturer,
@@ -73,10 +74,12 @@ from autohome.models import (
     SmartTestRanking,
     Spec,
     SpecPowertrain,
+    SpecVehicleAttributes,
     SpecParameter,
     ResaleValueRanking,
     TechnologyRanking,
 )
+from autohome.vehicle_attribute_schema import ensure_vehicle_attribute_schema
 from autohome.translator import (
     translate_brand_name,
     translate_color_name,
@@ -195,6 +198,7 @@ class SqlAlchemyPipeline:
         ParameterDefinitionItem: ParameterDefinition,
         ModificationItem: Modification,
         SpecPowertrainItem: SpecPowertrain,
+        SpecVehicleAttributesItem: SpecVehicleAttributes,
         SpecParameterItem: SpecParameter,
         ParameterSubitemItem: ParameterSubitem,
         ParameterColorSetItem: ParameterColorSet,
@@ -253,7 +257,7 @@ class SqlAlchemyPipeline:
         self.engine = create_engine(self.database_url, pool_pre_ping=True)
         if self.engine.dialect.name == "sqlite":
             event.listen(self.engine, "connect", self._configure_sqlite)
-        Base.metadata.create_all(self.engine)
+        ensure_vehicle_attribute_schema(self.engine)
 
     @staticmethod
     def _configure_sqlite(dbapi_connection, _):
@@ -268,6 +272,14 @@ class SqlAlchemyPipeline:
     def process_item(self, item):
         """Добавить элемент в буфер и записать заполненный пакет."""
         row = self._serialize(item)
+        if isinstance(item, SpecItem) and not any(
+            row.get(field) is not None and row[field] > 0
+            for field in ("guide_price_yuan", "dealer_price_yuan")
+        ):
+            spec_id = row.get("id")
+            raise DropItem(
+                f"Комплектация spec_id={spec_id} пропущена: отсутствуют цены"
+            )
         self.buffers[type(item)].append(row)
         self.buffered += 1
         if self.buffered >= self.batch_size:
