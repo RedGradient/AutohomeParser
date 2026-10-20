@@ -22,6 +22,7 @@ from autohome.import_duty import (
 )
 from autohome.import_duty.calculator import assumed_production_date, completed_months
 from autohome.import_duty.currency import fetch_cbr_rates
+from autohome.import_duty.detail_labels import add_detail_field_labels
 from autohome.import_duty.rates import RULES_VERSION
 from autohome.import_duty.types import (
     CalculationStatus,
@@ -285,7 +286,7 @@ def make_rows(
         "amount_rub": result.amount_rub,
         "status": result.status.value,
         "rule_code": result.rule_code,
-        "details_json": result.details,
+        "details_json": add_detail_field_labels(result.details),
     }
     return calculation, payment
 

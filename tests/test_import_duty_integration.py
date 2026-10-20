@@ -96,6 +96,14 @@ class ImportDutyClassificationIntegrationTests(unittest.TestCase):
         self.assertEqual(classification.tnved_heading, "8702")
         self.assertEqual(payment["status"], "CALCULATED")
         self.assertEqual(payment["amount_rub"], Decimal("1797000.00"))
+        self.assertEqual(
+            payment["details_json"]["field_labels"]["duty_rub"],
+            "Ввозная пошлина, RUB",
+        )
+        self.assertEqual(
+            payment["details_json"]["field_labels"]["engine_displacement_cc"],
+            "Рабочий объём двигателя, см³",
+        )
         self.assertEqual(calculation["tnved_code"], "8702901994")
         self.assertEqual(calculation["rules_version"], RULES_VERSION)
         self.assertEqual(
