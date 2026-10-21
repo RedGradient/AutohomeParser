@@ -63,11 +63,19 @@ make api-up
 ```
 
 Команда собирает образ приложения, ожидает готовности PostgreSQL и запускает
-API на `http://127.0.0.1:8000`. Просмотр логов и остановка:
+API на `http://127.0.0.1:8000`, Redis, Celery worker и Celery beat. Просмотр
+логов и остановка:
 
 ```bash
 make api-logs
+make celery-logs
 make docker-down
+```
+
+Для production используется отдельная конфигурация:
+
+```bash
+make COMPOSE_FILE=compose.prod.yaml api-up
 ```
 
 Парсер использует сетевой стек хоста, поэтому видит физические Wi-Fi и Ethernet
@@ -464,6 +472,26 @@ DATABASE_URL="$DATABASE_URL" .venv/bin/python calculate_import_duties.py \
 [для товаров личного пользования](https://eec.eaeunion.org/upload/medialibrary/48d/754bnati3u804penijmb0h866e5g6cng/Prilozhenie-2_107.pdf)
 и [группе 87 ЕТТ ЕАЭС](https://eec.eaeunion.org/comission/department/catr/ett/ru.2022/ru.87_2022_22.01.2026.pdf).
 Курсы загружаются из [ежедневного XML Банка России](https://www.cbr.ru/scripts/XML_daily.asp).
+
+### Автоматическое обновление курсов
+
+Celery beat ежедневно в 08:00 по часовому поясу `Europe/Moscow` ставит задачу
+проверки официальных курсов CNY и EUR. Время можно изменить через
+`CBR_RATES_UPDATE_HOUR` и `CBR_RATES_UPDATE_MINUTE`.
+
+Задача получает курс за текущий и предыдущий день. При первом запуске либо при
+изменении номинала или значения хотя бы одной валюты она запускает полный
+перерасчёт таможенных платежей и после его успешного завершения обновляет
+таблицу `cbr_exchange_rates`. Поэтому неудачный перерасчёт будет повторён
+Celery, а курс не будет ошибочно отмечен как применённый. При неизменившихся
+курсах записи и расчёты не обновляются. Повторный запуск задачи без изменения
+курса безопасен.
+
+Celery использует Redis как брокер. Логи планировщика и worker:
+
+```bash
+make celery-logs
+```
 
 ## Локальный словарь
 

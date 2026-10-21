@@ -1,4 +1,13 @@
 services:
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
   postgres:
     image: postgres:16
     environment:
@@ -42,6 +51,37 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    init: true
+    restart: unless-stopped
+
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["celery", "-A", "autohome.celery_app:app", "worker", "--loglevel=INFO", "--concurrency=1"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-autohome}:${POSTGRES_PASSWORD:-autohome}@postgres:5432/${POSTGRES_DB:-autohome}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    init: true
+    restart: unless-stopped
+
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["celery", "-A", "autohome.celery_app:app", "beat", "--loglevel=INFO", "--schedule=/tmp/celerybeat-schedule"]
+    environment:
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CBR_RATES_UPDATE_HOUR: ${CBR_RATES_UPDATE_HOUR:-8}
+      CBR_RATES_UPDATE_MINUTE: ${CBR_RATES_UPDATE_MINUTE:-0}
+    depends_on:
+      redis:
+        condition: service_healthy
     init: true
     restart: unless-stopped
 

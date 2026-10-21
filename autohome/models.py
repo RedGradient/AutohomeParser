@@ -426,6 +426,20 @@ class CustomsCalculation(Base):
     )
 
 
+class CbrExchangeRate(Base):
+    """Последний применённый официальный курс валюты Банка России."""
+
+    __tablename__ = "cbr_exchange_rates"
+
+    currency: Mapped[str] = mapped_column(String(3), primary_key=True)
+    nominal: Mapped[int] = mapped_column(Integer, nullable=False)
+    rate_rub: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    rate_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class CustomsPaymentResult(Base):
     """Результат одного вида платежа внутри таможенного расчёта."""
 
