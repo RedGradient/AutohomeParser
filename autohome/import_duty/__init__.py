@@ -2,6 +2,7 @@
 
 from .calculator import calculate_import_duty
 from .customs_fee import calculate_customs_fee
+from .recycling_fee import RecyclingFeeContext, calculate_recycling_fee
 from .classifier import (
     CLASSIFICATION_RULES_VERSION,
     VehicleClassificationInput,
@@ -16,9 +17,11 @@ __all__ = (
     "DutyResult",
     "ExchangeRate",
     "ImporterType",
+    "RecyclingFeeContext",
     "VehicleClassificationInput",
     "VehicleClassificationResult",
     "calculate_import_duty",
     "calculate_customs_fee",
     "classify_vehicle",
+    "calculate_recycling_fee",
 )

@@ -16,9 +16,11 @@ from autohome.import_duty import (
     DutyContext,
     ExchangeRate,
     ImporterType,
+    RecyclingFeeContext,
     VehicleClassificationInput,
     calculate_import_duty,
     calculate_customs_fee,
+    calculate_recycling_fee,
     classify_vehicle,
 )
 from autohome.import_duty.calculator import assumed_production_date, completed_months
@@ -38,6 +40,7 @@ from autohome.models import (
     SpecVehicleAttributes,
 )
 from autohome.vehicle_attribute_inference import INFERRED_INPUTS_USED
+from autohome.powertrain_schema import ensure_powertrain_schema
 from autohome.vehicle_attribute_schema import ensure_vehicle_attribute_schema
 
 MAX_UPSERT_ROWS = 2000
@@ -68,6 +71,15 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=5000)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--individual-personal-use",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Считать сценарий физлица ввозом для личного пользования; "
+            "по умолчанию включено."
+        ),
+    )
     parser.add_argument("--cny-rate-rub", type=Decimal)
     parser.add_argument("--cny-nominal", type=int, default=10)
     parser.add_argument("--eur-rate-rub", type=Decimal)
@@ -181,6 +193,7 @@ def make_rows(
     calculation_date: date,
     rates,
     classification=None,
+    personal_use: bool | None = None,
 ):
     """Рассчитать один сценарий и сериализовать его строки платежей."""
     if classification is None:
@@ -225,6 +238,21 @@ def make_rows(
             Decimal("0.01")
         )
     customs_fee_result = calculate_customs_fee(customs_value_rub)
+    if personal_use is None:
+        personal_use = importer == ImporterType.INDIVIDUAL
+    recycling_fee_result = calculate_recycling_fee(
+        RecyclingFeeContext(
+            importer_type=importer,
+            calculation_date=calculation_date,
+            personal_use=personal_use,
+            vehicle_technical_category=getattr(row, "vehicle_technical_category", None),
+            age_months=age_months,
+            powertrain_type=getattr(row, "recycling_fee_powertrain_type", None),
+            power_kw=getattr(row, "recycling_fee_power_kw", None),
+            power_source=getattr(row, "recycling_fee_power_source", None),
+            engine_displacement_cc=row.engine_displacement_ml,
+        )
+    )
     calculation_id = stable_calculation_id(
         row.id, importer, calculation_date, price_source
     )
@@ -284,16 +312,39 @@ def make_rows(
         "status": result.status.value,
         "input_snapshot_json": {
             "spec_id": row.id,
-            "guide_price_cny": str(row.guide_price_yuan) if row.guide_price_yuan is not None else None,
-            "dealer_price_cny": str(row.dealer_price_yuan) if row.dealer_price_yuan is not None else None,
+            "guide_price_cny": str(row.guide_price_yuan)
+            if row.guide_price_yuan is not None
+            else None,
+            "dealer_price_cny": str(row.dealer_price_yuan)
+            if row.dealer_price_yuan is not None
+            else None,
             "selected_price_cny": str(price_cny) if price_cny is not None else None,
             "price_source": price_source,
             "model_year": row.year,
             "energy_type": row.energy_type,
             "body_type": row.body_type,
             "engine_displacement_cc": row.engine_displacement_ml,
-            "engine_power_hp": str(row.engine_power_hp) if row.engine_power_hp is not None else None,
-            "motor_power_kw": str(row.motor_total_power_kw) if row.motor_total_power_kw is not None else None,
+            "engine_power_hp": str(row.engine_power_hp)
+            if row.engine_power_hp is not None
+            else None,
+            "motor_power_kw": str(row.motor_total_power_kw)
+            if row.motor_total_power_kw is not None
+            else None,
+            "personal_use": personal_use,
+            "vehicle_technical_category": getattr(
+                row, "vehicle_technical_category", None
+            ),
+            "recycling_fee_powertrain_type": getattr(
+                row, "recycling_fee_powertrain_type", None
+            ),
+            "recycling_fee_power_kw": (
+                str(row.recycling_fee_power_kw)
+                if getattr(row, "recycling_fee_power_kw", None) is not None
+                else None
+            ),
+            "recycling_fee_power_source": getattr(
+                row, "recycling_fee_power_source", None
+            ),
             "vehicle_class": getattr(row, "vehicle_class", None),
             "axle_count": getattr(row, "axle_count", None),
             "seat_count_min": getattr(row, "seat_count_min", None),
@@ -349,6 +400,14 @@ def make_rows(
             "status": customs_fee_result.status.value,
             "rule_code": customs_fee_result.rule_code,
             "details_json": add_detail_field_labels(customs_fee_result.details),
+        },
+        {
+            "calculation_id": calculation_id,
+            "payment_type": "RECYCLING_FEE",
+            "amount_rub": recycling_fee_result.amount_rub,
+            "status": recycling_fee_result.status.value,
+            "rule_code": recycling_fee_result.rule_code,
+            "details_json": add_detail_field_labels(recycling_fee_result.details),
         },
     ]
     return calculation, payments
@@ -411,6 +470,7 @@ def main() -> int:
     engine = create_engine(args.database_url, pool_pre_ping=True)
     if not args.dry_run:
         ensure_vehicle_attribute_schema(engine)
+        ensure_powertrain_schema(engine)
 
     existing_vehicle_attribute_columns = {
         column["name"]
@@ -436,7 +496,11 @@ def main() -> int:
             SpecPowertrain.engine_displacement_ml,
             SpecPowertrain.engine_power_hp,
             SpecPowertrain.motor_total_power_kw,
+            SpecPowertrain.recycling_fee_powertrain_type,
+            SpecPowertrain.recycling_fee_power_kw,
+            SpecPowertrain.recycling_fee_power_source,
             SpecVehicleAttributes.vehicle_class,
+            SpecVehicleAttributes.vehicle_technical_category,
             SpecVehicleAttributes.body_type,
             SpecVehicleAttributes.seat_count_min,
             SpecVehicleAttributes.seat_count_max,
@@ -494,6 +558,11 @@ def main() -> int:
                         args.calculation_date,
                         rates,
                         classification,
+                        personal_use=(
+                            args.individual_personal_use
+                            if importer == ImporterType.INDIVIDUAL
+                            else False
+                        ),
                     )
                     calculations.append(calculation)
                     payments.extend(scenario_payments)

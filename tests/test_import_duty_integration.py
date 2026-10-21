@@ -26,7 +26,11 @@ def database_row(**overrides):
         "engine_displacement_ml": 2000,
         "engine_power_hp": Decimal("150"),
         "motor_total_power_kw": None,
+        "recycling_fee_powertrain_type": "ICE",
+        "recycling_fee_power_kw": Decimal("110"),
+        "recycling_fee_power_source": "ENGINE_POWER_KW",
         "vehicle_class": "MIDSIZE_CAR",
+        "vehicle_technical_category": "M1",
         "body_type": "SEDAN",
         "seat_count_min": 5,
         "seat_count_max": 5,
@@ -168,6 +172,22 @@ class ImportDutyClassificationIntegrationTests(unittest.TestCase):
         self.assertIn(
             "INCOMPLETE_CUSTOMS_VALUE",
             {warning["code"] for warning in calculation["warnings_json"]},
+        )
+
+    def test_recycling_fee_is_added_as_separate_payment(self):
+        _, payments = make_rows(
+            database_row(year=2026),
+            ImporterType.INDIVIDUAL,
+            CALCULATION_DATE,
+            RATES,
+        )
+
+        fee = next(p for p in payments if p["payment_type"] == "RECYCLING_FEE")
+        self.assertEqual(fee["status"], "CALCULATED")
+        self.assertEqual(fee["amount_rub"], Decimal("3400.00"))
+        self.assertEqual(
+            fee["details_json"]["field_labels"]["recycling_fee_rub"],
+            "Утилизационный сбор, RUB",
         )
 
     def test_customs_fee_reports_missing_value_without_vehicle_price(self):
