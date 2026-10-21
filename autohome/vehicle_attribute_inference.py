@@ -13,7 +13,7 @@ from autohome.import_duty.classifier import (
 from autohome.import_duty.types import ClassificationStatus
 
 
-VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-21-v5"
+VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-21-v6"
 INFERRED_INPUTS_USED = "INFERRED_INPUTS_USED"
 TRUCK_OCCUPANT_MASS_KG = 65
 INFERRED_MASS_CATEGORY_GUARD_KG = 100
@@ -184,6 +184,7 @@ GOODS_TRANSPORT_MARKERS = (
     "栏板",
     "仓栅",
 )
+COMMERCIAL_CAB_BODY_TYPES = frozenset({"PICKUP", "TRUCK", "VAN"})
 
 
 PARAMETER_INFERENCE_RULES = (
@@ -581,6 +582,60 @@ def _name_marker_evidence(
     return tuple(evidence)
 
 
+def infer_cab_attributes(
+    *,
+    body_type: str | None,
+    vehicle_class: str | None,
+    spec_name: str | None,
+    series_name: str | None,
+) -> tuple[dict[str, InferenceDecision], tuple[str, ...]]:
+    """Вывести признаки заднего ряда из названия кабины коммерческого ТС."""
+    commercial_vehicle = (
+        body_type in COMMERCIAL_CAB_BODY_TYPES
+        or vehicle_class in VAN_CLASSES | PICKUP_CLASSES | TRUCK_CLASSES
+    )
+    if not commercial_vehicle:
+        return {}, ()
+
+    single_cab_evidence = _name_marker_evidence(
+        "单排",
+        spec_name=spec_name,
+        series_name=series_name,
+    )
+    double_cab_evidence = _name_marker_evidence(
+        "双排",
+        spec_name=spec_name,
+        series_name=series_name,
+    )
+    if single_cab_evidence and double_cab_evidence:
+        return {}, ("CONFLICTING_CAB_LAYOUT_MARKERS",)
+    if single_cab_evidence:
+        return {
+            "has_permanent_rear_seats": InferenceDecision(
+                value=False,
+                rule_code="NO_REAR_SEATS_FROM_SINGLE_ROW_CAB",
+                confidence=InferenceConfidence.HIGH,
+                evidence=single_cab_evidence,
+            )
+        }, ()
+    if double_cab_evidence:
+        return {
+            "has_permanent_rear_seats": InferenceDecision(
+                value=True,
+                rule_code="REAR_SEATS_FROM_DOUBLE_ROW_CAB",
+                confidence=InferenceConfidence.HIGH,
+                evidence=double_cab_evidence,
+            ),
+            "has_rear_side_windows": InferenceDecision(
+                value=True,
+                rule_code="REAR_SIDE_WINDOWS_FROM_DOUBLE_ROW_CAB",
+                confidence=InferenceConfidence.HIGH,
+                evidence=double_cab_evidence,
+            ),
+        }, ()
+    return {}, ()
+
+
 def _is_passenger_class(vehicle_class: str | None) -> bool:
     return bool(
         vehicle_class
@@ -887,6 +942,14 @@ def infer_vehicle_attributes(
 ) -> VehicleAttributeInferenceResult:
     """Выполнить все косвенные правила для одной комплектации."""
     decisions = infer_parameter_attributes(parameters, body_type=body_type)
+    cab_decisions, cab_warnings = infer_cab_attributes(
+        body_type=body_type,
+        vehicle_class=vehicle_class,
+        spec_name=spec_name,
+        series_name=series_name,
+    )
+    for field_name, decision in cab_decisions.items():
+        decisions.setdefault(field_name, decision)
     inferred_gross_mass = infer_commercial_gross_mass(
         body_type=body_type,
         gross_mass_kg=gross_mass_kg,
@@ -899,10 +962,11 @@ def infer_vehicle_attributes(
     )
     if inferred_gross_mass is not None:
         decisions["gross_mass_kg"] = inferred_gross_mass
-    purpose, warnings = infer_vehicle_purpose(
+    purpose, purpose_warnings = infer_vehicle_purpose(
         spec_name=spec_name,
         series_name=series_name,
     )
+    warnings = (*cab_warnings, *purpose_warnings)
     if purpose is not None:
         decisions["vehicle_purpose_type"] = purpose
         assert isinstance(purpose.value, VehiclePurposeType)

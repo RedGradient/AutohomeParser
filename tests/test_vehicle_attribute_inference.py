@@ -189,6 +189,94 @@ class ConstructiveAttributeInferenceTests(unittest.TestCase):
 
         self.assertIsNone(result.value("has_rear_windowed_door"))
 
+    def test_single_row_cab_proves_absence_of_rear_seats(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="TRUCK",
+            vehicle_class="LIGHT_TRUCK",
+            spec_name="2025款 4.5吨长轴单排底盘",
+        )
+
+        decision = result.decisions["has_permanent_rear_seats"]
+        self.assertIs(decision.value, False)
+        self.assertEqual(
+            decision.rule_code,
+            "NO_REAR_SEATS_FROM_SINGLE_ROW_CAB",
+        )
+        self.assertEqual(decision.evidence[0].marker, "单排")
+
+    def test_double_row_cab_proves_rear_seats_and_side_windows(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="PICKUP",
+            vehicle_class="PICKUP",
+            series_name="测试双排皮卡",
+        )
+
+        self.assertIs(result.value("has_permanent_rear_seats"), True)
+        self.assertIs(result.value("has_rear_side_windows"), True)
+        self.assertEqual(
+            result.decisions["has_permanent_rear_seats"].rule_code,
+            "REAR_SEATS_FROM_DOUBLE_ROW_CAB",
+        )
+        self.assertEqual(
+            result.decisions["has_rear_side_windows"].rule_code,
+            "REAR_SIDE_WINDOWS_FROM_DOUBLE_ROW_CAB",
+        )
+
+    def test_parameter_evidence_has_priority_over_single_row_cab_name(self):
+        result = infer_vehicle_attributes(
+            [
+                parameter(
+                    "后排座椅放倒形式",
+                    sublist=[{"name": "比例放倒", "value": "●"}],
+                )
+            ],
+            body_type="TRUCK",
+            vehicle_class="LIGHT_TRUCK",
+            spec_name="测试单排底盘",
+        )
+
+        self.assertIs(result.value("has_permanent_rear_seats"), True)
+        self.assertEqual(
+            result.decisions["has_permanent_rear_seats"].rule_code,
+            "REAR_SEAT_FOLDING_PRESENT",
+        )
+
+    def test_one_and_half_row_cab_is_not_inferred(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="TRUCK",
+            vehicle_class="LIGHT_TRUCK",
+            spec_name="测试排半驾驶室",
+        )
+
+        self.assertIsNone(result.value("has_permanent_rear_seats"))
+
+    def test_conflicting_cab_markers_are_left_unknown(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="TRUCK",
+            vehicle_class="LIGHT_TRUCK",
+            spec_name="测试单排底盘",
+            series_name="测试双排系列",
+        )
+
+        self.assertIsNone(result.value("has_permanent_rear_seats"))
+        self.assertIsNone(result.value("has_rear_side_windows"))
+        self.assertIn("CONFLICTING_CAB_LAYOUT_MARKERS", result.warnings)
+
+    def test_cab_marker_is_ignored_for_non_commercial_vehicle(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="SEDAN",
+            vehicle_class="MIDSIZE_CAR",
+            spec_name="测试双排版本",
+        )
+
+        self.assertIsNone(result.value("has_permanent_rear_seats"))
+        self.assertIsNone(result.value("has_rear_side_windows"))
+
 
 class PurposeInferenceTests(unittest.TestCase):
     def test_8705_markers_set_special_purpose(self):
