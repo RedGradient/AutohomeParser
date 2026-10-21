@@ -841,6 +841,52 @@ class InferencePersistenceTests(unittest.TestCase):
             "TRUCK_GROSS_MASS_FROM_SPEC_NAME",
         )
 
+    def test_infers_gross_mass_when_chassis_modifiers_follow_tonnage(self):
+        cases = {
+            "2025款 3.0T 手动4.5吨长轴单排底盘": 4500,
+            "2021款 3.0T 自动5.5吨短轴双排底盘": 5500,
+            "2021款 3.0T 7吨超长轴单排底盘": 7000,
+        }
+        for spec_name, expected in cases.items():
+            with self.subTest(spec_name=spec_name):
+                row = apply_vehicle_attribute_inference(
+                    self.base_row(),
+                    [],
+                    spec_name=spec_name,
+                )
+                self.assertEqual(row["gross_mass_kg"], expected)
+                self.assertEqual(
+                    row["inference_details_json"]["decisions"]["gross_mass_kg"][
+                        "rule_code"
+                    ],
+                    "TRUCK_GROSS_MASS_FROM_SPEC_NAME",
+                )
+
+    def test_series_name_is_used_when_spec_name_has_no_chassis_tonnage(self):
+        row = apply_vehicle_attribute_inference(
+            self.base_row(),
+            [],
+            spec_name="2025款 标准版",
+            series_name="测试4.2吨长轴底盘",
+        )
+
+        self.assertEqual(row["gross_mass_kg"], 4200)
+        self.assertEqual(
+            row["inference_details_json"]["decisions"]["gross_mass_kg"][
+                "rule_code"
+            ],
+            "TRUCK_GROSS_MASS_FROM_SERIES_NAME",
+        )
+
+    def test_payload_tonnage_without_chassis_context_is_not_gross_mass(self):
+        row = apply_vehicle_attribute_inference(
+            self.base_row(),
+            [],
+            spec_name="2025款 载重4.5吨厢式货车",
+        )
+
+        self.assertIsNone(row["gross_mass_kg"])
+
     def test_does_not_infer_truck_gross_mass_from_ranges(self):
         row = apply_vehicle_attribute_inference(
             self.base_row(

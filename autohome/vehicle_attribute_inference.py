@@ -13,12 +13,13 @@ from autohome.import_duty.classifier import (
 from autohome.import_duty.types import ClassificationStatus
 
 
-VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-21-v8"
+VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-21-v9"
 INFERRED_INPUTS_USED = "INFERRED_INPUTS_USED"
 TRUCK_OCCUPANT_MASS_KG = 65
 INFERRED_MASS_CATEGORY_GUARD_KG = 100
 TRUCK_GROSS_MASS_NAME_RE = re.compile(
-    r"(?<![\d.])(?P<tonnes>\d{1,2}(?:\.\d+)?)吨(?=(?:底盘|级|加|\s|$))"
+    r"(?<![\d.])(?P<tonnes>\d{1,2}(?:\.\d+)?)吨"
+    r"(?=(?:底盘|级|加|\s|$)|[^吨]{0,24}底盘)"
 )
 SEAT_COUNT_NAME_RE = re.compile(
     r"(?<!\d)(?P<values>\d{1,2}(?:\s*(?:[/／、,，]|[-–—~至])\s*\d{1,2})*)\s*座"
@@ -946,27 +947,40 @@ def infer_commercial_gross_mass(
     seat_count_min: int | None,
     seat_count_max: int | None,
     spec_name: str | None,
+    series_name: str | None,
 ) -> InferenceDecision | None:
     """Восстановить полную массу грузовика или пикапа по точным компонентам."""
     if body_type not in {"TRUCK", "PICKUP"} or gross_mass_kg is not None:
         return None
 
     if body_type == "TRUCK":
-        raw_name = _text(spec_name)
-        name_match = TRUCK_GROSS_MASS_NAME_RE.search(raw_name)
-        if name_match is not None:
-            try:
-                mass = Decimal(name_match.group("tonnes")) * 1000
-            except InvalidOperation:
-                mass = Decimal(0)
-            if 500 <= mass <= 100_000 and mass == mass.to_integral_value():
+        for source, raw_name, source_code in (
+            ("specs.raw_json.name", _text(spec_name), "SPEC"),
+            ("series.raw_json.name", _text(series_name), "SERIES"),
+        ):
+            matches = list(TRUCK_GROSS_MASS_NAME_RE.finditer(raw_name))
+            masses = set()
+            for name_match in matches:
+                try:
+                    mass = Decimal(name_match.group("tonnes")) * 1000
+                except InvalidOperation:
+                    continue
+                if 500 <= mass <= 100_000 and mass == mass.to_integral_value():
+                    masses.add(int(mass))
+            if len(masses) == 1:
+                mass = masses.pop()
+                name_match = next(
+                    match
+                    for match in matches
+                    if Decimal(match.group("tonnes")) * 1000 == mass
+                )
                 return InferenceDecision(
-                    value=int(mass),
-                    rule_code="TRUCK_GROSS_MASS_FROM_SPEC_NAME",
+                    value=mass,
+                    rule_code=f"TRUCK_GROSS_MASS_FROM_{source_code}_NAME",
                     confidence=InferenceConfidence.HIGH,
                     evidence=(
                         InferenceEvidence(
-                            source="specs.raw_json.name",
+                            source=source,
                             marker=name_match.group(0),
                             raw_value=raw_name,
                         ),
@@ -1076,6 +1090,7 @@ def infer_vehicle_attributes(
         seat_count_min=seat_count_min,
         seat_count_max=seat_count_max,
         spec_name=spec_name,
+        series_name=series_name,
     )
     if inferred_gross_mass is not None:
         decisions["gross_mass_kg"] = inferred_gross_mass
