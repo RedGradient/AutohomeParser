@@ -511,6 +511,78 @@ class InferencePersistenceTests(unittest.TestCase):
 
         self.assertIsNone(row["gross_mass_kg"])
 
+    def test_infers_pickup_gross_mass_from_exact_components(self):
+        row = apply_vehicle_attribute_inference(
+            self.base_row(
+                body_type="PICKUP",
+                vehicle_class="PICKUP",
+                curb_mass_kg=1900,
+                payload_kg_min=1000,
+                payload_kg_max=1000,
+                seat_count_min=5,
+                seat_count_max=5,
+                wheelbase_mm=3200,
+                cargo_length_min_mm=1600,
+                cargo_length_max_mm=1600,
+            ),
+            [],
+        )
+
+        self.assertEqual(row["gross_mass_kg"], 3225)
+        self.assertEqual(row["vehicle_technical_category"], "N1")
+        decision = row["inference_details_json"]["decisions"]["gross_mass_kg"]
+        self.assertEqual(
+            decision["rule_code"],
+            "PICKUP_GROSS_MASS_FROM_CURB_PAYLOAD_AND_SEATS",
+        )
+        self.assertEqual(decision["confidence"], "MEDIUM")
+
+    def test_pickup_near_mass_boundary_keeps_mass_but_not_category(self):
+        row = apply_vehicle_attribute_inference(
+            self.base_row(
+                body_type="PICKUP",
+                vehicle_class="PICKUP",
+                curb_mass_kg=2500,
+                payload_kg_min=870,
+                payload_kg_max=870,
+                seat_count_min=2,
+                seat_count_max=2,
+                wheelbase_mm=3200,
+                cargo_length_min_mm=1800,
+                cargo_length_max_mm=1800,
+            ),
+            [],
+        )
+
+        self.assertEqual(row["gross_mass_kg"], 3500)
+        self.assertIsNone(row.get("vehicle_technical_category"))
+        details = row["inference_details_json"]["vehicle_technical_category"]
+        self.assertEqual(details["status"], "MANUAL_REVIEW")
+        self.assertEqual(
+            details["reason"],
+            "INFERRED_GROSS_MASS_NEAR_CATEGORY_BOUNDARY",
+        )
+
+    def test_explicit_pickup_mass_at_boundary_assigns_category(self):
+        row = apply_vehicle_attribute_inference(
+            self.base_row(
+                body_type="PICKUP",
+                vehicle_class="PICKUP",
+                gross_mass_kg=3500,
+                curb_mass_kg=2500,
+                payload_kg_min=870,
+                payload_kg_max=870,
+                seat_count_min=2,
+                seat_count_max=2,
+                wheelbase_mm=3200,
+                cargo_length_min_mm=1800,
+                cargo_length_max_mm=1800,
+            ),
+            [],
+        )
+
+        self.assertEqual(row["vehicle_technical_category"], "N1")
+
 
 class OrdinaryTransportInferenceAdditionalTests(unittest.TestCase):
     def test_bus_seat_count_proves_ordinary_passenger_transport(self):

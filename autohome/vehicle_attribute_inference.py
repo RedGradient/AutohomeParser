@@ -13,9 +13,10 @@ from autohome.import_duty.classifier import (
 from autohome.import_duty.types import ClassificationStatus
 
 
-VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-21-v3"
+VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-21-v4"
 INFERRED_INPUTS_USED = "INFERRED_INPUTS_USED"
 TRUCK_OCCUPANT_MASS_KG = 65
+INFERRED_MASS_CATEGORY_GUARD_KG = 100
 TRUCK_GROSS_MASS_NAME_RE = re.compile(
     r"(?<![\d.])(?P<tonnes>\d{1,2}(?:\.\d+)?)吨(?=(?:底盘|级|加|\s|$))"
 )
@@ -779,7 +780,7 @@ def infer_ordinary_transport(
     return None
 
 
-def infer_truck_gross_mass(
+def infer_commercial_gross_mass(
     *,
     body_type: str | None,
     gross_mass_kg: int | None,
@@ -790,30 +791,31 @@ def infer_truck_gross_mass(
     seat_count_max: int | None,
     spec_name: str | None,
 ) -> InferenceDecision | None:
-    """Восстановить полную массу грузовика без замены прямого значения."""
-    if body_type != "TRUCK" or gross_mass_kg is not None:
+    """Восстановить полную массу грузовика или пикапа по точным компонентам."""
+    if body_type not in {"TRUCK", "PICKUP"} or gross_mass_kg is not None:
         return None
 
-    raw_name = _text(spec_name)
-    name_match = TRUCK_GROSS_MASS_NAME_RE.search(raw_name)
-    if name_match is not None:
-        try:
-            mass = Decimal(name_match.group("tonnes")) * 1000
-        except InvalidOperation:
-            mass = Decimal(0)
-        if 500 <= mass <= 100_000 and mass == mass.to_integral_value():
-            return InferenceDecision(
-                value=int(mass),
-                rule_code="TRUCK_GROSS_MASS_FROM_SPEC_NAME",
-                confidence=InferenceConfidence.HIGH,
-                evidence=(
-                    InferenceEvidence(
-                        source="specs.raw_json.name",
-                        marker=name_match.group(0),
-                        raw_value=raw_name,
+    if body_type == "TRUCK":
+        raw_name = _text(spec_name)
+        name_match = TRUCK_GROSS_MASS_NAME_RE.search(raw_name)
+        if name_match is not None:
+            try:
+                mass = Decimal(name_match.group("tonnes")) * 1000
+            except InvalidOperation:
+                mass = Decimal(0)
+            if 500 <= mass <= 100_000 and mass == mass.to_integral_value():
+                return InferenceDecision(
+                    value=int(mass),
+                    rule_code="TRUCK_GROSS_MASS_FROM_SPEC_NAME",
+                    confidence=InferenceConfidence.HIGH,
+                    evidence=(
+                        InferenceEvidence(
+                            source="specs.raw_json.name",
+                            marker=name_match.group(0),
+                            raw_value=raw_name,
+                        ),
                     ),
-                ),
-            )
+                )
 
     exact_inputs = (
         curb_mass_kg is not None
@@ -837,7 +839,11 @@ def infer_truck_gross_mass(
     )
     return InferenceDecision(
         value=inferred_mass,
-        rule_code="TRUCK_GROSS_MASS_FROM_CURB_PAYLOAD_AND_SEATS",
+        rule_code=(
+            "PICKUP_GROSS_MASS_FROM_CURB_PAYLOAD_AND_SEATS"
+            if body_type == "PICKUP"
+            else "TRUCK_GROSS_MASS_FROM_CURB_PAYLOAD_AND_SEATS"
+        ),
         confidence=InferenceConfidence.MEDIUM,
         evidence=(
             _normalized_evidence("curb_mass_kg", curb_mass_kg),
@@ -881,7 +887,7 @@ def infer_vehicle_attributes(
 ) -> VehicleAttributeInferenceResult:
     """Выполнить все косвенные правила для одной комплектации."""
     decisions = infer_parameter_attributes(parameters, body_type=body_type)
-    inferred_gross_mass = infer_truck_gross_mass(
+    inferred_gross_mass = infer_commercial_gross_mass(
         body_type=body_type,
         gross_mass_kg=gross_mass_kg,
         curb_mass_kg=curb_mass_kg,
@@ -1003,6 +1009,15 @@ def infer_vehicle_attributes(
         )
     )
     technical_category = None
+    inferred_mass_near_category_boundary = (
+        body_type == "PICKUP"
+        and inferred_gross_mass is not None
+        and any(
+            abs(int(inferred_gross_mass.value) - boundary)
+            <= INFERRED_MASS_CATEGORY_GUARD_KG
+            for boundary in (3500, 12000)
+        )
+    )
     if technical_classification.status == ClassificationStatus.CLASSIFIED:
         if technical_classification.tnved_heading == "8703":
             technical_category = VehicleTechnicalCategory.M1
@@ -1018,6 +1033,7 @@ def infer_vehicle_attributes(
         elif (
             technical_classification.tnved_heading == "8704"
             and effective_gross_mass is not None
+            and not inferred_mass_near_category_boundary
         ):
             if effective_gross_mass <= 3500:
                 technical_category = VehicleTechnicalCategory.N1
@@ -1058,6 +1074,10 @@ def infer_vehicle_attributes(
         category_status = ClassificationStatus.MISSING_DATA
         category_missing_fields = ["gross_mass_kg"]
         category_reason = "TECHNICAL_CATEGORY_REQUIRES_GROSS_MASS"
+    elif inferred_mass_near_category_boundary:
+        category_status = ClassificationStatus.MANUAL_REVIEW
+        category_missing_fields = []
+        category_reason = "INFERRED_GROSS_MASS_NEAR_CATEGORY_BOUNDARY"
     technical_category_details = {
         "status": category_status.value,
         "tnved_heading": technical_classification.tnved_heading,
