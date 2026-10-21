@@ -146,6 +146,34 @@ class CargoDimensionTests(unittest.TestCase):
         self.assertTrue(all(value is None for value in result.values()))
         self.assertEqual(warnings[0]["code"], "INVALID_CARGO_DIMENSIONS")
 
+    def test_leading_comma_is_safely_removed(self):
+        warnings = []
+
+        result = parse_cargo_dimensions(",4050×1850×400", warnings)
+
+        self.assertEqual(result["cargo_length_min_mm"], 4050)
+        self.assertEqual(result["cargo_width_min_mm"], 1850)
+        self.assertEqual(result["cargo_height_min_mm"], 400)
+        self.assertEqual(warnings[0]["code"], "SANITIZED_CARGO_DIMENSIONS")
+
+    def test_trailing_separator_is_safely_removed(self):
+        warnings = []
+
+        result = parse_cargo_dimensions("3050x1500x360x", warnings)
+
+        self.assertEqual(result["cargo_length_max_mm"], 3050)
+        self.assertEqual(result["cargo_width_max_mm"], 1500)
+        self.assertEqual(result["cargo_height_max_mm"], 360)
+        self.assertEqual(warnings[0]["code"], "SANITIZED_CARGO_DIMENSIONS")
+
+    def test_fused_dimensions_are_not_guessed(self):
+        warnings = []
+
+        result = parse_cargo_dimensions("1510x1562475", warnings)
+
+        self.assertTrue(all(value is None for value in result.values()))
+        self.assertEqual(warnings[0]["code"], "INVALID_CARGO_DIMENSIONS")
+
 
 class VehicleAttributesNormalizerTests(unittest.TestCase):
     def test_normalizes_complete_passenger_vehicle(self):

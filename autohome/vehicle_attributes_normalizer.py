@@ -8,7 +8,7 @@ from typing import Any, Mapping
 from autohome.translator import translate_vehicle_attribute_code
 
 
-NORMALIZATION_VERSION = 3
+NORMALIZATION_VERSION = 4
 EMPTY_VALUES = {
     None,
     "",
@@ -231,7 +231,10 @@ def parse_cargo_dimensions(
     text = clean_text(value)
     if text is None:
         return empty
-    parts = DIMENSION_SEPARATOR_RE.split(text)
+    normalized_text = re.sub(r"^[,，]\s*", "", text)
+    normalized_text = re.sub(r"\s*[xX×*]\s*$", "", normalized_text)
+    was_sanitized = normalized_text != text
+    parts = DIMENSION_SEPARATOR_RE.split(normalized_text)
     if len(parts) != 3 or any(not part.strip() for part in parts):
         warnings.append(warning("INVALID_CARGO_DIMENSIONS", "cargo_dimensions", text))
         return empty
@@ -251,6 +254,10 @@ def parse_cargo_dimensions(
             return empty
         result[f"cargo_{name}_min_mm"] = minimum
         result[f"cargo_{name}_max_mm"] = maximum
+    if was_sanitized:
+        warnings.append(
+            warning("SANITIZED_CARGO_DIMENSIONS", "cargo_dimensions", text)
+        )
     return result
 
 
