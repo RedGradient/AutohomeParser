@@ -6,7 +6,7 @@ from typing import Any, Mapping
 from .types import ClassificationStatus
 
 
-CLASSIFICATION_RULES_VERSION = "RU-EAEU-VEHICLE-CLASSIFICATION-2026-10-20-v3"
+CLASSIFICATION_RULES_VERSION = "RU-EAEU-VEHICLE-CLASSIFICATION-2026-10-21-v4"
 PICKUP_CLASSIFICATION_SOURCE = "https://adilet.zan.kz/rus/docs/H11T0000751"
 PICKUP_DRIVER_MASS_KG = 75
 PICKUP_PASSENGER_MASS_KG = 68
@@ -53,6 +53,8 @@ class VehicleClassificationInput:
     seat_count_max: int | None = None
     gross_mass_kg: int | None = None
     curb_mass_kg: int | None = None
+    curb_mass_kg_min: int | None = None
+    curb_mass_kg_max: int | None = None
     payload_kg_min: int | None = None
     payload_kg_max: int | None = None
     length_mm: int | None = None
@@ -296,22 +298,34 @@ def _classify_pickup(
         elif cargo_max * 2 > wheelbase:
             ambiguous.append("cargo_length_mm")
 
+    curb_mass_min = (
+        values.curb_mass_kg
+        if values.curb_mass_kg is not None
+        else values.curb_mass_kg_min
+    )
+    curb_mass_max = (
+        values.curb_mass_kg
+        if values.curb_mass_kg is not None
+        else values.curb_mass_kg_max
+    )
     mass_fields = (
         values.gross_mass_kg,
-        values.curb_mass_kg,
+        curb_mass_min,
+        curb_mass_max,
         values.seat_count_min,
         values.seat_count_max,
     )
     if all(value is not None for value in mass_fields):
         gross_mass = values.gross_mass_kg
-        curb_mass = values.curb_mass_kg
         seat_min = values.seat_count_min
         seat_max = values.seat_count_max
-        assert gross_mass is not None and curb_mass is not None
+        assert gross_mass is not None
+        assert curb_mass_min is not None and curb_mass_max is not None
         assert seat_min is not None and seat_max is not None
         if (
-            curb_mass <= 0
-            or gross_mass <= curb_mass
+            curb_mass_min <= 0
+            or curb_mass_max < curb_mass_min
+            or gross_mass <= curb_mass_max
             or seat_min <= 0
             or seat_max < seat_min
         ):
@@ -325,23 +339,24 @@ def _classify_pickup(
             )
         else:
             # В Решении № 751 масса M включает водителя массой 75 кг.
-            decision_curb_mass = curb_mass + PICKUP_DRIVER_MASS_KG
-
-            def goods_capacity_exceeds_passenger_capacity(seats: int) -> bool:
+            def goods_capacity_exceeds_passenger_capacity(
+                curb_mass: int,
+                seats: int,
+            ) -> bool:
                 passengers = max(seats - 1, 0)
                 passenger_mass = passengers * PICKUP_PASSENGER_MASS_KG
+                decision_curb_mass = curb_mass + PICKUP_DRIVER_MASS_KG
                 return (
                     gross_mass - (decision_curb_mass + passenger_mass)
                     > passenger_mass
                 )
 
-            formula_true_for_min = goods_capacity_exceeds_passenger_capacity(
-                seat_min
-            )
-            formula_true_for_max = goods_capacity_exceeds_passenger_capacity(
-                seat_max
-            )
-            if formula_true_for_max:
+            outcomes = {
+                goods_capacity_exceeds_passenger_capacity(curb_mass, seats)
+                for curb_mass in {curb_mass_min, curb_mass_max}
+                for seats in {seat_min, seat_max}
+            }
+            if outcomes == {True}:
                 passengers = max(seat_max - 1, 0)
                 return _result(
                     ClassificationStatus.CLASSIFIED,
@@ -350,13 +365,29 @@ def _classify_pickup(
                     source=source,
                     formula="P - (M + N * 68) > N * 68",
                     gross_mass_kg=gross_mass,
-                    source_curb_mass_kg=curb_mass,
-                    decision_curb_mass_kg=decision_curb_mass,
+                    source_curb_mass_kg_min=curb_mass_min,
+                    source_curb_mass_kg_max=curb_mass_max,
+                    decision_curb_mass_kg_min=(
+                        curb_mass_min + PICKUP_DRIVER_MASS_KG
+                    ),
+                    decision_curb_mass_kg_max=(
+                        curb_mass_max + PICKUP_DRIVER_MASS_KG
+                    ),
+                    **(
+                        {
+                            "source_curb_mass_kg": curb_mass_min,
+                            "decision_curb_mass_kg": (
+                                curb_mass_min + PICKUP_DRIVER_MASS_KG
+                            ),
+                        }
+                        if curb_mass_min == curb_mass_max
+                        else {}
+                    ),
                     passenger_seat_count=passengers,
                     passenger_mass_kg=passengers * PICKUP_PASSENGER_MASS_KG,
                 )
-            if formula_true_for_min != formula_true_for_max:
-                ambiguous.append("seat_count")
+            if len(outcomes) > 1:
+                ambiguous.append("curb_mass_or_seat_count")
 
     if invalid:
         return _result(
@@ -376,7 +407,6 @@ def _classify_pickup(
     required = (
         "axle_count",
         "gross_mass_kg",
-        "curb_mass_kg",
         "seat_count_min",
         "seat_count_max",
         "wheelbase_mm",
@@ -384,6 +414,8 @@ def _classify_pickup(
         "cargo_length_max_mm",
     )
     missing = [name for name in required if getattr(values, name) is None]
+    if curb_mass_min is None or curb_mass_max is None:
+        missing.append("curb_mass_kg")
     if missing:
         return _result(
             ClassificationStatus.MISSING_DATA,

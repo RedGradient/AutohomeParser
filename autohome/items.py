@@ -180,6 +180,8 @@ class SpecVehicleAttributesItem(scrapy.Item):
     seat_count_max = scrapy.Field()
     door_count = scrapy.Field()
     curb_mass_kg = scrapy.Field()
+    curb_mass_kg_min = scrapy.Field()
+    curb_mass_kg_max = scrapy.Field()
     gross_mass_kg = scrapy.Field()
     payload_kg_min = scrapy.Field()
     payload_kg_max = scrapy.Field()

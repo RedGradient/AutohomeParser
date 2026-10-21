@@ -8,7 +8,7 @@ from typing import Any, Mapping
 from autohome.translator import translate_vehicle_attribute_code
 
 
-NORMALIZATION_VERSION = 2
+NORMALIZATION_VERSION = 3
 EMPTY_VALUES = {
     None,
     "",
@@ -342,6 +342,9 @@ def normalize_vehicle_attributes(
     payload_min, payload_max = parse_integer_range(
         values.get("payload_kg"), "payload_kg", warnings
     )
+    curb_mass_min, curb_mass_max = parse_integer_range(
+        values.get("curb_mass_kg"), "curb_mass_kg", warnings
+    )
 
     row: dict[str, Any] = {
         "spec_id": spec_id,
@@ -360,9 +363,11 @@ def normalize_vehicle_attributes(
         "door_count": parse_doors(
             values.get("door_count"), body_description, warnings
         ),
-        "curb_mass_kg": parse_single_integer(
-            values.get("curb_mass_kg"), "curb_mass_kg", warnings
+        "curb_mass_kg": (
+            curb_mass_min if curb_mass_min == curb_mass_max else None
         ),
+        "curb_mass_kg_min": curb_mass_min,
+        "curb_mass_kg_max": curb_mass_max,
         "gross_mass_kg": parse_single_integer(
             values.get("gross_mass_kg"), "gross_mass_kg", warnings
         ),

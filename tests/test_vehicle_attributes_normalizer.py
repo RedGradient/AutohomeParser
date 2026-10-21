@@ -172,6 +172,8 @@ class VehicleAttributesNormalizerTests(unittest.TestCase):
         self.assertEqual(row["seat_count_max"], 5)
         self.assertEqual(row["door_count"], 5)
         self.assertEqual(row["curb_mass_kg"], 1980)
+        self.assertEqual(row["curb_mass_kg_min"], 1980)
+        self.assertEqual(row["curb_mass_kg_max"], 1980)
         self.assertTrue(row["is_four_wheel_drive"])
         self.assertTrue(row["is_complete"])
         self.assertEqual(row["normalization_version"], NORMALIZATION_VERSION)
@@ -205,8 +207,10 @@ class VehicleAttributesNormalizerTests(unittest.TestCase):
         )
 
         self.assertIsNone(row["curb_mass_kg"])
+        self.assertEqual(row["curb_mass_kg_min"], 1980)
+        self.assertEqual(row["curb_mass_kg_max"], 2035)
         self.assertIn(
-            "INVALID_INTEGER", {item["code"] for item in row["warnings_json"]}
+            "MULTIPLE_VALUES", {item["code"] for item in row["warnings_json"]}
         )
 
     def test_missing_common_classification_fields_are_reported(self):

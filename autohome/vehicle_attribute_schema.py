@@ -6,6 +6,8 @@ from autohome.models import Base
 
 
 INFERENCE_COLUMNS = {
+    "curb_mass_kg_min": "INTEGER",
+    "curb_mass_kg_max": "INTEGER",
     "vehicle_technical_category": "VARCHAR(10)",
     "vehicle_purpose_type": "VARCHAR(50)",
     "inference_details_json": "JSON",

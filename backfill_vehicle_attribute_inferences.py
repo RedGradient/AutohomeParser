@@ -69,6 +69,8 @@ INFERENCE_STORAGE_FIELDS = (
     "missing_fields_json",
 )
 OPTIONAL_EXISTING_FIELDS = (
+    "curb_mass_kg_min",
+    "curb_mass_kg_max",
     "vehicle_technical_category",
     "vehicle_purpose_type",
     "inference_details_json",

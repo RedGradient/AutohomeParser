@@ -197,6 +197,37 @@ class VehicleClassifierTests(unittest.TestCase):
             "PICKUP_GOODS_CAPACITY_EXCEEDS_PASSENGER_CAPACITY",
         )
 
+    def test_pickup_curb_mass_range_classifies_when_all_variants_agree(self):
+        result = classify(
+            body_type="PICKUP",
+            vehicle_class="PICKUP",
+            seat_count_min=5,
+            seat_count_max=5,
+            gross_mass_kg=3200,
+            curb_mass_kg_min=1800,
+            curb_mass_kg_max=1850,
+        )
+
+        self.assertEqual(result.status, ClassificationStatus.CLASSIFIED)
+        self.assertEqual(result.tnved_heading, "8704")
+
+    def test_pickup_curb_mass_range_requires_review_when_variants_disagree(self):
+        result = classify(
+            body_type="PICKUP",
+            vehicle_class="PICKUP",
+            seat_count_min=5,
+            seat_count_max=5,
+            gross_mass_kg=2500,
+            curb_mass_kg_min=1800,
+            curb_mass_kg_max=2000,
+        )
+
+        self.assertEqual(result.status, ClassificationStatus.AMBIGUOUS)
+        self.assertIn(
+            "curb_mass_or_seat_count",
+            result.details["ambiguous_fields"],
+        )
+
     def test_pickup_with_all_8704_conditions_false_is_8703(self):
         result = classify(
             body_type="PICKUP",

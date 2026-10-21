@@ -13,7 +13,7 @@ from autohome.import_duty.classifier import (
 from autohome.import_duty.types import ClassificationStatus
 
 
-VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-21-v10"
+VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-21-v11"
 INFERRED_INPUTS_USED = "INFERRED_INPUTS_USED"
 TRUCK_OCCUPANT_MASS_KG = 65
 INFERRED_MASS_CATEGORY_GUARD_KG = 100
@@ -1067,6 +1067,8 @@ def infer_vehicle_attributes(
     seat_count_min: int | None = None,
     seat_count_max: int | None = None,
     curb_mass_kg: int | None = None,
+    curb_mass_kg_min: int | None = None,
+    curb_mass_kg_max: int | None = None,
     gross_mass_kg: int | None = None,
     payload_kg_min: int | None = None,
     payload_kg_max: int | None = None,
@@ -1260,6 +1262,8 @@ def infer_vehicle_attributes(
             seat_count_max=seat_count_max,
             gross_mass_kg=effective_gross_mass,
             curb_mass_kg=curb_mass_kg,
+            curb_mass_kg_min=curb_mass_kg_min,
+            curb_mass_kg_max=curb_mass_kg_max,
             payload_kg_min=payload_kg_min,
             payload_kg_max=payload_kg_max,
             length_mm=length_mm,
@@ -1415,6 +1419,8 @@ def apply_vehicle_attribute_inference(
         seat_count_min=inference_input.get("seat_count_min"),
         seat_count_max=inference_input.get("seat_count_max"),
         curb_mass_kg=inference_input.get("curb_mass_kg"),
+        curb_mass_kg_min=inference_input.get("curb_mass_kg_min"),
+        curb_mass_kg_max=inference_input.get("curb_mass_kg_max"),
         gross_mass_kg=inference_input.get("gross_mass_kg"),
         payload_kg_min=inference_input.get("payload_kg_min"),
         payload_kg_max=inference_input.get("payload_kg_max"),

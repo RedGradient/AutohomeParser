@@ -300,6 +300,8 @@ def make_rows(
             "seat_count_max": getattr(row, "seat_count_max", None),
             "gross_mass_kg": getattr(row, "gross_mass_kg", None),
             "curb_mass_kg": getattr(row, "curb_mass_kg", None),
+            "curb_mass_kg_min": getattr(row, "curb_mass_kg_min", None),
+            "curb_mass_kg_max": getattr(row, "curb_mass_kg_max", None),
             "payload_kg_min": getattr(row, "payload_kg_min", None),
             "payload_kg_max": getattr(row, "payload_kg_max", None),
             "wheelbase_mm": getattr(row, "wheelbase_mm", None),
@@ -440,6 +442,11 @@ def main() -> int:
             SpecVehicleAttributes.seat_count_max,
             SpecVehicleAttributes.gross_mass_kg,
             SpecVehicleAttributes.curb_mass_kg,
+            *(
+                getattr(SpecVehicleAttributes, name)
+                for name in ("curb_mass_kg_min", "curb_mass_kg_max")
+                if name in existing_vehicle_attribute_columns
+            ),
             SpecVehicleAttributes.payload_kg_min,
             SpecVehicleAttributes.payload_kg_max,
             SpecVehicleAttributes.length_mm,

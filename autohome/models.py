@@ -290,6 +290,8 @@ class SpecVehicleAttributes(Base):
     seat_count_max: Mapped[int | None] = mapped_column(Integer)
     door_count: Mapped[int | None] = mapped_column(Integer)
     curb_mass_kg: Mapped[int | None] = mapped_column(Integer)
+    curb_mass_kg_min: Mapped[int | None] = mapped_column(Integer)
+    curb_mass_kg_max: Mapped[int | None] = mapped_column(Integer)
     gross_mass_kg: Mapped[int | None] = mapped_column(Integer, index=True)
     payload_kg_min: Mapped[int | None] = mapped_column(Integer)
     payload_kg_max: Mapped[int | None] = mapped_column(Integer)
