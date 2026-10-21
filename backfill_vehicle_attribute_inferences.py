@@ -45,9 +45,12 @@ NORMALIZED_INPUT_FIELDS = (
     "has_rear_windowed_door",
     "has_separate_cargo_compartment",
     "is_special_purpose",
+    "is_complete",
+    "missing_fields_json",
     "warnings_json",
 )
 INFERENCE_STORAGE_FIELDS = (
+    "body_type",
     "vehicle_technical_category",
     "gross_mass_kg",
     "has_permanent_rear_seats",
@@ -60,6 +63,8 @@ INFERENCE_STORAGE_FIELDS = (
     "inference_details_json",
     "inference_flags_json",
     "inference_rules_version",
+    "is_complete",
+    "missing_fields_json",
 )
 OPTIONAL_EXISTING_FIELDS = (
     "vehicle_technical_category",

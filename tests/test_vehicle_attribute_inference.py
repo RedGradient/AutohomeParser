@@ -266,6 +266,68 @@ class ConstructiveAttributeInferenceTests(unittest.TestCase):
         self.assertIsNone(result.value("has_rear_side_windows"))
         self.assertIn("CONFLICTING_CAB_LAYOUT_MARKERS", result.warnings)
 
+
+class BodyTypeInferenceTests(unittest.TestCase):
+    def test_unambiguous_vehicle_classes_map_to_body_types(self):
+        cases = {
+            "PICKUP": "PICKUP",
+            "PREMIUM_PICKUP": "PICKUP",
+            "MINI_TRUCK": "TRUCK",
+            "LIGHT_TRUCK": "TRUCK",
+            "MICROVAN": "VAN",
+            "LIGHT_COMMERCIAL_VAN": "VAN",
+            "MPV": "MPV",
+            "MID_FULL_SIZE_MPV": "MPV",
+            "COMPACT_SUV": "SUV",
+        }
+        for vehicle_class, expected in cases.items():
+            with self.subTest(vehicle_class=vehicle_class):
+                result = infer_vehicle_attributes(
+                    [],
+                    body_type=None,
+                    vehicle_class=vehicle_class,
+                )
+                decision = result.decisions["body_type"]
+                self.assertEqual(decision.value, expected)
+                self.assertEqual(
+                    decision.rule_code,
+                    "BODY_TYPE_FROM_VEHICLE_CLASS",
+                )
+
+    def test_broad_passenger_class_does_not_guess_specific_body(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type=None,
+            vehicle_class="MIDSIZE_CAR",
+        )
+
+        self.assertIsNone(result.value("body_type"))
+
+    def test_explicit_body_type_is_not_reinferred(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="HATCHBACK",
+            vehicle_class="COMPACT_SUV",
+        )
+
+        self.assertIsNone(result.value("body_type"))
+
+    def test_inferred_body_type_is_used_by_downstream_classification(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type=None,
+            vehicle_class="COMPACT_SUV",
+            seat_count_min=5,
+            seat_count_max=5,
+        )
+
+        self.assertEqual(result.value("body_type"), "SUV")
+        self.assertIs(result.value("is_special_purpose"), False)
+        self.assertEqual(
+            result.value("vehicle_technical_category"),
+            VehicleTechnicalCategory.M1,
+        )
+
     def test_cab_marker_is_ignored_for_non_commercial_vehicle(self):
         result = infer_vehicle_attributes(
             [],
@@ -538,6 +600,8 @@ class InferencePersistenceTests(unittest.TestCase):
             "has_separate_cargo_compartment": None,
             "is_special_purpose": None,
             "vehicle_purpose_type": None,
+            "is_complete": True,
+            "missing_fields_json": [],
             "warnings_json": [],
         }
         row.update(overrides)
@@ -597,6 +661,22 @@ class InferencePersistenceTests(unittest.TestCase):
         first = apply_vehicle_attribute_inference(self.base_row(), [])
         second = apply_vehicle_attribute_inference(first, [])
 
+        self.assertEqual(first, second)
+
+    def test_inferred_body_type_updates_completeness_and_is_idempotent(self):
+        source = self.base_row(
+            body_type=None,
+            vehicle_class="PICKUP",
+            is_complete=False,
+            missing_fields_json=["body_type"],
+        )
+
+        first = apply_vehicle_attribute_inference(source, [])
+        second = apply_vehicle_attribute_inference(first, [])
+
+        self.assertEqual(first["body_type"], "PICKUP")
+        self.assertNotIn("body_type", first["missing_fields_json"])
+        self.assertIs(first["is_complete"], True)
         self.assertEqual(first, second)
 
     def test_infers_truck_gross_mass_from_exact_components(self):

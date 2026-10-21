@@ -13,7 +13,7 @@ from autohome.import_duty.classifier import (
 from autohome.import_duty.types import ClassificationStatus
 
 
-VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-21-v6"
+VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-21-v7"
 INFERRED_INPUTS_USED = "INFERRED_INPUTS_USED"
 TRUCK_OCCUPANT_MASS_KG = 65
 INFERRED_MASS_CATEGORY_GUARD_KG = 100
@@ -109,7 +109,7 @@ class InferenceEvidence:
 class InferenceDecision:
     """Выведенное значение одного нормализованного поля."""
 
-    value: bool | int | VehiclePurposeType | VehicleTechnicalCategory
+    value: bool | int | str | VehiclePurposeType | VehicleTechnicalCategory
     rule_code: str
     confidence: InferenceConfidence
     evidence: tuple[InferenceEvidence, ...]
@@ -127,7 +127,7 @@ class VehicleAttributeInferenceResult:
 
     def value(
         self, field_name: str
-    ) -> bool | int | VehiclePurposeType | VehicleTechnicalCategory | None:
+    ) -> bool | int | str | VehiclePurposeType | VehicleTechnicalCategory | None:
         decision = self.decisions.get(field_name)
         return decision.value if decision is not None else None
 
@@ -142,6 +142,7 @@ INFERRED_STORAGE_FIELDS = frozenset(
         "vehicle_purpose_type",
         "vehicle_technical_category",
         "gross_mass_kg",
+        "body_type",
     }
 )
 
@@ -582,6 +583,31 @@ def _name_marker_evidence(
     return tuple(evidence)
 
 
+def infer_body_type(vehicle_class: str | None) -> InferenceDecision | None:
+    """Восстановить однозначный тип кузова из нормализованного класса."""
+    body_type = None
+    if vehicle_class in PICKUP_CLASSES:
+        body_type = "PICKUP"
+    elif vehicle_class in TRUCK_CLASSES:
+        body_type = "TRUCK"
+    elif vehicle_class in VAN_CLASSES:
+        body_type = "VAN"
+    elif vehicle_class == "MPV" or (
+        vehicle_class is not None and vehicle_class.endswith("_MPV")
+    ):
+        body_type = "MPV"
+    elif vehicle_class is not None and vehicle_class.endswith("_SUV"):
+        body_type = "SUV"
+    if body_type is None:
+        return None
+    return InferenceDecision(
+        value=body_type,
+        rule_code="BODY_TYPE_FROM_VEHICLE_CLASS",
+        confidence=InferenceConfidence.HIGH,
+        evidence=(_normalized_evidence("vehicle_class", vehicle_class),),
+    )
+
+
 def infer_cab_attributes(
     *,
     body_type: str | None,
@@ -941,7 +967,13 @@ def infer_vehicle_attributes(
     series_name: str | None = None,
 ) -> VehicleAttributeInferenceResult:
     """Выполнить все косвенные правила для одной комплектации."""
-    decisions = infer_parameter_attributes(parameters, body_type=body_type)
+    decisions: dict[str, InferenceDecision] = {}
+    if body_type is None:
+        body_type_decision = infer_body_type(vehicle_class)
+        if body_type_decision is not None:
+            decisions["body_type"] = body_type_decision
+            body_type = str(body_type_decision.value)
+    decisions.update(infer_parameter_attributes(parameters, body_type=body_type))
     cab_decisions, cab_warnings = infer_cab_attributes(
         body_type=body_type,
         vehicle_class=vehicle_class,
@@ -1325,4 +1357,12 @@ def apply_vehicle_attribute_inference(
         [INFERRED_INPUTS_USED] if applied_fields else []
     )
     updated["inference_rules_version"] = result.rules_version
+    if "missing_fields_json" in updated or "is_complete" in updated:
+        missing_fields = set(updated.get("missing_fields_json") or [])
+        if updated.get("body_type") is None:
+            missing_fields.add("body_type")
+        else:
+            missing_fields.discard("body_type")
+        updated["missing_fields_json"] = sorted(missing_fields)
+        updated["is_complete"] = not missing_fields
     return updated
