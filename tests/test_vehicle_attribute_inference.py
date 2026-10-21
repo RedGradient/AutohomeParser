@@ -7,6 +7,7 @@ from autohome.vehicle_attribute_inference import (
     InferenceConfidence,
     RawParameter,
     VehiclePurposeType,
+    VehicleTechnicalCategory,
     apply_vehicle_attribute_inference,
     infer_vehicle_attributes,
 )
@@ -67,7 +68,11 @@ class ConstructiveAttributeInferenceTests(unittest.TestCase):
             van.decisions["has_rear_windowed_door"].confidence,
             InferenceConfidence.MEDIUM,
         )
-        self.assertIsNone(sedan.value("has_rear_windowed_door"))
+        self.assertIs(sedan.value("has_rear_windowed_door"), False)
+        self.assertEqual(
+            sedan.decisions["has_rear_windowed_door"].rule_code,
+            "NO_WINDOWED_REAR_DOOR_FOR_SEDAN",
+        )
 
     def test_cargo_dimensions_require_goods_body(self):
         pickup = infer_vehicle_attributes(
@@ -115,6 +120,370 @@ class ConstructiveAttributeInferenceTests(unittest.TestCase):
         )
 
         self.assertIsNone(result.value("has_permanent_rear_seats"))
+
+    def test_at_most_two_seats_prove_absence_of_permanent_rear_seats(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="TRUCK",
+            seat_count_min=2,
+            seat_count_max=2,
+        )
+
+        decision = result.decisions["has_permanent_rear_seats"]
+        self.assertIs(decision.value, False)
+        self.assertEqual(
+            decision.rule_code,
+            "NO_REAR_SEATS_WITH_AT_MOST_TWO_SEATS",
+        )
+
+    def test_positive_rear_seat_evidence_wins_over_seat_count_rule(self):
+        result = infer_vehicle_attributes(
+            [
+                parameter(
+                    "后排座椅放倒形式",
+                    sublist=[{"name": "比例放倒", "value": "●"}],
+                )
+            ],
+            body_type="VAN",
+            seat_count_min=2,
+            seat_count_max=2,
+        )
+
+        self.assertIs(result.value("has_permanent_rear_seats"), True)
+        self.assertEqual(
+            result.decisions["has_permanent_rear_seats"].rule_code,
+            "REAR_SEAT_FOLDING_PRESENT",
+        )
+
+    def test_sedan_has_no_windowed_rear_door(self):
+        result = infer_vehicle_attributes([], body_type="SEDAN")
+
+        decision = result.decisions["has_rear_windowed_door"]
+        self.assertIs(decision.value, False)
+        self.assertEqual(
+            decision.rule_code,
+            "NO_WINDOWED_REAR_DOOR_FOR_SEDAN",
+        )
+
+    def test_ordinary_pickup_has_no_windowed_rear_door(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="PICKUP",
+            vehicle_class="PICKUP",
+        )
+
+        decision = result.decisions["has_rear_windowed_door"]
+        self.assertIs(decision.value, False)
+        self.assertEqual(
+            decision.rule_code,
+            "NO_WINDOWED_REAR_DOOR_FOR_ORDINARY_PICKUP",
+        )
+
+    def test_special_purpose_pickup_keeps_rear_door_unknown(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="PICKUP",
+            vehicle_class="PICKUP",
+            is_special_purpose=True,
+        )
+
+        self.assertIsNone(result.value("has_rear_windowed_door"))
+
+    def test_single_row_cab_proves_absence_of_rear_seats(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="TRUCK",
+            vehicle_class="LIGHT_TRUCK",
+            spec_name="2025款 4.5吨长轴单排底盘",
+        )
+
+        decision = result.decisions["has_permanent_rear_seats"]
+        self.assertIs(decision.value, False)
+        self.assertEqual(
+            decision.rule_code,
+            "NO_REAR_SEATS_FROM_SINGLE_ROW_CAB",
+        )
+        self.assertEqual(decision.evidence[0].marker, "单排")
+
+    def test_double_row_cab_proves_rear_seats_and_side_windows(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="PICKUP",
+            vehicle_class="PICKUP",
+            series_name="测试双排皮卡",
+        )
+
+        self.assertIs(result.value("has_permanent_rear_seats"), True)
+        self.assertIs(result.value("has_rear_side_windows"), True)
+        self.assertEqual(
+            result.decisions["has_permanent_rear_seats"].rule_code,
+            "REAR_SEATS_FROM_DOUBLE_ROW_CAB",
+        )
+        self.assertEqual(
+            result.decisions["has_rear_side_windows"].rule_code,
+            "REAR_SIDE_WINDOWS_FROM_DOUBLE_ROW_CAB",
+        )
+
+    def test_parameter_evidence_has_priority_over_single_row_cab_name(self):
+        result = infer_vehicle_attributes(
+            [
+                parameter(
+                    "后排座椅放倒形式",
+                    sublist=[{"name": "比例放倒", "value": "●"}],
+                )
+            ],
+            body_type="TRUCK",
+            vehicle_class="LIGHT_TRUCK",
+            spec_name="测试单排底盘",
+        )
+
+        self.assertIs(result.value("has_permanent_rear_seats"), True)
+        self.assertEqual(
+            result.decisions["has_permanent_rear_seats"].rule_code,
+            "REAR_SEAT_FOLDING_PRESENT",
+        )
+
+    def test_one_and_half_row_cab_is_not_inferred(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="TRUCK",
+            vehicle_class="LIGHT_TRUCK",
+            spec_name="测试排半驾驶室",
+        )
+
+        self.assertIsNone(result.value("has_permanent_rear_seats"))
+
+    def test_conflicting_cab_markers_are_left_unknown(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="TRUCK",
+            vehicle_class="LIGHT_TRUCK",
+            spec_name="测试单排底盘",
+            series_name="测试双排系列",
+        )
+
+        self.assertIsNone(result.value("has_permanent_rear_seats"))
+        self.assertIsNone(result.value("has_rear_side_windows"))
+        self.assertIn("CONFLICTING_CAB_LAYOUT_MARKERS", result.warnings)
+
+
+class BodyTypeInferenceTests(unittest.TestCase):
+    def test_unambiguous_vehicle_classes_map_to_body_types(self):
+        cases = {
+            "PICKUP": "PICKUP",
+            "PREMIUM_PICKUP": "PICKUP",
+            "MINI_TRUCK": "TRUCK",
+            "LIGHT_TRUCK": "TRUCK",
+            "MICROVAN": "VAN",
+            "LIGHT_COMMERCIAL_VAN": "VAN",
+            "MPV": "MPV",
+            "MID_FULL_SIZE_MPV": "MPV",
+            "COMPACT_SUV": "SUV",
+        }
+        for vehicle_class, expected in cases.items():
+            with self.subTest(vehicle_class=vehicle_class):
+                result = infer_vehicle_attributes(
+                    [],
+                    body_type=None,
+                    vehicle_class=vehicle_class,
+                )
+                decision = result.decisions["body_type"]
+                self.assertEqual(decision.value, expected)
+                self.assertEqual(
+                    decision.rule_code,
+                    "BODY_TYPE_FROM_VEHICLE_CLASS",
+                )
+
+    def test_broad_passenger_class_does_not_guess_specific_body(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type=None,
+            vehicle_class="MIDSIZE_CAR",
+        )
+
+        self.assertIsNone(result.value("body_type"))
+
+    def test_explicit_body_type_is_not_reinferred(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="HATCHBACK",
+            vehicle_class="COMPACT_SUV",
+        )
+
+        self.assertIsNone(result.value("body_type"))
+
+    def test_inferred_body_type_is_used_by_downstream_classification(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type=None,
+            vehicle_class="COMPACT_SUV",
+            seat_count_min=5,
+            seat_count_max=5,
+        )
+
+        self.assertEqual(result.value("body_type"), "SUV")
+        self.assertIs(result.value("is_special_purpose"), False)
+        self.assertEqual(
+            result.value("vehicle_technical_category"),
+            VehicleTechnicalCategory.M1,
+        )
+
+    def test_cab_marker_is_ignored_for_non_commercial_vehicle(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="SEDAN",
+            vehicle_class="MIDSIZE_CAR",
+            spec_name="测试双排版本",
+        )
+
+        self.assertIsNone(result.value("has_permanent_rear_seats"))
+        self.assertIsNone(result.value("has_rear_side_windows"))
+
+
+class SeatCountNameInferenceTests(unittest.TestCase):
+    def test_exact_seat_count_is_extracted_from_spec_name(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="VAN",
+            vehicle_class="LIGHT_COMMERCIAL_VAN",
+            spec_name="2021款 厢式车VAN短轴中顶3座",
+        )
+
+        self.assertEqual(result.value("seat_count_min"), 3)
+        self.assertEqual(result.value("seat_count_max"), 3)
+        self.assertEqual(
+            result.decisions["seat_count_min"].rule_code,
+            "SEAT_COUNT_FROM_SPEC_NAME",
+        )
+
+    def test_seat_variants_are_stored_as_range(self):
+        for raw_name, expected in (
+            ("多功能乘用车6/7座", (6, 7)),
+            ("短轴8-9座", (8, 9)),
+            ("商旅版10/11/12座", (10, 12)),
+        ):
+            with self.subTest(raw_name=raw_name):
+                result = infer_vehicle_attributes(
+                    [],
+                    body_type="VAN",
+                    vehicle_class="LIGHT_COMMERCIAL_VAN",
+                    spec_name=raw_name,
+                )
+                self.assertEqual(result.value("seat_count_min"), expected[0])
+                self.assertEqual(result.value("seat_count_max"), expected[1])
+
+    def test_spec_name_has_priority_over_series_name(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="VAN",
+            spec_name="测试6座",
+            series_name="测试9座系列",
+        )
+
+        self.assertEqual(result.value("seat_count_min"), 6)
+        self.assertEqual(
+            result.decisions["seat_count_min"].rule_code,
+            "SEAT_COUNT_FROM_SPEC_NAME",
+        )
+
+    def test_existing_seat_count_is_not_reinferred(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="VAN",
+            seat_count_min=5,
+            seat_count_max=5,
+            spec_name="测试7座",
+        )
+
+        self.assertIsNone(result.value("seat_count_min"))
+        self.assertIsNone(result.value("seat_count_max"))
+
+    def test_conflicting_counts_in_one_name_are_left_unknown(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="VAN",
+            spec_name="测试5座与7座版本",
+        )
+
+        self.assertIsNone(result.value("seat_count_min"))
+        self.assertIn("CONFLICTING_SEAT_COUNTS_IN_NAME", result.warnings)
+
+    def test_inferred_seat_count_is_used_for_bus_classification(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="VAN",
+            vehicle_class="LIGHT_COMMERCIAL_VAN",
+            gross_mass_kg=4800,
+            spec_name="商旅版12座",
+        )
+
+        self.assertEqual(
+            result.value("vehicle_technical_category"),
+            VehicleTechnicalCategory.M2,
+        )
+
+
+class CargoCompartmentNameInferenceTests(unittest.TestCase):
+    def test_cargo_van_markers_prove_separate_cargo_compartment(self):
+        for body_type, spec_name in (
+            ("VAN", "2024款 厢货长轴高顶3座"),
+            ("TRUCK", "2025款 EC5S双排厢货"),
+            ("MPV", "2021款 1.6L 厢货工程狮 2座"),
+            ("TRUCK", "2021款 创业版5座厢式车"),
+        ):
+            with self.subTest(body_type=body_type, spec_name=spec_name):
+                result = infer_vehicle_attributes(
+                    [],
+                    body_type=body_type,
+                    spec_name=spec_name,
+                )
+                decision = result.decisions["has_separate_cargo_compartment"]
+                self.assertIs(decision.value, True)
+                self.assertEqual(
+                    decision.rule_code,
+                    "SEPARATE_CARGO_COMPARTMENT_FROM_CARGO_VAN_NAME",
+                )
+
+    def test_series_name_marker_does_not_apply_to_every_spec(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="VAN",
+            spec_name="2025款 пассажирская версия",
+            series_name="测试厢货系列",
+        )
+
+        self.assertIsNone(result.value("has_separate_cargo_compartment"))
+
+    def test_cargo_marker_is_ignored_for_unsupported_body(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="SEDAN",
+            spec_name="测试厢货版本",
+        )
+
+        self.assertIsNone(result.value("has_separate_cargo_compartment"))
+
+    def test_explicit_cargo_compartment_value_is_not_reinferred(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="VAN",
+            has_separate_cargo_compartment=False,
+            spec_name="测试厢货版本",
+        )
+
+        self.assertIsNone(result.value("has_separate_cargo_compartment"))
+
+    def test_parameter_evidence_keeps_priority_over_name_marker(self):
+        result = infer_vehicle_attributes(
+            [parameter("货箱尺寸(mm)", itemname="3000x1800x400")],
+            body_type="TRUCK",
+            spec_name="测试厢货版本",
+        )
+
+        self.assertEqual(
+            result.decisions["has_separate_cargo_compartment"].rule_code,
+            "CARGO_BOX_DIMENSIONS_WITH_GOODS_BODY",
+        )
 
 
 class PurposeInferenceTests(unittest.TestCase):
@@ -226,6 +595,110 @@ class PurposeInferenceTests(unittest.TestCase):
         self.assertIn("CONFLICTING_PURPOSE_MARKERS", result.warnings)
 
 
+class TechnicalCategoryInferenceTests(unittest.TestCase):
+    def test_passenger_vehicle_up_to_nine_seats_is_m1(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="SUV",
+            vehicle_class="MIDSIZE_SUV",
+            seat_count_min=5,
+            seat_count_max=7,
+        )
+
+        self.assertEqual(
+            result.value("vehicle_technical_category"),
+            VehicleTechnicalCategory.M1,
+        )
+
+    def test_bus_categories_are_split_at_five_tonnes(self):
+        cases = (
+            (5000, VehicleTechnicalCategory.M2),
+            (5001, VehicleTechnicalCategory.M3),
+        )
+        for gross_mass, expected in cases:
+            with self.subTest(gross_mass=gross_mass):
+                result = infer_vehicle_attributes(
+                    [],
+                    body_type="VAN",
+                    vehicle_class="LIGHT_COMMERCIAL_VAN",
+                    seat_count_min=11,
+                    seat_count_max=11,
+                    gross_mass_kg=gross_mass,
+                    is_special_purpose=False,
+                )
+                self.assertEqual(
+                    result.value("vehicle_technical_category"), expected
+                )
+
+    def test_goods_categories_use_3500_and_12000_kg_boundaries(self):
+        cases = (
+            (3500, VehicleTechnicalCategory.N1),
+            (3501, VehicleTechnicalCategory.N2),
+            (12000, VehicleTechnicalCategory.N2),
+            (12001, VehicleTechnicalCategory.N3),
+        )
+        for gross_mass, expected in cases:
+            with self.subTest(gross_mass=gross_mass):
+                result = infer_vehicle_attributes(
+                    [],
+                    body_type="TRUCK",
+                    vehicle_class="LIGHT_TRUCK",
+                    gross_mass_kg=gross_mass,
+                    is_special_purpose=False,
+                )
+                self.assertEqual(
+                    result.value("vehicle_technical_category"), expected
+                )
+
+    def test_bus_without_gross_mass_remains_unknown(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="VAN",
+            vehicle_class="LIGHT_COMMERCIAL_VAN",
+            seat_count_min=11,
+            seat_count_max=11,
+            is_special_purpose=False,
+        )
+
+        self.assertIsNone(result.value("vehicle_technical_category"))
+        self.assertEqual(
+            result.details["vehicle_technical_category"]["status"],
+            "MISSING_DATA",
+        )
+
+    def test_ambiguous_passenger_and_goods_vehicle_remains_unknown(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="TRUCK",
+            vehicle_class="MIDSIZE_CAR",
+            seat_count_min=5,
+            seat_count_max=5,
+            gross_mass_kg=3000,
+            is_special_purpose=False,
+        )
+
+        self.assertIsNone(result.value("vehicle_technical_category"))
+        self.assertEqual(
+            result.details["vehicle_technical_category"]["status"],
+            "MANUAL_REVIEW",
+        )
+
+    def test_explicit_special_purpose_truck_is_not_assigned_n_category(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="TRUCK",
+            vehicle_class="LIGHT_TRUCK",
+            gross_mass_kg=3500,
+            is_special_purpose=True,
+        )
+
+        self.assertIsNone(result.value("vehicle_technical_category"))
+        self.assertEqual(
+            result.details["vehicle_technical_category"]["tnved_heading"],
+            "8705",
+        )
+
+
 class OrdinaryTransportInferenceTests(unittest.TestCase):
     def test_passenger_body_class_and_seats_prove_not_8705(self):
         result = infer_vehicle_attributes(
@@ -273,6 +746,8 @@ class InferencePersistenceTests(unittest.TestCase):
             "has_separate_cargo_compartment": None,
             "is_special_purpose": None,
             "vehicle_purpose_type": None,
+            "is_complete": True,
+            "missing_fields_json": [],
             "warnings_json": [],
         }
         row.update(overrides)
@@ -334,6 +809,43 @@ class InferencePersistenceTests(unittest.TestCase):
 
         self.assertEqual(first, second)
 
+    def test_inferred_body_type_updates_completeness_and_is_idempotent(self):
+        source = self.base_row(
+            body_type=None,
+            vehicle_class="PICKUP",
+            is_complete=False,
+            missing_fields_json=["body_type"],
+        )
+
+        first = apply_vehicle_attribute_inference(source, [])
+        second = apply_vehicle_attribute_inference(first, [])
+
+        self.assertEqual(first["body_type"], "PICKUP")
+        self.assertNotIn("body_type", first["missing_fields_json"])
+        self.assertIs(first["is_complete"], True)
+        self.assertEqual(first, second)
+
+    def test_inferred_seat_range_is_persisted_and_idempotent(self):
+        source = self.base_row(
+            body_type="VAN",
+            vehicle_class="LIGHT_COMMERCIAL_VAN",
+        )
+
+        first = apply_vehicle_attribute_inference(
+            source,
+            [],
+            spec_name="多功能乘用车6/7座",
+        )
+        second = apply_vehicle_attribute_inference(
+            first,
+            [],
+            spec_name="多功能乘用车6/7座",
+        )
+
+        self.assertEqual(first["seat_count_min"], 6)
+        self.assertEqual(first["seat_count_max"], 7)
+        self.assertEqual(first, second)
+
     def test_infers_truck_gross_mass_from_exact_components(self):
         row = apply_vehicle_attribute_inference(
             self.base_row(
@@ -392,6 +904,52 @@ class InferencePersistenceTests(unittest.TestCase):
             "TRUCK_GROSS_MASS_FROM_SPEC_NAME",
         )
 
+    def test_infers_gross_mass_when_chassis_modifiers_follow_tonnage(self):
+        cases = {
+            "2025款 3.0T 手动4.5吨长轴单排底盘": 4500,
+            "2021款 3.0T 自动5.5吨短轴双排底盘": 5500,
+            "2021款 3.0T 7吨超长轴单排底盘": 7000,
+        }
+        for spec_name, expected in cases.items():
+            with self.subTest(spec_name=spec_name):
+                row = apply_vehicle_attribute_inference(
+                    self.base_row(),
+                    [],
+                    spec_name=spec_name,
+                )
+                self.assertEqual(row["gross_mass_kg"], expected)
+                self.assertEqual(
+                    row["inference_details_json"]["decisions"]["gross_mass_kg"][
+                        "rule_code"
+                    ],
+                    "TRUCK_GROSS_MASS_FROM_SPEC_NAME",
+                )
+
+    def test_series_name_is_used_when_spec_name_has_no_chassis_tonnage(self):
+        row = apply_vehicle_attribute_inference(
+            self.base_row(),
+            [],
+            spec_name="2025款 标准版",
+            series_name="测试4.2吨长轴底盘",
+        )
+
+        self.assertEqual(row["gross_mass_kg"], 4200)
+        self.assertEqual(
+            row["inference_details_json"]["decisions"]["gross_mass_kg"][
+                "rule_code"
+            ],
+            "TRUCK_GROSS_MASS_FROM_SERIES_NAME",
+        )
+
+    def test_payload_tonnage_without_chassis_context_is_not_gross_mass(self):
+        row = apply_vehicle_attribute_inference(
+            self.base_row(),
+            [],
+            spec_name="2025款 载重4.5吨厢式货车",
+        )
+
+        self.assertIsNone(row["gross_mass_kg"])
+
     def test_does_not_infer_truck_gross_mass_from_ranges(self):
         row = apply_vehicle_attribute_inference(
             self.base_row(
@@ -405,6 +963,78 @@ class InferencePersistenceTests(unittest.TestCase):
         )
 
         self.assertIsNone(row["gross_mass_kg"])
+
+    def test_infers_pickup_gross_mass_from_exact_components(self):
+        row = apply_vehicle_attribute_inference(
+            self.base_row(
+                body_type="PICKUP",
+                vehicle_class="PICKUP",
+                curb_mass_kg=1900,
+                payload_kg_min=1000,
+                payload_kg_max=1000,
+                seat_count_min=5,
+                seat_count_max=5,
+                wheelbase_mm=3200,
+                cargo_length_min_mm=1600,
+                cargo_length_max_mm=1600,
+            ),
+            [],
+        )
+
+        self.assertEqual(row["gross_mass_kg"], 3225)
+        self.assertEqual(row["vehicle_technical_category"], "N1")
+        decision = row["inference_details_json"]["decisions"]["gross_mass_kg"]
+        self.assertEqual(
+            decision["rule_code"],
+            "PICKUP_GROSS_MASS_FROM_CURB_PAYLOAD_AND_SEATS",
+        )
+        self.assertEqual(decision["confidence"], "MEDIUM")
+
+    def test_pickup_near_mass_boundary_keeps_mass_but_not_category(self):
+        row = apply_vehicle_attribute_inference(
+            self.base_row(
+                body_type="PICKUP",
+                vehicle_class="PICKUP",
+                curb_mass_kg=2500,
+                payload_kg_min=870,
+                payload_kg_max=870,
+                seat_count_min=2,
+                seat_count_max=2,
+                wheelbase_mm=3200,
+                cargo_length_min_mm=1800,
+                cargo_length_max_mm=1800,
+            ),
+            [],
+        )
+
+        self.assertEqual(row["gross_mass_kg"], 3500)
+        self.assertIsNone(row.get("vehicle_technical_category"))
+        details = row["inference_details_json"]["vehicle_technical_category"]
+        self.assertEqual(details["status"], "MANUAL_REVIEW")
+        self.assertEqual(
+            details["reason"],
+            "INFERRED_GROSS_MASS_NEAR_CATEGORY_BOUNDARY",
+        )
+
+    def test_explicit_pickup_mass_at_boundary_assigns_category(self):
+        row = apply_vehicle_attribute_inference(
+            self.base_row(
+                body_type="PICKUP",
+                vehicle_class="PICKUP",
+                gross_mass_kg=3500,
+                curb_mass_kg=2500,
+                payload_kg_min=870,
+                payload_kg_max=870,
+                seat_count_min=2,
+                seat_count_max=2,
+                wheelbase_mm=3200,
+                cargo_length_min_mm=1800,
+                cargo_length_max_mm=1800,
+            ),
+            [],
+        )
+
+        self.assertEqual(row["vehicle_technical_category"], "N1")
 
 
 class OrdinaryTransportInferenceAdditionalTests(unittest.TestCase):

@@ -10,13 +10,13 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from autohome.models import (
-    Base,
     ParameterDefinition,
     Spec,
     SpecParameter,
     SpecPowertrain,
     SpecVehicleAttributes,
 )
+from autohome.vehicle_attribute_schema import ensure_vehicle_attribute_schema
 from autohome.vehicle_attributes_normalizer import (
     NORMALIZATION_VERSION,
     REQUIRED_SOURCE_FIELDS,
@@ -30,6 +30,9 @@ MAX_UPSERT_ROWS = 500
 INFERENCE_COMPATIBLE_FIELDS = frozenset(
     {
         "gross_mass_kg",
+        "body_type",
+        "seat_count_min",
+        "seat_count_max",
         "has_permanent_rear_seats",
         "has_rear_side_windows",
         "has_rear_windowed_door",
@@ -298,7 +301,7 @@ def main() -> int:
     engine = create_engine(args.database_url, pool_pre_ping=True)
     try:
         if not args.dry_run:
-            Base.metadata.create_all(engine)
+            ensure_vehicle_attribute_schema(engine)
         counts = backfill(engine, args)
     finally:
         engine.dispose()

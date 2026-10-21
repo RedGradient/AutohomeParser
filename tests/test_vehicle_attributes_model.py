@@ -28,9 +28,12 @@ class SpecVehicleAttributesModelTests(unittest.TestCase):
         self.assertTrue(
             {
                 "vehicle_class",
+                "vehicle_technical_category",
                 "seat_count_min",
                 "seat_count_max",
                 "gross_mass_kg",
+                "curb_mass_kg_min",
+                "curb_mass_kg_max",
                 "payload_kg_min",
                 "payload_kg_max",
                 "cargo_length_min_mm",

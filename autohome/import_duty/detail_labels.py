@@ -33,6 +33,14 @@ DETAIL_FIELD_LABELS = {
     "customs_value_source": "Источник таможенной стоимости",
     "upper_bound_rub": "Верхняя граница диапазона стоимости, RUB",
     "fee_rub": "Таможенный сбор, RUB",
+    "base_rate_rub": "Базовая ставка утильсбора, RUB",
+    "coefficient": "Коэффициент утильсбора",
+    "recycling_fee_rub": "Утилизационный сбор, RUB",
+    "personal_use": "Ввоз для личного пользования",
+    "vehicle_technical_category": "Техническая категория автомобиля",
+    "powertrain_type": "Нормативный тип силовой установки",
+    "power_kw": "Нормативная мощность, кВт",
+    "power_source": "Источник нормативной мощности",
 }
 
 
@@ -40,9 +48,7 @@ def add_detail_field_labels(details: Mapping[str, Any]) -> dict[str, Any]:
     """Добавить подписи только к присутствующим полям детализации."""
     result = dict(details)
     labels = {
-        key: DETAIL_FIELD_LABELS[key]
-        for key in details
-        if key in DETAIL_FIELD_LABELS
+        key: DETAIL_FIELD_LABELS[key] for key in details if key in DETAIL_FIELD_LABELS
     }
     if labels:
         result["field_labels"] = labels

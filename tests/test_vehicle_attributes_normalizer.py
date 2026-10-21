@@ -44,7 +44,10 @@ class VehicleAttributeDictionaryTests(unittest.TestCase):
         )
 
     def test_powertrain_dictionary_closes_known_tail_values(self):
-        self.assertEqual(translate_powertrain_code("energy_type", "汽油电驱"), "HEV")
+        self.assertEqual(
+            translate_powertrain_code("energy_type", "汽油电驱"),
+            "SERIES_HEV",
+        )
         self.assertEqual(
             translate_powertrain_code("body_type", "5门5座两厢跨界车"),
             "HATCHBACK",
@@ -146,6 +149,34 @@ class CargoDimensionTests(unittest.TestCase):
         self.assertTrue(all(value is None for value in result.values()))
         self.assertEqual(warnings[0]["code"], "INVALID_CARGO_DIMENSIONS")
 
+    def test_leading_comma_is_safely_removed(self):
+        warnings = []
+
+        result = parse_cargo_dimensions(",4050×1850×400", warnings)
+
+        self.assertEqual(result["cargo_length_min_mm"], 4050)
+        self.assertEqual(result["cargo_width_min_mm"], 1850)
+        self.assertEqual(result["cargo_height_min_mm"], 400)
+        self.assertEqual(warnings[0]["code"], "SANITIZED_CARGO_DIMENSIONS")
+
+    def test_trailing_separator_is_safely_removed(self):
+        warnings = []
+
+        result = parse_cargo_dimensions("3050x1500x360x", warnings)
+
+        self.assertEqual(result["cargo_length_max_mm"], 3050)
+        self.assertEqual(result["cargo_width_max_mm"], 1500)
+        self.assertEqual(result["cargo_height_max_mm"], 360)
+        self.assertEqual(warnings[0]["code"], "SANITIZED_CARGO_DIMENSIONS")
+
+    def test_fused_dimensions_are_not_guessed(self):
+        warnings = []
+
+        result = parse_cargo_dimensions("1510x1562475", warnings)
+
+        self.assertTrue(all(value is None for value in result.values()))
+        self.assertEqual(warnings[0]["code"], "INVALID_CARGO_DIMENSIONS")
+
 
 class VehicleAttributesNormalizerTests(unittest.TestCase):
     def test_normalizes_complete_passenger_vehicle(self):
@@ -172,6 +203,8 @@ class VehicleAttributesNormalizerTests(unittest.TestCase):
         self.assertEqual(row["seat_count_max"], 5)
         self.assertEqual(row["door_count"], 5)
         self.assertEqual(row["curb_mass_kg"], 1980)
+        self.assertEqual(row["curb_mass_kg_min"], 1980)
+        self.assertEqual(row["curb_mass_kg_max"], 1980)
         self.assertTrue(row["is_four_wheel_drive"])
         self.assertTrue(row["is_complete"])
         self.assertEqual(row["normalization_version"], NORMALIZATION_VERSION)
@@ -205,8 +238,10 @@ class VehicleAttributesNormalizerTests(unittest.TestCase):
         )
 
         self.assertIsNone(row["curb_mass_kg"])
+        self.assertEqual(row["curb_mass_kg_min"], 1980)
+        self.assertEqual(row["curb_mass_kg_max"], 2035)
         self.assertIn(
-            "INVALID_INTEGER", {item["code"] for item in row["warnings_json"]}
+            "MULTIPLE_VALUES", {item["code"] for item in row["warnings_json"]}
         )
 
     def test_missing_common_classification_fields_are_reported(self):

@@ -6,12 +6,23 @@ from enum import StrEnum
 import re
 from typing import Any, Iterable, Mapping
 
+from autohome.import_duty.classifier import (
+    VehicleClassificationInput,
+    classify_vehicle,
+)
+from autohome.import_duty.types import ClassificationStatus
 
-VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-20-v2"
+
+VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-21-v12"
 INFERRED_INPUTS_USED = "INFERRED_INPUTS_USED"
 TRUCK_OCCUPANT_MASS_KG = 65
+INFERRED_MASS_CATEGORY_GUARD_KG = 100
 TRUCK_GROSS_MASS_NAME_RE = re.compile(
-    r"(?<![\d.])(?P<tonnes>\d{1,2}(?:\.\d+)?)吨(?=(?:底盘|级|加|\s|$))"
+    r"(?<![\d.])(?P<tonnes>\d{1,2}(?:\.\d+)?)吨"
+    r"(?=(?:底盘|级|加|\s|$)|[^吨]{0,24}底盘)"
+)
+SEAT_COUNT_NAME_RE = re.compile(
+    r"(?<!\d)(?P<values>\d{1,2}(?:\s*(?:[/／、,，]|[-–—~至])\s*\d{1,2})*)\s*座"
 )
 
 
@@ -29,6 +40,17 @@ class VehiclePurposeType(StrEnum):
     MOTORHOME = "MOTORHOME"
     REFUSE_TRUCK = "REFUSE_TRUCK"
     UNKNOWN_SPECIAL = "UNKNOWN_SPECIAL"
+
+
+class VehicleTechnicalCategory(StrEnum):
+    """Техническая категория колёсного транспортного средства."""
+
+    M1 = "M1"
+    M2 = "M2"
+    M3 = "M3"
+    N1 = "N1"
+    N2 = "N2"
+    N3 = "N3"
 
 
 class InferenceConfidence(StrEnum):
@@ -91,7 +113,7 @@ class InferenceEvidence:
 class InferenceDecision:
     """Выведенное значение одного нормализованного поля."""
 
-    value: bool | int | VehiclePurposeType
+    value: bool | int | str | VehiclePurposeType | VehicleTechnicalCategory
     rule_code: str
     confidence: InferenceConfidence
     evidence: tuple[InferenceEvidence, ...]
@@ -104,9 +126,12 @@ class VehicleAttributeInferenceResult:
     decisions: dict[str, InferenceDecision] = field(default_factory=dict)
     warnings: tuple[str, ...] = ()
     flags: tuple[str, ...] = ()
+    details: dict[str, Any] = field(default_factory=dict)
     rules_version: str = VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION
 
-    def value(self, field_name: str) -> bool | int | VehiclePurposeType | None:
+    def value(
+        self, field_name: str
+    ) -> bool | int | str | VehiclePurposeType | VehicleTechnicalCategory | None:
         decision = self.decisions.get(field_name)
         return decision.value if decision is not None else None
 
@@ -119,7 +144,11 @@ INFERRED_STORAGE_FIELDS = frozenset(
         "has_separate_cargo_compartment",
         "is_special_purpose",
         "vehicle_purpose_type",
+        "vehicle_technical_category",
         "gross_mass_kg",
+        "body_type",
+        "seat_count_min",
+        "seat_count_max",
     }
 )
 
@@ -162,6 +191,9 @@ GOODS_TRANSPORT_MARKERS = (
     "栏板",
     "仓栅",
 )
+COMMERCIAL_CAB_BODY_TYPES = frozenset({"PICKUP", "TRUCK", "VAN"})
+CARGO_VAN_NAME_BODY_TYPES = frozenset({"MPV", "TRUCK", "VAN"})
+CARGO_VAN_NAME_MARKERS = ("厢式车", "厢货")
 
 
 PARAMETER_INFERENCE_RULES = (
@@ -559,6 +591,184 @@ def _name_marker_evidence(
     return tuple(evidence)
 
 
+def infer_body_type(vehicle_class: str | None) -> InferenceDecision | None:
+    """Восстановить однозначный тип кузова из нормализованного класса."""
+    body_type = None
+    if vehicle_class in PICKUP_CLASSES:
+        body_type = "PICKUP"
+    elif vehicle_class in TRUCK_CLASSES:
+        body_type = "TRUCK"
+    elif vehicle_class in VAN_CLASSES:
+        body_type = "VAN"
+    elif vehicle_class == "MPV" or (
+        vehicle_class is not None and vehicle_class.endswith("_MPV")
+    ):
+        body_type = "MPV"
+    elif vehicle_class is not None and vehicle_class.endswith("_SUV"):
+        body_type = "SUV"
+    if body_type is None:
+        return None
+    return InferenceDecision(
+        value=body_type,
+        rule_code="BODY_TYPE_FROM_VEHICLE_CLASS",
+        confidence=InferenceConfidence.HIGH,
+        evidence=(_normalized_evidence("vehicle_class", vehicle_class),),
+    )
+
+
+def _seat_count_from_name(
+    raw_name: str,
+    *,
+    source: str,
+) -> tuple[int, int, InferenceEvidence] | None:
+    matches = []
+    for match in SEAT_COUNT_NAME_RE.finditer(raw_name):
+        values = [int(value) for value in re.findall(r"\d+", match.group("values"))]
+        if values and all(1 <= value <= 99 for value in values):
+            matches.append(
+                (
+                    min(values),
+                    max(values),
+                    InferenceEvidence(
+                        source=source,
+                        marker=match.group(0),
+                        raw_value=raw_name,
+                    ),
+                )
+            )
+    unique_ranges = {(minimum, maximum) for minimum, maximum, _ in matches}
+    if len(unique_ranges) != 1:
+        return None
+    minimum, maximum = next(iter(unique_ranges))
+    evidence = next(
+        evidence
+        for candidate_min, candidate_max, evidence in matches
+        if (candidate_min, candidate_max) == (minimum, maximum)
+    )
+    return minimum, maximum, evidence
+
+
+def infer_seat_count_from_names(
+    *,
+    spec_name: str | None,
+    series_name: str | None,
+) -> tuple[dict[str, InferenceDecision], tuple[str, ...]]:
+    """Извлечь точное число или диапазон мест из сырого названия."""
+    sources = (
+        ("specs.raw_json.name", _text(spec_name), "SPEC"),
+        ("series.raw_json.name", _text(series_name), "SERIES"),
+    )
+    for source, raw_name, source_code in sources:
+        if not raw_name:
+            continue
+        raw_matches = list(SEAT_COUNT_NAME_RE.finditer(raw_name))
+        if not raw_matches:
+            continue
+        parsed = _seat_count_from_name(raw_name, source=source)
+        if parsed is None:
+            return {}, ("CONFLICTING_SEAT_COUNTS_IN_NAME",)
+        minimum, maximum, evidence = parsed
+        confidence = InferenceConfidence.HIGH
+        return {
+            "seat_count_min": InferenceDecision(
+                value=minimum,
+                rule_code=f"SEAT_COUNT_FROM_{source_code}_NAME",
+                confidence=confidence,
+                evidence=(evidence,),
+            ),
+            "seat_count_max": InferenceDecision(
+                value=maximum,
+                rule_code=f"SEAT_COUNT_FROM_{source_code}_NAME",
+                confidence=confidence,
+                evidence=(evidence,),
+            ),
+        }, ()
+    return {}, ()
+
+
+def infer_cargo_compartment_from_spec_name(
+    *,
+    body_type: str | None,
+    spec_name: str | None,
+) -> InferenceDecision | None:
+    """Определить отдельный грузовой отсек по названию грузового исполнения."""
+    if body_type not in CARGO_VAN_NAME_BODY_TYPES:
+        return None
+    raw_name = _text(spec_name)
+    marker = next(
+        (candidate for candidate in CARGO_VAN_NAME_MARKERS if candidate in raw_name),
+        None,
+    )
+    if marker is None:
+        return None
+    return InferenceDecision(
+        value=True,
+        rule_code="SEPARATE_CARGO_COMPARTMENT_FROM_CARGO_VAN_NAME",
+        confidence=InferenceConfidence.HIGH,
+        evidence=(
+            InferenceEvidence(
+                source="specs.raw_json.name",
+                marker=marker,
+                raw_value=raw_name,
+            ),
+        ),
+    )
+
+
+def infer_cab_attributes(
+    *,
+    body_type: str | None,
+    vehicle_class: str | None,
+    spec_name: str | None,
+    series_name: str | None,
+) -> tuple[dict[str, InferenceDecision], tuple[str, ...]]:
+    """Вывести признаки заднего ряда из названия кабины коммерческого ТС."""
+    commercial_vehicle = (
+        body_type in COMMERCIAL_CAB_BODY_TYPES
+        or vehicle_class in VAN_CLASSES | PICKUP_CLASSES | TRUCK_CLASSES
+    )
+    if not commercial_vehicle:
+        return {}, ()
+
+    single_cab_evidence = _name_marker_evidence(
+        "单排",
+        spec_name=spec_name,
+        series_name=series_name,
+    )
+    double_cab_evidence = _name_marker_evidence(
+        "双排",
+        spec_name=spec_name,
+        series_name=series_name,
+    )
+    if single_cab_evidence and double_cab_evidence:
+        return {}, ("CONFLICTING_CAB_LAYOUT_MARKERS",)
+    if single_cab_evidence:
+        return {
+            "has_permanent_rear_seats": InferenceDecision(
+                value=False,
+                rule_code="NO_REAR_SEATS_FROM_SINGLE_ROW_CAB",
+                confidence=InferenceConfidence.HIGH,
+                evidence=single_cab_evidence,
+            )
+        }, ()
+    if double_cab_evidence:
+        return {
+            "has_permanent_rear_seats": InferenceDecision(
+                value=True,
+                rule_code="REAR_SEATS_FROM_DOUBLE_ROW_CAB",
+                confidence=InferenceConfidence.HIGH,
+                evidence=double_cab_evidence,
+            ),
+            "has_rear_side_windows": InferenceDecision(
+                value=True,
+                rule_code="REAR_SIDE_WINDOWS_FROM_DOUBLE_ROW_CAB",
+                confidence=InferenceConfidence.HIGH,
+                evidence=double_cab_evidence,
+            ),
+        }, ()
+    return {}, ()
+
+
 def _is_passenger_class(vehicle_class: str | None) -> bool:
     return bool(
         vehicle_class
@@ -758,7 +968,7 @@ def infer_ordinary_transport(
     return None
 
 
-def infer_truck_gross_mass(
+def infer_commercial_gross_mass(
     *,
     body_type: str | None,
     gross_mass_kg: int | None,
@@ -768,31 +978,45 @@ def infer_truck_gross_mass(
     seat_count_min: int | None,
     seat_count_max: int | None,
     spec_name: str | None,
+    series_name: str | None,
 ) -> InferenceDecision | None:
-    """Восстановить полную массу грузовика без замены прямого значения."""
-    if body_type != "TRUCK" or gross_mass_kg is not None:
+    """Восстановить полную массу грузовика или пикапа по точным компонентам."""
+    if body_type not in {"TRUCK", "PICKUP"} or gross_mass_kg is not None:
         return None
 
-    raw_name = _text(spec_name)
-    name_match = TRUCK_GROSS_MASS_NAME_RE.search(raw_name)
-    if name_match is not None:
-        try:
-            mass = Decimal(name_match.group("tonnes")) * 1000
-        except InvalidOperation:
-            mass = Decimal(0)
-        if 500 <= mass <= 100_000 and mass == mass.to_integral_value():
-            return InferenceDecision(
-                value=int(mass),
-                rule_code="TRUCK_GROSS_MASS_FROM_SPEC_NAME",
-                confidence=InferenceConfidence.HIGH,
-                evidence=(
-                    InferenceEvidence(
-                        source="specs.raw_json.name",
-                        marker=name_match.group(0),
-                        raw_value=raw_name,
+    if body_type == "TRUCK":
+        for source, raw_name, source_code in (
+            ("specs.raw_json.name", _text(spec_name), "SPEC"),
+            ("series.raw_json.name", _text(series_name), "SERIES"),
+        ):
+            matches = list(TRUCK_GROSS_MASS_NAME_RE.finditer(raw_name))
+            masses = set()
+            for name_match in matches:
+                try:
+                    mass = Decimal(name_match.group("tonnes")) * 1000
+                except InvalidOperation:
+                    continue
+                if 500 <= mass <= 100_000 and mass == mass.to_integral_value():
+                    masses.add(int(mass))
+            if len(masses) == 1:
+                mass = masses.pop()
+                name_match = next(
+                    match
+                    for match in matches
+                    if Decimal(match.group("tonnes")) * 1000 == mass
+                )
+                return InferenceDecision(
+                    value=mass,
+                    rule_code=f"TRUCK_GROSS_MASS_FROM_{source_code}_NAME",
+                    confidence=InferenceConfidence.HIGH,
+                    evidence=(
+                        InferenceEvidence(
+                            source=source,
+                            marker=name_match.group(0),
+                            raw_value=raw_name,
+                        ),
                     ),
-                ),
-            )
+                )
 
     exact_inputs = (
         curb_mass_kg is not None
@@ -816,7 +1040,11 @@ def infer_truck_gross_mass(
     )
     return InferenceDecision(
         value=inferred_mass,
-        rule_code="TRUCK_GROSS_MASS_FROM_CURB_PAYLOAD_AND_SEATS",
+        rule_code=(
+            "PICKUP_GROSS_MASS_FROM_CURB_PAYLOAD_AND_SEATS"
+            if body_type == "PICKUP"
+            else "TRUCK_GROSS_MASS_FROM_CURB_PAYLOAD_AND_SEATS"
+        ),
         confidence=InferenceConfidence.MEDIUM,
         evidence=(
             _normalized_evidence("curb_mass_kg", curb_mass_kg),
@@ -839,22 +1067,64 @@ def infer_vehicle_attributes(
     seat_count_min: int | None = None,
     seat_count_max: int | None = None,
     curb_mass_kg: int | None = None,
+    curb_mass_kg_min: int | None = None,
+    curb_mass_kg_max: int | None = None,
     gross_mass_kg: int | None = None,
     payload_kg_min: int | None = None,
     payload_kg_max: int | None = None,
+    length_mm: int | None = None,
+    wheelbase_mm: int | None = None,
     cargo_length_min_mm: int | None = None,
+    cargo_length_max_mm: int | None = None,
     cargo_width_min_mm: int | None = None,
+    cargo_width_max_mm: int | None = None,
     cargo_height_min_mm: int | None = None,
+    cargo_height_max_mm: int | None = None,
     has_permanent_rear_seats: bool | None = None,
     has_rear_side_windows: bool | None = None,
     has_rear_windowed_door: bool | None = None,
     has_separate_cargo_compartment: bool | None = None,
+    is_special_purpose: bool | None = None,
     spec_name: str | None = None,
     series_name: str | None = None,
 ) -> VehicleAttributeInferenceResult:
     """Выполнить все косвенные правила для одной комплектации."""
-    decisions = infer_parameter_attributes(parameters, body_type=body_type)
-    inferred_gross_mass = infer_truck_gross_mass(
+    decisions: dict[str, InferenceDecision] = {}
+    if body_type is None:
+        body_type_decision = infer_body_type(vehicle_class)
+        if body_type_decision is not None:
+            decisions["body_type"] = body_type_decision
+            body_type = str(body_type_decision.value)
+    decisions.update(infer_parameter_attributes(parameters, body_type=body_type))
+    if (
+        has_separate_cargo_compartment is None
+        and "has_separate_cargo_compartment" not in decisions
+    ):
+        cargo_compartment = infer_cargo_compartment_from_spec_name(
+            body_type=body_type,
+            spec_name=spec_name,
+        )
+        if cargo_compartment is not None:
+            decisions["has_separate_cargo_compartment"] = cargo_compartment
+    seat_warnings: tuple[str, ...] = ()
+    if seat_count_min is None and seat_count_max is None:
+        seat_decisions, seat_warnings = infer_seat_count_from_names(
+            spec_name=spec_name,
+            series_name=series_name,
+        )
+        decisions.update(seat_decisions)
+        if seat_decisions:
+            seat_count_min = int(seat_decisions["seat_count_min"].value)
+            seat_count_max = int(seat_decisions["seat_count_max"].value)
+    cab_decisions, cab_warnings = infer_cab_attributes(
+        body_type=body_type,
+        vehicle_class=vehicle_class,
+        spec_name=spec_name,
+        series_name=series_name,
+    )
+    for field_name, decision in cab_decisions.items():
+        decisions.setdefault(field_name, decision)
+    inferred_gross_mass = infer_commercial_gross_mass(
         body_type=body_type,
         gross_mass_kg=gross_mass_kg,
         curb_mass_kg=curb_mass_kg,
@@ -863,13 +1133,15 @@ def infer_vehicle_attributes(
         seat_count_min=seat_count_min,
         seat_count_max=seat_count_max,
         spec_name=spec_name,
+        series_name=series_name,
     )
     if inferred_gross_mass is not None:
         decisions["gross_mass_kg"] = inferred_gross_mass
-    purpose, warnings = infer_vehicle_purpose(
+    purpose, purpose_warnings = infer_vehicle_purpose(
         spec_name=spec_name,
         series_name=series_name,
     )
+    warnings = (*cab_warnings, *seat_warnings, *purpose_warnings)
     if purpose is not None:
         decisions["vehicle_purpose_type"] = purpose
         assert isinstance(purpose.value, VehiclePurposeType)
@@ -931,11 +1203,181 @@ def infer_vehicle_attributes(
         )
         if ordinary_transport is not None:
             decisions["is_special_purpose"] = ordinary_transport
+
+    if (
+        "has_permanent_rear_seats" not in decisions
+        and seat_count_min is not None
+        and seat_count_max is not None
+        and 1 <= seat_count_min <= seat_count_max <= 2
+    ):
+        decisions["has_permanent_rear_seats"] = InferenceDecision(
+            value=False,
+            rule_code="NO_REAR_SEATS_WITH_AT_MOST_TWO_SEATS",
+            confidence=InferenceConfidence.HIGH,
+            evidence=(
+                _normalized_evidence("seat_count_min", seat_count_min),
+                _normalized_evidence("seat_count_max", seat_count_max),
+            ),
+        )
+
+    if "has_rear_windowed_door" not in decisions and body_type == "SEDAN":
+        decisions["has_rear_windowed_door"] = InferenceDecision(
+            value=False,
+            rule_code="NO_WINDOWED_REAR_DOOR_FOR_SEDAN",
+            confidence=InferenceConfidence.HIGH,
+            evidence=(_normalized_evidence("body_type", body_type),),
+        )
+
+    special_purpose_decision = decisions.get("is_special_purpose")
+    ordinary_pickup = (
+        body_type == "PICKUP"
+        and is_special_purpose is not True
+        and special_purpose_decision is not None
+        and special_purpose_decision.value is False
+        and special_purpose_decision.rule_code.startswith("ORDINARY_")
+    )
+    if "has_rear_windowed_door" not in decisions and ordinary_pickup:
+        decisions["has_rear_windowed_door"] = InferenceDecision(
+            value=False,
+            rule_code="NO_WINDOWED_REAR_DOOR_FOR_ORDINARY_PICKUP",
+            confidence=InferenceConfidence.HIGH,
+            evidence=(
+                _normalized_evidence("body_type", body_type),
+                *special_purpose_decision.evidence,
+            ),
+        )
+
+    def effective_value(field_name: str, explicit_value: Any) -> Any:
+        if explicit_value is not None:
+            return explicit_value
+        decision = decisions.get(field_name)
+        return decision.value if decision is not None else None
+
+    effective_gross_mass = effective_value("gross_mass_kg", gross_mass_kg)
+    technical_classification = classify_vehicle(
+        VehicleClassificationInput(
+            body_type=body_type,
+            vehicle_class=vehicle_class,
+            seat_count_min=seat_count_min,
+            seat_count_max=seat_count_max,
+            gross_mass_kg=effective_gross_mass,
+            curb_mass_kg=curb_mass_kg,
+            curb_mass_kg_min=curb_mass_kg_min,
+            curb_mass_kg_max=curb_mass_kg_max,
+            payload_kg_min=payload_kg_min,
+            payload_kg_max=payload_kg_max,
+            length_mm=length_mm,
+            wheelbase_mm=wheelbase_mm,
+            cargo_length_min_mm=cargo_length_min_mm,
+            cargo_length_max_mm=cargo_length_max_mm,
+            cargo_width_min_mm=cargo_width_min_mm,
+            cargo_width_max_mm=cargo_width_max_mm,
+            cargo_height_min_mm=cargo_height_min_mm,
+            cargo_height_max_mm=cargo_height_max_mm,
+            has_permanent_rear_seats=effective_value(
+                "has_permanent_rear_seats", has_permanent_rear_seats
+            ),
+            has_rear_side_windows=effective_value(
+                "has_rear_side_windows", has_rear_side_windows
+            ),
+            has_rear_windowed_door=effective_value(
+                "has_rear_windowed_door", has_rear_windowed_door
+            ),
+            has_separate_cargo_compartment=effective_value(
+                "has_separate_cargo_compartment",
+                has_separate_cargo_compartment,
+            ),
+            is_special_purpose=effective_value(
+                "is_special_purpose", is_special_purpose
+            ),
+        )
+    )
+    technical_category = None
+    inferred_mass_near_category_boundary = (
+        body_type == "PICKUP"
+        and inferred_gross_mass is not None
+        and any(
+            abs(int(inferred_gross_mass.value) - boundary)
+            <= INFERRED_MASS_CATEGORY_GUARD_KG
+            for boundary in (3500, 12000)
+        )
+    )
+    if technical_classification.status == ClassificationStatus.CLASSIFIED:
+        if technical_classification.tnved_heading == "8703":
+            technical_category = VehicleTechnicalCategory.M1
+        elif (
+            technical_classification.tnved_heading == "8702"
+            and effective_gross_mass is not None
+        ):
+            technical_category = (
+                VehicleTechnicalCategory.M2
+                if effective_gross_mass <= 5000
+                else VehicleTechnicalCategory.M3
+            )
+        elif (
+            technical_classification.tnved_heading == "8704"
+            and effective_gross_mass is not None
+            and not inferred_mass_near_category_boundary
+        ):
+            if effective_gross_mass <= 3500:
+                technical_category = VehicleTechnicalCategory.N1
+            elif effective_gross_mass <= 12000:
+                technical_category = VehicleTechnicalCategory.N2
+            else:
+                technical_category = VehicleTechnicalCategory.N3
+    if technical_category is not None:
+        evidence = [
+            InferenceEvidence(
+                source="vehicle_classification",
+                marker="tnved_heading",
+                raw_value=technical_classification.tnved_heading,
+            )
+        ]
+        if technical_category != VehicleTechnicalCategory.M1:
+            evidence.append(
+                _normalized_evidence("gross_mass_kg", effective_gross_mass)
+            )
+        decisions["vehicle_technical_category"] = InferenceDecision(
+            value=technical_category,
+            rule_code=f"TECHNICAL_CATEGORY_{technical_category.value}",
+            confidence=(
+                InferenceConfidence.MEDIUM
+                if inferred_gross_mass is not None
+                else InferenceConfidence.HIGH
+            ),
+            evidence=tuple(evidence),
+        )
+    category_status = technical_classification.status
+    category_missing_fields = list(technical_classification.missing_fields)
+    category_reason = technical_classification.details.get("reason")
+    if (
+        technical_classification.status == ClassificationStatus.CLASSIFIED
+        and technical_classification.tnved_heading in {"8702", "8704"}
+        and effective_gross_mass is None
+    ):
+        category_status = ClassificationStatus.MISSING_DATA
+        category_missing_fields = ["gross_mass_kg"]
+        category_reason = "TECHNICAL_CATEGORY_REQUIRES_GROSS_MASS"
+    elif inferred_mass_near_category_boundary:
+        category_status = ClassificationStatus.MANUAL_REVIEW
+        category_missing_fields = []
+        category_reason = "INFERRED_GROSS_MASS_NEAR_CATEGORY_BOUNDARY"
+    technical_category_details = {
+        "status": category_status.value,
+        "tnved_heading": technical_classification.tnved_heading,
+        "classification_rule_code": technical_classification.rule_code,
+        "missing_fields": category_missing_fields,
+        "reason": category_reason,
+        "classification_details": technical_classification.details,
+    }
     flags = (INFERRED_INPUTS_USED,) if decisions else ()
     return VehicleAttributeInferenceResult(
         decisions=decisions,
         warnings=warnings,
         flags=flags,
+        details={
+            "vehicle_technical_category": technical_category_details,
+        },
     )
 
 
@@ -977,18 +1419,26 @@ def apply_vehicle_attribute_inference(
         seat_count_min=inference_input.get("seat_count_min"),
         seat_count_max=inference_input.get("seat_count_max"),
         curb_mass_kg=inference_input.get("curb_mass_kg"),
+        curb_mass_kg_min=inference_input.get("curb_mass_kg_min"),
+        curb_mass_kg_max=inference_input.get("curb_mass_kg_max"),
         gross_mass_kg=inference_input.get("gross_mass_kg"),
         payload_kg_min=inference_input.get("payload_kg_min"),
         payload_kg_max=inference_input.get("payload_kg_max"),
+        length_mm=inference_input.get("length_mm"),
+        wheelbase_mm=inference_input.get("wheelbase_mm"),
         cargo_length_min_mm=inference_input.get("cargo_length_min_mm"),
+        cargo_length_max_mm=inference_input.get("cargo_length_max_mm"),
         cargo_width_min_mm=inference_input.get("cargo_width_min_mm"),
+        cargo_width_max_mm=inference_input.get("cargo_width_max_mm"),
         cargo_height_min_mm=inference_input.get("cargo_height_min_mm"),
+        cargo_height_max_mm=inference_input.get("cargo_height_max_mm"),
         has_permanent_rear_seats=inference_input.get("has_permanent_rear_seats"),
         has_rear_side_windows=inference_input.get("has_rear_side_windows"),
         has_rear_windowed_door=inference_input.get("has_rear_windowed_door"),
         has_separate_cargo_compartment=inference_input.get(
             "has_separate_cargo_compartment"
         ),
+        is_special_purpose=inference_input.get("is_special_purpose"),
         spec_name=spec_name,
         series_name=series_name,
     )
@@ -1048,9 +1498,18 @@ def apply_vehicle_attribute_inference(
     updated["inference_details_json"] = {
         "decisions": serialized_decisions,
         "warnings": list(result.warnings),
+        **result.details,
     }
     updated["inference_flags_json"] = (
         [INFERRED_INPUTS_USED] if applied_fields else []
     )
     updated["inference_rules_version"] = result.rules_version
+    if "missing_fields_json" in updated or "is_complete" in updated:
+        missing_fields = set(updated.get("missing_fields_json") or [])
+        if updated.get("body_type") is None:
+            missing_fields.add("body_type")
+        else:
+            missing_fields.discard("body_type")
+        updated["missing_fields_json"] = sorted(missing_fields)
+        updated["is_complete"] = not missing_fields
     return updated
