@@ -18,7 +18,7 @@ RUN python -m pip install --upgrade pip \
     && python -m pip install -r requirements.txt
 
 COPY autohome ./autohome
-COPY scrapy.cfg run_multi.py ./
+COPY scrapy.cfg run_multi.py calculate_import_duties.py ./
 
 USER autohome
 
