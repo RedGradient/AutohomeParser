@@ -340,6 +340,89 @@ class BodyTypeInferenceTests(unittest.TestCase):
         self.assertIsNone(result.value("has_rear_side_windows"))
 
 
+class SeatCountNameInferenceTests(unittest.TestCase):
+    def test_exact_seat_count_is_extracted_from_spec_name(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="VAN",
+            vehicle_class="LIGHT_COMMERCIAL_VAN",
+            spec_name="2021款 厢式车VAN短轴中顶3座",
+        )
+
+        self.assertEqual(result.value("seat_count_min"), 3)
+        self.assertEqual(result.value("seat_count_max"), 3)
+        self.assertEqual(
+            result.decisions["seat_count_min"].rule_code,
+            "SEAT_COUNT_FROM_SPEC_NAME",
+        )
+
+    def test_seat_variants_are_stored_as_range(self):
+        for raw_name, expected in (
+            ("多功能乘用车6/7座", (6, 7)),
+            ("短轴8-9座", (8, 9)),
+            ("商旅版10/11/12座", (10, 12)),
+        ):
+            with self.subTest(raw_name=raw_name):
+                result = infer_vehicle_attributes(
+                    [],
+                    body_type="VAN",
+                    vehicle_class="LIGHT_COMMERCIAL_VAN",
+                    spec_name=raw_name,
+                )
+                self.assertEqual(result.value("seat_count_min"), expected[0])
+                self.assertEqual(result.value("seat_count_max"), expected[1])
+
+    def test_spec_name_has_priority_over_series_name(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="VAN",
+            spec_name="测试6座",
+            series_name="测试9座系列",
+        )
+
+        self.assertEqual(result.value("seat_count_min"), 6)
+        self.assertEqual(
+            result.decisions["seat_count_min"].rule_code,
+            "SEAT_COUNT_FROM_SPEC_NAME",
+        )
+
+    def test_existing_seat_count_is_not_reinferred(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="VAN",
+            seat_count_min=5,
+            seat_count_max=5,
+            spec_name="测试7座",
+        )
+
+        self.assertIsNone(result.value("seat_count_min"))
+        self.assertIsNone(result.value("seat_count_max"))
+
+    def test_conflicting_counts_in_one_name_are_left_unknown(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="VAN",
+            spec_name="测试5座与7座版本",
+        )
+
+        self.assertIsNone(result.value("seat_count_min"))
+        self.assertIn("CONFLICTING_SEAT_COUNTS_IN_NAME", result.warnings)
+
+    def test_inferred_seat_count_is_used_for_bus_classification(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="VAN",
+            vehicle_class="LIGHT_COMMERCIAL_VAN",
+            gross_mass_kg=4800,
+            spec_name="商旅版12座",
+        )
+
+        self.assertEqual(
+            result.value("vehicle_technical_category"),
+            VehicleTechnicalCategory.M2,
+        )
+
+
 class PurposeInferenceTests(unittest.TestCase):
     def test_8705_markers_set_special_purpose(self):
         cases = {
@@ -677,6 +760,27 @@ class InferencePersistenceTests(unittest.TestCase):
         self.assertEqual(first["body_type"], "PICKUP")
         self.assertNotIn("body_type", first["missing_fields_json"])
         self.assertIs(first["is_complete"], True)
+        self.assertEqual(first, second)
+
+    def test_inferred_seat_range_is_persisted_and_idempotent(self):
+        source = self.base_row(
+            body_type="VAN",
+            vehicle_class="LIGHT_COMMERCIAL_VAN",
+        )
+
+        first = apply_vehicle_attribute_inference(
+            source,
+            [],
+            spec_name="多功能乘用车6/7座",
+        )
+        second = apply_vehicle_attribute_inference(
+            first,
+            [],
+            spec_name="多功能乘用车6/7座",
+        )
+
+        self.assertEqual(first["seat_count_min"], 6)
+        self.assertEqual(first["seat_count_max"], 7)
         self.assertEqual(first, second)
 
     def test_infers_truck_gross_mass_from_exact_components(self):

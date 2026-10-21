@@ -51,6 +51,8 @@ NORMALIZED_INPUT_FIELDS = (
 )
 INFERENCE_STORAGE_FIELDS = (
     "body_type",
+    "seat_count_min",
+    "seat_count_max",
     "vehicle_technical_category",
     "gross_mass_kg",
     "has_permanent_rear_seats",

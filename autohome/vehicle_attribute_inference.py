@@ -13,12 +13,15 @@ from autohome.import_duty.classifier import (
 from autohome.import_duty.types import ClassificationStatus
 
 
-VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-21-v7"
+VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-21-v8"
 INFERRED_INPUTS_USED = "INFERRED_INPUTS_USED"
 TRUCK_OCCUPANT_MASS_KG = 65
 INFERRED_MASS_CATEGORY_GUARD_KG = 100
 TRUCK_GROSS_MASS_NAME_RE = re.compile(
     r"(?<![\d.])(?P<tonnes>\d{1,2}(?:\.\d+)?)吨(?=(?:底盘|级|加|\s|$))"
+)
+SEAT_COUNT_NAME_RE = re.compile(
+    r"(?<!\d)(?P<values>\d{1,2}(?:\s*(?:[/／、,，]|[-–—~至])\s*\d{1,2})*)\s*座"
 )
 
 
@@ -143,6 +146,8 @@ INFERRED_STORAGE_FIELDS = frozenset(
         "vehicle_technical_category",
         "gross_mass_kg",
         "body_type",
+        "seat_count_min",
+        "seat_count_max",
     }
 )
 
@@ -608,6 +613,76 @@ def infer_body_type(vehicle_class: str | None) -> InferenceDecision | None:
     )
 
 
+def _seat_count_from_name(
+    raw_name: str,
+    *,
+    source: str,
+) -> tuple[int, int, InferenceEvidence] | None:
+    matches = []
+    for match in SEAT_COUNT_NAME_RE.finditer(raw_name):
+        values = [int(value) for value in re.findall(r"\d+", match.group("values"))]
+        if values and all(1 <= value <= 99 for value in values):
+            matches.append(
+                (
+                    min(values),
+                    max(values),
+                    InferenceEvidence(
+                        source=source,
+                        marker=match.group(0),
+                        raw_value=raw_name,
+                    ),
+                )
+            )
+    unique_ranges = {(minimum, maximum) for minimum, maximum, _ in matches}
+    if len(unique_ranges) != 1:
+        return None
+    minimum, maximum = next(iter(unique_ranges))
+    evidence = next(
+        evidence
+        for candidate_min, candidate_max, evidence in matches
+        if (candidate_min, candidate_max) == (minimum, maximum)
+    )
+    return minimum, maximum, evidence
+
+
+def infer_seat_count_from_names(
+    *,
+    spec_name: str | None,
+    series_name: str | None,
+) -> tuple[dict[str, InferenceDecision], tuple[str, ...]]:
+    """Извлечь точное число или диапазон мест из сырого названия."""
+    sources = (
+        ("specs.raw_json.name", _text(spec_name), "SPEC"),
+        ("series.raw_json.name", _text(series_name), "SERIES"),
+    )
+    for source, raw_name, source_code in sources:
+        if not raw_name:
+            continue
+        raw_matches = list(SEAT_COUNT_NAME_RE.finditer(raw_name))
+        if not raw_matches:
+            continue
+        parsed = _seat_count_from_name(raw_name, source=source)
+        if parsed is None:
+            return {}, ("CONFLICTING_SEAT_COUNTS_IN_NAME",)
+        minimum, maximum, evidence = parsed
+        confidence = InferenceConfidence.HIGH
+        return {
+            "seat_count_min": InferenceDecision(
+                value=minimum,
+                rule_code=f"SEAT_COUNT_FROM_{source_code}_NAME",
+                confidence=confidence,
+                evidence=(evidence,),
+            ),
+            "seat_count_max": InferenceDecision(
+                value=maximum,
+                rule_code=f"SEAT_COUNT_FROM_{source_code}_NAME",
+                confidence=confidence,
+                evidence=(evidence,),
+            ),
+        }, ()
+    return {}, ()
+
+
 def infer_cab_attributes(
     *,
     body_type: str | None,
@@ -974,6 +1049,16 @@ def infer_vehicle_attributes(
             decisions["body_type"] = body_type_decision
             body_type = str(body_type_decision.value)
     decisions.update(infer_parameter_attributes(parameters, body_type=body_type))
+    seat_warnings: tuple[str, ...] = ()
+    if seat_count_min is None and seat_count_max is None:
+        seat_decisions, seat_warnings = infer_seat_count_from_names(
+            spec_name=spec_name,
+            series_name=series_name,
+        )
+        decisions.update(seat_decisions)
+        if seat_decisions:
+            seat_count_min = int(seat_decisions["seat_count_min"].value)
+            seat_count_max = int(seat_decisions["seat_count_max"].value)
     cab_decisions, cab_warnings = infer_cab_attributes(
         body_type=body_type,
         vehicle_class=vehicle_class,
@@ -998,7 +1083,7 @@ def infer_vehicle_attributes(
         spec_name=spec_name,
         series_name=series_name,
     )
-    warnings = (*cab_warnings, *purpose_warnings)
+    warnings = (*cab_warnings, *seat_warnings, *purpose_warnings)
     if purpose is not None:
         decisions["vehicle_purpose_type"] = purpose
         assert isinstance(purpose.value, VehiclePurposeType)
