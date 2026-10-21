@@ -407,7 +407,7 @@ class SeriesGalleryColorItem(scrapy.Item):
     """Цвет кузова или салона из галереи серии."""
 
     series_id = scrapy.Field()
-    color_type = scrapy.Field()
+    color_scope = scrapy.Field()
     color_id = scrapy.Field()
     name = scrapy.Field()
     color_values = scrapy.Field()
@@ -436,7 +436,7 @@ class SeriesPhotoColorItem(scrapy.Item):
 
     photo_id = scrapy.Field()
     series_id = scrapy.Field()
-    color_type = scrapy.Field()
+    color_scope = scrapy.Field()
     color_id = scrapy.Field()
 
 
@@ -446,7 +446,7 @@ class GalleryCrawlTaskItem(scrapy.Item):
     id = scrapy.Field()
     series_id = scrapy.Field()
     category_id = scrapy.Field()
-    color_type = scrapy.Field()
+    color_scope = scrapy.Field()
     color_id = scrapy.Field()
     page_url = scrapy.Field()
     status = scrapy.Field()

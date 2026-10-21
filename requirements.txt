@@ -1,3 +1,7 @@
 scrapy
 sqlalchemy
 psycopg[binary]
+fastapi
+uvicorn[standard]
+PyYAML
+httpx

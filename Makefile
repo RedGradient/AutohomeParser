@@ -16,6 +16,8 @@ AUDIT_VEHICLE_CLASSIFICATIONS_ARGS ?=
 AUDIT_INDIRECT_VEHICLE_ATTRIBUTES_ARGS ?=
 BACKFILL_VEHICLE_ATTRIBUTE_INFERENCES_ARGS ?=
 CALCULATE_IMPORT_DUTIES_ARGS ?=
+API_HOST ?= 0.0.0.0
+API_PORT ?= 8000
 DATABASE_URL ?= postgresql+psycopg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@127.0.0.1:$(POSTGRES_PORT)/$(POSTGRES_DB)
 
 # Используемые по умолчанию сетевые интерфейсы.
@@ -28,7 +30,7 @@ ETH_TABLE := 10102
 WIFI_PRIORITY := 10101
 ETH_PRIORITY := 10102
 
-.PHONY: help network-up network-down network-status network-test postgres-up parser-run parser-resume database-reset parameters-reset build-modifications normalize-vehicle-attributes audit-vehicle-classifications audit-indirect-vehicle-attributes backfill-vehicle-attribute-inferences translate-db calculate-import-duties docker-down
+.PHONY: help network-up network-down network-status network-test postgres-up parser-run parser-resume api-run database-reset parameters-reset build-modifications normalize-vehicle-attributes audit-vehicle-classifications audit-indirect-vehicle-attributes backfill-vehicle-attribute-inferences translate-db calculate-import-duties docker-down
 
 help:
 	@echo "Доступные команды:"
@@ -39,6 +41,7 @@ help:
 	@echo "  make postgres-up     — запустить PostgreSQL"
 	@echo "  make parser-run      — запустить локальный парсер"
 	@echo "  make parser-resume   — дозагрузить конфигурации, продажи и галереи"
+	@echo "  make api-run         — запустить FastAPI и Swagger UI"
 	@echo "  make database-reset  — удалить всю БД и создать актуальные таблицы"
 	@echo "  make parameters-reset — пересоздать только таблицы характеристик"
 	@echo "  make build-modifications — нормализовать параметры и собрать модификации"
@@ -129,6 +132,11 @@ parser-resume: postgres-up
 		--interfaces '$(AUTOHOME_INTERFACES)' \
 		--shutdown-timeout '$(SHUTDOWN_TIMEOUT)' \
 		--resume-configs
+
+api-run: postgres-up
+	@DATABASE_URL='$(DATABASE_URL)' \
+		.venv/bin/uvicorn autohome.api.app:app \
+		--host '$(API_HOST)' --port '$(API_PORT)'
 
 database-reset: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \

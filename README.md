@@ -15,6 +15,23 @@ python -m pip install -r requirements.txt
 scrapy crawl cars
 ```
 
+## HTTP API и Swagger
+
+API читает ту же базу, что и парсер. Адрес берётся из `DATABASE_URL`, а без
+переменной используется `data/autohome.sqlite3`.
+
+```bash
+uvicorn autohome.api.app:app --host 0.0.0.0 --port 8000
+```
+
+После запуска доступны:
+
+- API: `http://localhost:8000/api/v1`;
+- Swagger UI: `http://localhost:8000/docs`;
+- ReDoc: `http://localhost:8000/redoc`;
+- OpenAPI JSON: `http://localhost:8000/openapi.json`;
+- исходная спецификация: `docs/openapi.yaml`.
+
 Ограниченная проверка каталога:
 
 ```bash
