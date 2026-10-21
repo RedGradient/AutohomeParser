@@ -6,8 +6,14 @@ from enum import StrEnum
 import re
 from typing import Any, Iterable, Mapping
 
+from autohome.import_duty.classifier import (
+    VehicleClassificationInput,
+    classify_vehicle,
+)
+from autohome.import_duty.types import ClassificationStatus
 
-VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-20-v2"
+
+VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-21-v3"
 INFERRED_INPUTS_USED = "INFERRED_INPUTS_USED"
 TRUCK_OCCUPANT_MASS_KG = 65
 TRUCK_GROSS_MASS_NAME_RE = re.compile(
@@ -29,6 +35,17 @@ class VehiclePurposeType(StrEnum):
     MOTORHOME = "MOTORHOME"
     REFUSE_TRUCK = "REFUSE_TRUCK"
     UNKNOWN_SPECIAL = "UNKNOWN_SPECIAL"
+
+
+class VehicleTechnicalCategory(StrEnum):
+    """Техническая категория колёсного транспортного средства."""
+
+    M1 = "M1"
+    M2 = "M2"
+    M3 = "M3"
+    N1 = "N1"
+    N2 = "N2"
+    N3 = "N3"
 
 
 class InferenceConfidence(StrEnum):
@@ -91,7 +108,7 @@ class InferenceEvidence:
 class InferenceDecision:
     """Выведенное значение одного нормализованного поля."""
 
-    value: bool | int | VehiclePurposeType
+    value: bool | int | VehiclePurposeType | VehicleTechnicalCategory
     rule_code: str
     confidence: InferenceConfidence
     evidence: tuple[InferenceEvidence, ...]
@@ -104,9 +121,12 @@ class VehicleAttributeInferenceResult:
     decisions: dict[str, InferenceDecision] = field(default_factory=dict)
     warnings: tuple[str, ...] = ()
     flags: tuple[str, ...] = ()
+    details: dict[str, Any] = field(default_factory=dict)
     rules_version: str = VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION
 
-    def value(self, field_name: str) -> bool | int | VehiclePurposeType | None:
+    def value(
+        self, field_name: str
+    ) -> bool | int | VehiclePurposeType | VehicleTechnicalCategory | None:
         decision = self.decisions.get(field_name)
         return decision.value if decision is not None else None
 
@@ -119,6 +139,7 @@ INFERRED_STORAGE_FIELDS = frozenset(
         "has_separate_cargo_compartment",
         "is_special_purpose",
         "vehicle_purpose_type",
+        "vehicle_technical_category",
         "gross_mass_kg",
     }
 )
@@ -842,13 +863,19 @@ def infer_vehicle_attributes(
     gross_mass_kg: int | None = None,
     payload_kg_min: int | None = None,
     payload_kg_max: int | None = None,
+    length_mm: int | None = None,
+    wheelbase_mm: int | None = None,
     cargo_length_min_mm: int | None = None,
+    cargo_length_max_mm: int | None = None,
     cargo_width_min_mm: int | None = None,
+    cargo_width_max_mm: int | None = None,
     cargo_height_min_mm: int | None = None,
+    cargo_height_max_mm: int | None = None,
     has_permanent_rear_seats: bool | None = None,
     has_rear_side_windows: bool | None = None,
     has_rear_windowed_door: bool | None = None,
     has_separate_cargo_compartment: bool | None = None,
+    is_special_purpose: bool | None = None,
     spec_name: str | None = None,
     series_name: str | None = None,
 ) -> VehicleAttributeInferenceResult:
@@ -931,11 +958,122 @@ def infer_vehicle_attributes(
         )
         if ordinary_transport is not None:
             decisions["is_special_purpose"] = ordinary_transport
+
+    def effective_value(field_name: str, explicit_value: Any) -> Any:
+        if explicit_value is not None:
+            return explicit_value
+        decision = decisions.get(field_name)
+        return decision.value if decision is not None else None
+
+    effective_gross_mass = effective_value("gross_mass_kg", gross_mass_kg)
+    technical_classification = classify_vehicle(
+        VehicleClassificationInput(
+            body_type=body_type,
+            vehicle_class=vehicle_class,
+            seat_count_min=seat_count_min,
+            seat_count_max=seat_count_max,
+            gross_mass_kg=effective_gross_mass,
+            curb_mass_kg=curb_mass_kg,
+            payload_kg_min=payload_kg_min,
+            payload_kg_max=payload_kg_max,
+            length_mm=length_mm,
+            wheelbase_mm=wheelbase_mm,
+            cargo_length_min_mm=cargo_length_min_mm,
+            cargo_length_max_mm=cargo_length_max_mm,
+            cargo_width_min_mm=cargo_width_min_mm,
+            cargo_width_max_mm=cargo_width_max_mm,
+            cargo_height_min_mm=cargo_height_min_mm,
+            cargo_height_max_mm=cargo_height_max_mm,
+            has_permanent_rear_seats=effective_value(
+                "has_permanent_rear_seats", has_permanent_rear_seats
+            ),
+            has_rear_side_windows=effective_value(
+                "has_rear_side_windows", has_rear_side_windows
+            ),
+            has_rear_windowed_door=effective_value(
+                "has_rear_windowed_door", has_rear_windowed_door
+            ),
+            has_separate_cargo_compartment=effective_value(
+                "has_separate_cargo_compartment",
+                has_separate_cargo_compartment,
+            ),
+            is_special_purpose=effective_value(
+                "is_special_purpose", is_special_purpose
+            ),
+        )
+    )
+    technical_category = None
+    if technical_classification.status == ClassificationStatus.CLASSIFIED:
+        if technical_classification.tnved_heading == "8703":
+            technical_category = VehicleTechnicalCategory.M1
+        elif (
+            technical_classification.tnved_heading == "8702"
+            and effective_gross_mass is not None
+        ):
+            technical_category = (
+                VehicleTechnicalCategory.M2
+                if effective_gross_mass <= 5000
+                else VehicleTechnicalCategory.M3
+            )
+        elif (
+            technical_classification.tnved_heading == "8704"
+            and effective_gross_mass is not None
+        ):
+            if effective_gross_mass <= 3500:
+                technical_category = VehicleTechnicalCategory.N1
+            elif effective_gross_mass <= 12000:
+                technical_category = VehicleTechnicalCategory.N2
+            else:
+                technical_category = VehicleTechnicalCategory.N3
+    if technical_category is not None:
+        evidence = [
+            InferenceEvidence(
+                source="vehicle_classification",
+                marker="tnved_heading",
+                raw_value=technical_classification.tnved_heading,
+            )
+        ]
+        if technical_category != VehicleTechnicalCategory.M1:
+            evidence.append(
+                _normalized_evidence("gross_mass_kg", effective_gross_mass)
+            )
+        decisions["vehicle_technical_category"] = InferenceDecision(
+            value=technical_category,
+            rule_code=f"TECHNICAL_CATEGORY_{technical_category.value}",
+            confidence=(
+                InferenceConfidence.MEDIUM
+                if inferred_gross_mass is not None
+                else InferenceConfidence.HIGH
+            ),
+            evidence=tuple(evidence),
+        )
+    category_status = technical_classification.status
+    category_missing_fields = list(technical_classification.missing_fields)
+    category_reason = technical_classification.details.get("reason")
+    if (
+        technical_classification.status == ClassificationStatus.CLASSIFIED
+        and technical_classification.tnved_heading in {"8702", "8704"}
+        and effective_gross_mass is None
+    ):
+        category_status = ClassificationStatus.MISSING_DATA
+        category_missing_fields = ["gross_mass_kg"]
+        category_reason = "TECHNICAL_CATEGORY_REQUIRES_GROSS_MASS"
+    technical_category_details = {
+        "status": category_status.value,
+        "tnved_heading": technical_classification.tnved_heading,
+        "classification_rule_code": technical_classification.rule_code,
+        "missing_fields": category_missing_fields,
+        "reason": category_reason,
+        "classification_details": technical_classification.details,
+    }
     flags = (INFERRED_INPUTS_USED,) if decisions else ()
     return VehicleAttributeInferenceResult(
         decisions=decisions,
         warnings=warnings,
         flags=flags,
+        details={
+            "vehicle_technical_category": technical_category_details,
+        },
     )
 
 
@@ -980,15 +1118,21 @@ def apply_vehicle_attribute_inference(
         gross_mass_kg=inference_input.get("gross_mass_kg"),
         payload_kg_min=inference_input.get("payload_kg_min"),
         payload_kg_max=inference_input.get("payload_kg_max"),
+        length_mm=inference_input.get("length_mm"),
+        wheelbase_mm=inference_input.get("wheelbase_mm"),
         cargo_length_min_mm=inference_input.get("cargo_length_min_mm"),
+        cargo_length_max_mm=inference_input.get("cargo_length_max_mm"),
         cargo_width_min_mm=inference_input.get("cargo_width_min_mm"),
+        cargo_width_max_mm=inference_input.get("cargo_width_max_mm"),
         cargo_height_min_mm=inference_input.get("cargo_height_min_mm"),
+        cargo_height_max_mm=inference_input.get("cargo_height_max_mm"),
         has_permanent_rear_seats=inference_input.get("has_permanent_rear_seats"),
         has_rear_side_windows=inference_input.get("has_rear_side_windows"),
         has_rear_windowed_door=inference_input.get("has_rear_windowed_door"),
         has_separate_cargo_compartment=inference_input.get(
             "has_separate_cargo_compartment"
         ),
+        is_special_purpose=inference_input.get("is_special_purpose"),
         spec_name=spec_name,
         series_name=series_name,
     )
@@ -1048,6 +1192,7 @@ def apply_vehicle_attribute_inference(
     updated["inference_details_json"] = {
         "decisions": serialized_decisions,
         "warnings": list(result.warnings),
+        **result.details,
     }
     updated["inference_flags_json"] = (
         [INFERRED_INPUTS_USED] if applied_fields else []

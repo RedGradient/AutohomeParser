@@ -32,9 +32,14 @@ NORMALIZED_INPUT_FIELDS = (
     "gross_mass_kg",
     "payload_kg_min",
     "payload_kg_max",
+    "length_mm",
+    "wheelbase_mm",
     "cargo_length_min_mm",
+    "cargo_length_max_mm",
     "cargo_width_min_mm",
+    "cargo_width_max_mm",
     "cargo_height_min_mm",
+    "cargo_height_max_mm",
     "has_permanent_rear_seats",
     "has_rear_side_windows",
     "has_rear_windowed_door",
@@ -43,6 +48,7 @@ NORMALIZED_INPUT_FIELDS = (
     "warnings_json",
 )
 INFERENCE_STORAGE_FIELDS = (
+    "vehicle_technical_category",
     "gross_mass_kg",
     "has_permanent_rear_seats",
     "has_rear_side_windows",
@@ -56,6 +62,7 @@ INFERENCE_STORAGE_FIELDS = (
     "inference_rules_version",
 )
 OPTIONAL_EXISTING_FIELDS = (
+    "vehicle_technical_category",
     "vehicle_purpose_type",
     "inference_details_json",
     "inference_flags_json",
@@ -260,6 +267,10 @@ def _record_counts(counts: Counter, updates: list[dict[str, Any]]) -> None:
                 counts[f"field_{field_name}_applied"] += 1
         if row.get("vehicle_purpose_type"):
             counts[f"purpose_{row['vehicle_purpose_type']}"] += 1
+        if row.get("vehicle_technical_category"):
+            counts[
+                f"technical_category_{row['vehicle_technical_category']}"
+            ] += 1
 
 
 def backfill(engine, args: argparse.Namespace) -> Counter:

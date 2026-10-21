@@ -7,6 +7,7 @@ from autohome.vehicle_attribute_inference import (
     InferenceConfidence,
     RawParameter,
     VehiclePurposeType,
+    VehicleTechnicalCategory,
     apply_vehicle_attribute_inference,
     infer_vehicle_attributes,
 )
@@ -224,6 +225,110 @@ class PurposeInferenceTests(unittest.TestCase):
             VehiclePurposeType.UNKNOWN_SPECIAL,
         )
         self.assertIn("CONFLICTING_PURPOSE_MARKERS", result.warnings)
+
+
+class TechnicalCategoryInferenceTests(unittest.TestCase):
+    def test_passenger_vehicle_up_to_nine_seats_is_m1(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="SUV",
+            vehicle_class="MIDSIZE_SUV",
+            seat_count_min=5,
+            seat_count_max=7,
+        )
+
+        self.assertEqual(
+            result.value("vehicle_technical_category"),
+            VehicleTechnicalCategory.M1,
+        )
+
+    def test_bus_categories_are_split_at_five_tonnes(self):
+        cases = (
+            (5000, VehicleTechnicalCategory.M2),
+            (5001, VehicleTechnicalCategory.M3),
+        )
+        for gross_mass, expected in cases:
+            with self.subTest(gross_mass=gross_mass):
+                result = infer_vehicle_attributes(
+                    [],
+                    body_type="VAN",
+                    vehicle_class="LIGHT_COMMERCIAL_VAN",
+                    seat_count_min=11,
+                    seat_count_max=11,
+                    gross_mass_kg=gross_mass,
+                    is_special_purpose=False,
+                )
+                self.assertEqual(
+                    result.value("vehicle_technical_category"), expected
+                )
+
+    def test_goods_categories_use_3500_and_12000_kg_boundaries(self):
+        cases = (
+            (3500, VehicleTechnicalCategory.N1),
+            (3501, VehicleTechnicalCategory.N2),
+            (12000, VehicleTechnicalCategory.N2),
+            (12001, VehicleTechnicalCategory.N3),
+        )
+        for gross_mass, expected in cases:
+            with self.subTest(gross_mass=gross_mass):
+                result = infer_vehicle_attributes(
+                    [],
+                    body_type="TRUCK",
+                    vehicle_class="LIGHT_TRUCK",
+                    gross_mass_kg=gross_mass,
+                    is_special_purpose=False,
+                )
+                self.assertEqual(
+                    result.value("vehicle_technical_category"), expected
+                )
+
+    def test_bus_without_gross_mass_remains_unknown(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="VAN",
+            vehicle_class="LIGHT_COMMERCIAL_VAN",
+            seat_count_min=11,
+            seat_count_max=11,
+            is_special_purpose=False,
+        )
+
+        self.assertIsNone(result.value("vehicle_technical_category"))
+        self.assertEqual(
+            result.details["vehicle_technical_category"]["status"],
+            "MISSING_DATA",
+        )
+
+    def test_ambiguous_passenger_and_goods_vehicle_remains_unknown(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="TRUCK",
+            vehicle_class="MIDSIZE_CAR",
+            seat_count_min=5,
+            seat_count_max=5,
+            gross_mass_kg=3000,
+            is_special_purpose=False,
+        )
+
+        self.assertIsNone(result.value("vehicle_technical_category"))
+        self.assertEqual(
+            result.details["vehicle_technical_category"]["status"],
+            "MANUAL_REVIEW",
+        )
+
+    def test_explicit_special_purpose_truck_is_not_assigned_n_category(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="TRUCK",
+            vehicle_class="LIGHT_TRUCK",
+            gross_mass_kg=3500,
+            is_special_purpose=True,
+        )
+
+        self.assertIsNone(result.value("vehicle_technical_category"))
+        self.assertEqual(
+            result.details["vehicle_technical_category"]["tnved_heading"],
+            "8705",
+        )
 
 
 class OrdinaryTransportInferenceTests(unittest.TestCase):
