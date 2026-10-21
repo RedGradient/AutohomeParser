@@ -165,11 +165,26 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         self.app.state.engine.dispose()
         self.temp_dir.cleanup()
 
-    async def test_swagger_uses_committed_openapi_specification(self):
+    async def test_swagger_uses_documented_pydantic_schemas(self):
         response = await self.client.get("/openapi.json")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["openapi"], "3.1.0")
-        self.assertIn("/series/{series_id}/modifications", response.json()["paths"])
+        schema = response.json()
+        self.assertEqual(schema["openapi"], "3.1.0")
+        self.assertIn(
+            "/api/v1/series/{series_id}/modifications",
+            schema["paths"],
+        )
+        spec_schema = schema["components"]["schemas"]["SpecResponse"]
+        self.assertIn("description", spec_schema)
+        self.assertEqual(
+            spec_schema["properties"]["state"]["description"],
+            "Исходный код стадии продаж комплектации.",
+        )
+        operation = schema["paths"]["/api/v1/specs"]["get"]
+        self.assertEqual(
+            operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/SpecPage",
+        )
         self.assertEqual((await self.client.get("/docs")).status_code, 200)
 
     async def test_modifications_are_filtered_by_series(self):

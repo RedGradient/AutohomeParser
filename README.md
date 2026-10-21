@@ -29,8 +29,10 @@ uvicorn autohome.api.app:app --host 0.0.0.0 --port 8000
 - API: `http://localhost:8000/api/v1`;
 - Swagger UI: `http://localhost:8000/docs`;
 - ReDoc: `http://localhost:8000/redoc`;
-- OpenAPI JSON: `http://localhost:8000/openapi.json`;
-- исходная спецификация: `docs/openapi.yaml`.
+- OpenAPI JSON: `http://localhost:8000/openapi.json`.
+
+OpenAPI формируется автоматически из документированных Pydantic-схем в
+`autohome/api/schemas.py`, поэтому описание API всегда соответствует коду.
 
 Ограниченная проверка каталога:
 

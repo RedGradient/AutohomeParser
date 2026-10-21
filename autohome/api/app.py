@@ -9,7 +9,6 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
@@ -35,9 +34,24 @@ from autohome.models import (
     SpecPowertrain,
     SpecVehicleAttributes,
 )
+from autohome.api.schemas import (
+    BrandPage,
+    BrandResponse,
+    CustomsCalculationPage,
+    CustomsCalculationResponse,
+    ErrorResponse,
+    GalleryColorsResponse,
+    ModificationPage,
+    ModificationResponse,
+    ParameterGroupsResponse,
+    PhotoPage,
+    SeriesPage,
+    SeriesResponse,
+    SpecDetailResponse,
+    SpecPage,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-OPENAPI_PATH = PROJECT_ROOT / "docs" / "openapi.yaml"
 DEFAULT_DATABASE_URL = f"sqlite:///{(PROJECT_ROOT / 'data' / 'autohome.sqlite3').resolve()}"
 
 PriceType = Literal["effective", "guide", "dealer"]
@@ -244,10 +258,26 @@ def _apply_spec_filters(
 def create_app(database_url: str | None = None) -> FastAPI:
     application = FastAPI(
         title="Autohome Catalog API",
+        description=(
+            "API чтения каталога Autohome: бренды, серии, комплектации, "
+            "технические модификации, характеристики, фотографии и "
+            "предварительно рассчитанные таможенные платежи."
+        ),
         version="1.0.0",
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
+        openapi_tags=[
+            {"name": "Brands", "description": "Бренды автомобилей."},
+            {"name": "Series", "description": "Серии и их изображения."},
+            {"name": "Modifications", "description": "Нормализованные технические модификации."},
+            {"name": "Specs", "description": "Комплектации и полные характеристики."},
+            {"name": "Customs", "description": "Сохранённые расчёты таможенных платежей."},
+        ],
+        responses={
+            400: {"model": ErrorResponse, "description": "Некорректный фильтр, диапазон или курсор."},
+            404: {"model": ErrorResponse, "description": "Запрошенная сущность не найдена."},
+        },
     )
     url = database_url or os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
     connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
@@ -259,14 +289,6 @@ def create_app(database_url: str | None = None) -> FastAPI:
     async def get_session() -> AsyncGenerator[Session, None]:
         with session_factory() as session:
             yield session
-
-    def load_openapi():
-        if application.openapi_schema:
-            return application.openapi_schema
-        application.openapi_schema = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
-        return application.openapi_schema
-
-    application.openapi = load_openapi
 
     @application.exception_handler(HTTPException)
     async def http_exception_handler(_, exc: HTTPException):
@@ -280,7 +302,13 @@ def create_app(database_url: str | None = None) -> FastAPI:
     async def health():
         return {"status": "ok"}
 
-    @application.get("/api/v1/brands")
+    @application.get(
+        "/api/v1/brands",
+        response_model=BrandPage,
+        tags=["Brands"],
+        summary="Получить бренды",
+        description="Возвращает бренды с ценовым диапазоном и курсорной пагинацией.",
+    )
     async def brands(
         q: str | None = None,
         manufacturer_id: int | None = None,
@@ -333,7 +361,12 @@ def create_app(database_url: str | None = None) -> FastAPI:
         ]
         return {"items": items, "pagination": pagination}
 
-    @application.get("/api/v1/brands/{brand_id}")
+    @application.get(
+        "/api/v1/brands/{brand_id}",
+        response_model=BrandResponse,
+        tags=["Brands"],
+        summary="Получить бренд",
+    )
     async def brand_detail(brand_id: int, session: Session = Depends(get_session)):
         brand = session.get(Brand, brand_id)
         if brand is None:
@@ -391,7 +424,13 @@ def create_app(database_url: str | None = None) -> FastAPI:
             )
         return result
 
-    @application.get("/api/v1/series")
+    @application.get(
+        "/api/v1/series",
+        response_model=SeriesPage,
+        tags=["Series"],
+        summary="Получить серии",
+        description="Фильтрует серии по бренду, производителю и характеристикам комплектаций.",
+    )
     async def series_list(
         q: str | None = None, brand_id: int | None = None, manufacturer_id: int | None = None,
         is_new_energy: bool | None = None, state: int | None = None,
@@ -448,7 +487,12 @@ def create_app(database_url: str | None = None) -> FastAPI:
         } for item, brand, manufacturer, minimum, maximum in rows]
         return {"items": items, "pagination": pagination}
 
-    @application.get("/api/v1/series/{series_id}")
+    @application.get(
+        "/api/v1/series/{series_id}",
+        response_model=SeriesResponse,
+        tags=["Series"],
+        summary="Получить серию",
+    )
     async def series_detail(series_id: int, session: Session = Depends(get_session)):
         row = session.execute(series_statement().where(Series.id == series_id)).one_or_none()
         if row is None:
@@ -495,7 +539,12 @@ def create_app(database_url: str | None = None) -> FastAPI:
         } for item, minimum, maximum in rows]
         return {"items": items, "pagination": pagination}
 
-    @application.get("/api/v1/modifications")
+    @application.get(
+        "/api/v1/modifications",
+        response_model=ModificationPage,
+        tags=["Modifications"],
+        summary="Получить модификации",
+    )
     async def modifications(
         series_id: int | None = None, brand_id: int | None = None,
         year_from: int | None = None, year_to: int | None = None,
@@ -519,7 +568,12 @@ def create_app(database_url: str | None = None) -> FastAPI:
             session, **{key: value for key, value in locals().items() if key in argument_names}
         )
 
-    @application.get("/api/v1/series/{series_id}/modifications")
+    @application.get(
+        "/api/v1/series/{series_id}/modifications",
+        response_model=ModificationPage,
+        tags=["Modifications"],
+        summary="Получить модификации серии",
+    )
     async def series_modifications(
         series_id: int, year_from: int | None = None, year_to: int | None = None,
         energy_type: str | None = None, body_type: str | None = None,
@@ -538,7 +592,12 @@ def create_app(database_url: str | None = None) -> FastAPI:
             power_hp_to=power_hp_to, price_from=price_from, price_to=price_to,
             price_type=price_type, limit=limit, cursor=cursor)
 
-    @application.get("/api/v1/modifications/{modification_id}")
+    @application.get(
+        "/api/v1/modifications/{modification_id}",
+        response_model=ModificationResponse,
+        tags=["Modifications"],
+        summary="Получить модификацию",
+    )
     async def modification_detail(modification_id: int, session: Session = Depends(get_session)):
         item = session.get(Modification, modification_id)
         if item is None: raise _not_found("Modification")
@@ -562,7 +621,13 @@ def create_app(database_url: str | None = None) -> FastAPI:
         rows, pagination = _page(session, statement, limit, cursor)
         return {"items": [_spec_payload(row) for row in rows], "pagination": pagination}
 
-    @application.get("/api/v1/specs")
+    @application.get(
+        "/api/v1/specs",
+        response_model=SpecPage,
+        tags=["Specs"],
+        summary="Получить комплектации",
+        description="Возвращает комплектации с ценами и нормализованной силовой установкой.",
+    )
     async def specs(
         q: str | None = None, brand_id: int | None = None, series_id: int | None = None,
         modification_id: int | None = None, manufacturer_id: int | None = None,
@@ -588,7 +653,12 @@ def create_app(database_url: str | None = None) -> FastAPI:
         values = {key: value for key, value in locals().items() if key in filter_names}
         return specs_impl(session, limit, cursor, sort=sort, order=order, **values)
 
-    @application.get("/api/v1/modifications/{modification_id}/specs")
+    @application.get(
+        "/api/v1/modifications/{modification_id}/specs",
+        response_model=SpecPage,
+        tags=["Specs"],
+        summary="Получить комплектации модификации",
+    )
     async def modification_specs(modification_id: int, price_from: Decimal | None = None,
         price_to: Decimal | None = None, price_type: PriceType = "effective",
         limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
@@ -597,13 +667,23 @@ def create_app(database_url: str | None = None) -> FastAPI:
         return specs_impl(session, limit, cursor, modification_id=modification_id,
                           price_from=price_from, price_to=price_to, price_type=price_type)
 
-    @application.get("/api/v1/specs/{spec_id}")
+    @application.get(
+        "/api/v1/specs/{spec_id}",
+        response_model=SpecDetailResponse,
+        tags=["Specs"],
+        summary="Получить комплектацию",
+    )
     async def spec_detail(spec_id: int, session: Session = Depends(get_session)):
         row = session.execute(_spec_select().where(Spec.id == spec_id)).one_or_none()
         if row is None: raise _not_found("Spec")
         return _spec_payload(row, detail=True)
 
-    @application.get("/api/v1/specs/{spec_id}/parameters")
+    @application.get(
+        "/api/v1/specs/{spec_id}/parameters",
+        response_model=ParameterGroupsResponse,
+        tags=["Specs"],
+        summary="Получить полную конфигурацию комплектации",
+    )
     async def spec_parameters(spec_id: int, group_id: int | None = None, section_id: int | None = None,
                         session: Session = Depends(get_session)):
         if session.get(Spec, spec_id) is None: raise _not_found("Spec")
@@ -631,7 +711,12 @@ def create_app(database_url: str | None = None) -> FastAPI:
                 "video_url": value.video_url, "subitems": subitems_by_parameter.get(definition.id, [])})
         return {"items": list(groups.values())}
 
-    @application.get("/api/v1/series/{series_id}/photos")
+    @application.get(
+        "/api/v1/series/{series_id}/photos",
+        response_model=PhotoPage,
+        tags=["Series"],
+        summary="Получить фотографии серии",
+    )
     async def photos(series_id: int, spec_id: int | None = None, category_id: int | None = None,
                color_scope: str | None = None, color_id: int | None = None,
                limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
@@ -667,7 +752,12 @@ def create_app(database_url: str | None = None) -> FastAPI:
             "colors": by_photo.get(photo.id, [])} for photo in photos_list]
         return {"items": items, "pagination": pagination}
 
-    @application.get("/api/v1/series/{series_id}/gallery-colors")
+    @application.get(
+        "/api/v1/series/{series_id}/gallery-colors",
+        response_model=GalleryColorsResponse,
+        tags=["Series"],
+        summary="Получить цвета галереи",
+    )
     async def gallery_colors(series_id: int, color_scope: str | None = None, session: Session = Depends(get_session)):
         if session.get(Series, series_id) is None: raise _not_found("Series")
         statement = select(SeriesGalleryColor).where(SeriesGalleryColor.series_id == series_id)
@@ -710,7 +800,12 @@ def create_app(database_url: str | None = None) -> FastAPI:
         rows, pagination = _page(session, statement, limit, cursor)
         return {"items": [calculation_payload(session, row[0]) for row in rows], "pagination": pagination}
 
-    @application.get("/api/v1/customs-calculations")
+    @application.get(
+        "/api/v1/customs-calculations",
+        response_model=CustomsCalculationPage,
+        tags=["Customs"],
+        summary="Получить таможенные расчёты",
+    )
     async def calculations(spec_id: int | None = None, brand_id: int | None = None, series_id: int | None = None,
                      importer_type: str | None = None, status: str | None = None,
                      calculation_date_from: date | None = None, calculation_date_to: date | None = None,
@@ -721,13 +816,23 @@ def create_app(database_url: str | None = None) -> FastAPI:
             series_id=series_id, importer_type=importer_type, status=status,
             calculation_date_from=calculation_date_from, calculation_date_to=calculation_date_to)
 
-    @application.get("/api/v1/customs-calculations/{calculation_id}")
+    @application.get(
+        "/api/v1/customs-calculations/{calculation_id}",
+        response_model=CustomsCalculationResponse,
+        tags=["Customs"],
+        summary="Получить таможенный расчёт",
+    )
     async def calculation_detail(calculation_id: int, session: Session = Depends(get_session)):
         item = session.get(CustomsCalculation, calculation_id)
         if item is None: raise _not_found("Customs calculation")
         return calculation_payload(session, item)
 
-    @application.get("/api/v1/specs/{spec_id}/customs-calculations")
+    @application.get(
+        "/api/v1/specs/{spec_id}/customs-calculations",
+        response_model=CustomsCalculationPage,
+        tags=["Customs"],
+        summary="Получить таможенные расчёты комплектации",
+    )
     async def spec_calculations(spec_id: int, importer_type: str | None = None,
                           calculation_date: date | None = None,
                           limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
