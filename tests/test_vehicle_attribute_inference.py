@@ -423,6 +423,69 @@ class SeatCountNameInferenceTests(unittest.TestCase):
         )
 
 
+class CargoCompartmentNameInferenceTests(unittest.TestCase):
+    def test_cargo_van_markers_prove_separate_cargo_compartment(self):
+        for body_type, spec_name in (
+            ("VAN", "2024款 厢货长轴高顶3座"),
+            ("TRUCK", "2025款 EC5S双排厢货"),
+            ("MPV", "2021款 1.6L 厢货工程狮 2座"),
+            ("TRUCK", "2021款 创业版5座厢式车"),
+        ):
+            with self.subTest(body_type=body_type, spec_name=spec_name):
+                result = infer_vehicle_attributes(
+                    [],
+                    body_type=body_type,
+                    spec_name=spec_name,
+                )
+                decision = result.decisions["has_separate_cargo_compartment"]
+                self.assertIs(decision.value, True)
+                self.assertEqual(
+                    decision.rule_code,
+                    "SEPARATE_CARGO_COMPARTMENT_FROM_CARGO_VAN_NAME",
+                )
+
+    def test_series_name_marker_does_not_apply_to_every_spec(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="VAN",
+            spec_name="2025款 пассажирская версия",
+            series_name="测试厢货系列",
+        )
+
+        self.assertIsNone(result.value("has_separate_cargo_compartment"))
+
+    def test_cargo_marker_is_ignored_for_unsupported_body(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="SEDAN",
+            spec_name="测试厢货版本",
+        )
+
+        self.assertIsNone(result.value("has_separate_cargo_compartment"))
+
+    def test_explicit_cargo_compartment_value_is_not_reinferred(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="VAN",
+            has_separate_cargo_compartment=False,
+            spec_name="测试厢货版本",
+        )
+
+        self.assertIsNone(result.value("has_separate_cargo_compartment"))
+
+    def test_parameter_evidence_keeps_priority_over_name_marker(self):
+        result = infer_vehicle_attributes(
+            [parameter("货箱尺寸(mm)", itemname="3000x1800x400")],
+            body_type="TRUCK",
+            spec_name="测试厢货版本",
+        )
+
+        self.assertEqual(
+            result.decisions["has_separate_cargo_compartment"].rule_code,
+            "CARGO_BOX_DIMENSIONS_WITH_GOODS_BODY",
+        )
+
+
 class PurposeInferenceTests(unittest.TestCase):
     def test_8705_markers_set_special_purpose(self):
         cases = {

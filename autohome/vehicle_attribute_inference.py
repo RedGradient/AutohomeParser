@@ -13,7 +13,7 @@ from autohome.import_duty.classifier import (
 from autohome.import_duty.types import ClassificationStatus
 
 
-VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-21-v9"
+VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-21-v10"
 INFERRED_INPUTS_USED = "INFERRED_INPUTS_USED"
 TRUCK_OCCUPANT_MASS_KG = 65
 INFERRED_MASS_CATEGORY_GUARD_KG = 100
@@ -192,6 +192,8 @@ GOODS_TRANSPORT_MARKERS = (
     "仓栅",
 )
 COMMERCIAL_CAB_BODY_TYPES = frozenset({"PICKUP", "TRUCK", "VAN"})
+CARGO_VAN_NAME_BODY_TYPES = frozenset({"MPV", "TRUCK", "VAN"})
+CARGO_VAN_NAME_MARKERS = ("厢式车", "厢货")
 
 
 PARAMETER_INFERENCE_RULES = (
@@ -684,6 +686,35 @@ def infer_seat_count_from_names(
     return {}, ()
 
 
+def infer_cargo_compartment_from_spec_name(
+    *,
+    body_type: str | None,
+    spec_name: str | None,
+) -> InferenceDecision | None:
+    """Определить отдельный грузовой отсек по названию грузового исполнения."""
+    if body_type not in CARGO_VAN_NAME_BODY_TYPES:
+        return None
+    raw_name = _text(spec_name)
+    marker = next(
+        (candidate for candidate in CARGO_VAN_NAME_MARKERS if candidate in raw_name),
+        None,
+    )
+    if marker is None:
+        return None
+    return InferenceDecision(
+        value=True,
+        rule_code="SEPARATE_CARGO_COMPARTMENT_FROM_CARGO_VAN_NAME",
+        confidence=InferenceConfidence.HIGH,
+        evidence=(
+            InferenceEvidence(
+                source="specs.raw_json.name",
+                marker=marker,
+                raw_value=raw_name,
+            ),
+        ),
+    )
+
+
 def infer_cab_attributes(
     *,
     body_type: str | None,
@@ -1063,6 +1094,16 @@ def infer_vehicle_attributes(
             decisions["body_type"] = body_type_decision
             body_type = str(body_type_decision.value)
     decisions.update(infer_parameter_attributes(parameters, body_type=body_type))
+    if (
+        has_separate_cargo_compartment is None
+        and "has_separate_cargo_compartment" not in decisions
+    ):
+        cargo_compartment = infer_cargo_compartment_from_spec_name(
+            body_type=body_type,
+            spec_name=spec_name,
+        )
+        if cargo_compartment is not None:
+            decisions["has_separate_cargo_compartment"] = cargo_compartment
     seat_warnings: tuple[str, ...] = ()
     if seat_count_min is None and seat_count_max is None:
         seat_decisions, seat_warnings = infer_seat_count_from_names(
