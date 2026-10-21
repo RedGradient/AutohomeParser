@@ -13,7 +13,7 @@ from autohome.import_duty.classifier import (
 from autohome.import_duty.types import ClassificationStatus
 
 
-VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-21-v4"
+VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-21-v5"
 INFERRED_INPUTS_USED = "INFERRED_INPUTS_USED"
 TRUCK_OCCUPANT_MASS_KG = 65
 INFERRED_MASS_CATEGORY_GUARD_KG = 100
@@ -964,6 +964,49 @@ def infer_vehicle_attributes(
         )
         if ordinary_transport is not None:
             decisions["is_special_purpose"] = ordinary_transport
+
+    if (
+        "has_permanent_rear_seats" not in decisions
+        and seat_count_min is not None
+        and seat_count_max is not None
+        and 1 <= seat_count_min <= seat_count_max <= 2
+    ):
+        decisions["has_permanent_rear_seats"] = InferenceDecision(
+            value=False,
+            rule_code="NO_REAR_SEATS_WITH_AT_MOST_TWO_SEATS",
+            confidence=InferenceConfidence.HIGH,
+            evidence=(
+                _normalized_evidence("seat_count_min", seat_count_min),
+                _normalized_evidence("seat_count_max", seat_count_max),
+            ),
+        )
+
+    if "has_rear_windowed_door" not in decisions and body_type == "SEDAN":
+        decisions["has_rear_windowed_door"] = InferenceDecision(
+            value=False,
+            rule_code="NO_WINDOWED_REAR_DOOR_FOR_SEDAN",
+            confidence=InferenceConfidence.HIGH,
+            evidence=(_normalized_evidence("body_type", body_type),),
+        )
+
+    special_purpose_decision = decisions.get("is_special_purpose")
+    ordinary_pickup = (
+        body_type == "PICKUP"
+        and is_special_purpose is not True
+        and special_purpose_decision is not None
+        and special_purpose_decision.value is False
+        and special_purpose_decision.rule_code.startswith("ORDINARY_")
+    )
+    if "has_rear_windowed_door" not in decisions and ordinary_pickup:
+        decisions["has_rear_windowed_door"] = InferenceDecision(
+            value=False,
+            rule_code="NO_WINDOWED_REAR_DOOR_FOR_ORDINARY_PICKUP",
+            confidence=InferenceConfidence.HIGH,
+            evidence=(
+                _normalized_evidence("body_type", body_type),
+                *special_purpose_decision.evidence,
+            ),
+        )
 
     def effective_value(field_name: str, explicit_value: Any) -> Any:
         if explicit_value is not None:

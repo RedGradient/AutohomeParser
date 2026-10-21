@@ -68,7 +68,11 @@ class ConstructiveAttributeInferenceTests(unittest.TestCase):
             van.decisions["has_rear_windowed_door"].confidence,
             InferenceConfidence.MEDIUM,
         )
-        self.assertIsNone(sedan.value("has_rear_windowed_door"))
+        self.assertIs(sedan.value("has_rear_windowed_door"), False)
+        self.assertEqual(
+            sedan.decisions["has_rear_windowed_door"].rule_code,
+            "NO_WINDOWED_REAR_DOOR_FOR_SEDAN",
+        )
 
     def test_cargo_dimensions_require_goods_body(self):
         pickup = infer_vehicle_attributes(
@@ -116,6 +120,74 @@ class ConstructiveAttributeInferenceTests(unittest.TestCase):
         )
 
         self.assertIsNone(result.value("has_permanent_rear_seats"))
+
+    def test_at_most_two_seats_prove_absence_of_permanent_rear_seats(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="TRUCK",
+            seat_count_min=2,
+            seat_count_max=2,
+        )
+
+        decision = result.decisions["has_permanent_rear_seats"]
+        self.assertIs(decision.value, False)
+        self.assertEqual(
+            decision.rule_code,
+            "NO_REAR_SEATS_WITH_AT_MOST_TWO_SEATS",
+        )
+
+    def test_positive_rear_seat_evidence_wins_over_seat_count_rule(self):
+        result = infer_vehicle_attributes(
+            [
+                parameter(
+                    "后排座椅放倒形式",
+                    sublist=[{"name": "比例放倒", "value": "●"}],
+                )
+            ],
+            body_type="VAN",
+            seat_count_min=2,
+            seat_count_max=2,
+        )
+
+        self.assertIs(result.value("has_permanent_rear_seats"), True)
+        self.assertEqual(
+            result.decisions["has_permanent_rear_seats"].rule_code,
+            "REAR_SEAT_FOLDING_PRESENT",
+        )
+
+    def test_sedan_has_no_windowed_rear_door(self):
+        result = infer_vehicle_attributes([], body_type="SEDAN")
+
+        decision = result.decisions["has_rear_windowed_door"]
+        self.assertIs(decision.value, False)
+        self.assertEqual(
+            decision.rule_code,
+            "NO_WINDOWED_REAR_DOOR_FOR_SEDAN",
+        )
+
+    def test_ordinary_pickup_has_no_windowed_rear_door(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="PICKUP",
+            vehicle_class="PICKUP",
+        )
+
+        decision = result.decisions["has_rear_windowed_door"]
+        self.assertIs(decision.value, False)
+        self.assertEqual(
+            decision.rule_code,
+            "NO_WINDOWED_REAR_DOOR_FOR_ORDINARY_PICKUP",
+        )
+
+    def test_special_purpose_pickup_keeps_rear_door_unknown(self):
+        result = infer_vehicle_attributes(
+            [],
+            body_type="PICKUP",
+            vehicle_class="PICKUP",
+            is_special_purpose=True,
+        )
+
+        self.assertIsNone(result.value("has_rear_windowed_door"))
 
 
 class PurposeInferenceTests(unittest.TestCase):
