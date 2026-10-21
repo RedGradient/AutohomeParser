@@ -18,6 +18,10 @@ BACKFILL_VEHICLE_ATTRIBUTE_INFERENCES_ARGS ?=
 CALCULATE_IMPORT_DUTIES_ARGS ?=
 API_HOST ?= 0.0.0.0
 API_PORT ?= 8000
+API_USERNAME ?= autohome
+API_PASSWORD ?= autohome
+API_JWT_SECRET ?= development-only-autohome-jwt-secret-change-me
+API_JWT_TTL_SECONDS ?= 3600
 DATABASE_URL ?= postgresql+psycopg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@127.0.0.1:$(POSTGRES_PORT)/$(POSTGRES_DB)
 
 # Используемые по умолчанию сетевые интерфейсы.
@@ -135,6 +139,8 @@ parser-resume: postgres-up
 
 api-run: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
+		API_USERNAME='$(API_USERNAME)' API_PASSWORD='$(API_PASSWORD)' \
+		API_JWT_SECRET='$(API_JWT_SECRET)' API_JWT_TTL_SECONDS='$(API_JWT_TTL_SECONDS)' \
 		.venv/bin/uvicorn autohome.api.app:app \
 		--host '$(API_HOST)' --port '$(API_PORT)'
 

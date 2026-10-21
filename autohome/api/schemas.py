@@ -31,6 +31,21 @@ class ErrorResponse(ApiSchema):
     )
 
 
+class TokenRequest(ApiSchema):
+    """Учётные данные для получения JWT."""
+
+    username: str = Field(description="Имя пользователя API.", min_length=1)
+    password: str = Field(description="Пароль пользователя API.", min_length=1)
+
+
+class TokenResponse(ApiSchema):
+    """Выданный JWT access token."""
+
+    access_token: str = Field(description="Подписанный JWT для заголовка Authorization.")
+    token_type: Literal["bearer"] = Field(description="Схема авторизации Bearer.")
+    expires_in: int = Field(description="Срок действия токена в секундах.", gt=0)
+
+
 class Pagination(ApiSchema):
     """Метаданные курсорной пагинации."""
 

@@ -9,6 +9,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from autohome.api.app import create_app
+from autohome.api.auth import create_access_token
 from autohome.models import (
     Base,
     Brand,
@@ -26,7 +27,14 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         database_path = Path(self.temp_dir.name) / "api.sqlite3"
-        self.app = create_app(f"sqlite:///{database_path}")
+        self.username = "test-user"
+        self.password = "test-password"
+        self.app = create_app(
+            f"sqlite:///{database_path}",
+            api_username=self.username,
+            api_password=self.password,
+            jwt_secret="test-jwt-secret-longer-than-thirty-two-bytes",
+        )
         Base.metadata.create_all(self.app.state.engine)
         with Session(self.app.state.engine) as session:
             session.add(Brand(id=1, name="Test Brand", raw_json={}))
@@ -156,14 +164,70 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             session.commit()
+        token = create_access_token(self.username, self.app.state.auth_settings)
         self.client = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=self.app), base_url="http://test"
+            transport=httpx.ASGITransport(app=self.app),
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {token}"},
         )
 
     async def asyncTearDown(self):
         await self.client.aclose()
         self.app.state.engine.dispose()
         self.temp_dir.cleanup()
+
+    async def test_protected_endpoint_rejects_missing_token(self):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=self.app), base_url="http://test"
+        ) as client:
+            response = await client.get("/api/v1/brands")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["code"], "INVALID_TOKEN")
+        self.assertEqual(response.headers["www-authenticate"], "Bearer")
+
+    async def test_protected_endpoint_rejects_malformed_token(self):
+        response = await self.client.get(
+            "/api/v1/brands", headers={"Authorization": "Bearer invalid.jwt.token"}
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["code"], "INVALID_TOKEN")
+
+    async def test_token_endpoint_issues_working_jwt(self):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=self.app), base_url="http://test"
+        ) as client:
+            token_response = await client.post(
+                "/api/v1/auth/token",
+                json={"username": self.username, "password": self.password},
+            )
+            token = token_response.json()["access_token"]
+            protected_response = await client.get(
+                "/api/v1/brands",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        self.assertEqual(token_response.status_code, 200)
+        self.assertEqual(token_response.json()["token_type"], "bearer")
+        self.assertEqual(protected_response.status_code, 200)
+
+    async def test_token_endpoint_rejects_invalid_credentials(self):
+        response = await self.client.post(
+            "/api/v1/auth/token",
+            json={"username": self.username, "password": "wrong"},
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["code"], "INVALID_CREDENTIALS")
+        self.assertEqual(response.headers["www-authenticate"], "Bearer")
+
+    async def test_health_endpoint_is_protected(self):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=self.app), base_url="http://test"
+        ) as client:
+            response = await client.get("/health")
+        self.assertEqual(response.status_code, 401)
 
     async def test_swagger_uses_documented_pydantic_schemas(self):
         response = await self.client.get("/openapi.json")
@@ -173,6 +237,17 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(
             "/api/v1/series/{series_id}/modifications",
             schema["paths"],
+        )
+        self.assertEqual(
+            schema["paths"]["/api/v1/specs"]["get"]["security"],
+            [{"JWT Bearer": []}],
+        )
+        self.assertNotIn(
+            "security", schema["paths"]["/api/v1/auth/token"]["post"]
+        )
+        self.assertEqual(
+            schema["components"]["securitySchemes"]["JWT Bearer"]["scheme"],
+            "bearer",
         )
         spec_schema = schema["components"]["schemas"]["SpecResponse"]
         self.assertIn("description", spec_schema)

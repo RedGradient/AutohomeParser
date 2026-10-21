@@ -9,12 +9,37 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Security
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import Engine, and_, case, create_engine, exists, func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from autohome.api.auth import (
+    AuthSettings,
+    authenticate_bearer,
+    create_access_token,
+    credentials_are_valid,
+)
+from autohome.api.schemas import (
+    BrandPage,
+    BrandResponse,
+    CustomsCalculationPage,
+    CustomsCalculationResponse,
+    ErrorResponse,
+    GalleryColorsResponse,
+    ModificationPage,
+    ModificationResponse,
+    ParameterGroupsResponse,
+    PhotoPage,
+    SeriesPage,
+    SeriesResponse,
+    SpecDetailResponse,
+    SpecPage,
+    TokenRequest,
+    TokenResponse,
+)
 from autohome.models import (
     Brand,
     CustomsCalculation,
@@ -33,22 +58,6 @@ from autohome.models import (
     SpecParameter,
     SpecPowertrain,
     SpecVehicleAttributes,
-)
-from autohome.api.schemas import (
-    BrandPage,
-    BrandResponse,
-    CustomsCalculationPage,
-    CustomsCalculationResponse,
-    ErrorResponse,
-    GalleryColorsResponse,
-    ModificationPage,
-    ModificationResponse,
-    ParameterGroupsResponse,
-    PhotoPage,
-    SeriesPage,
-    SeriesResponse,
-    SpecDetailResponse,
-    SpecPage,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -255,7 +264,20 @@ def _apply_spec_filters(
     return statement.where(*filters)
 
 
-def create_app(database_url: str | None = None) -> FastAPI:
+def create_app(
+    database_url: str | None = None,
+    *,
+    api_username: str | None = None,
+    api_password: str | None = None,
+    jwt_secret: str | None = None,
+    jwt_ttl_seconds: int | None = None,
+) -> FastAPI:
+    auth_settings = AuthSettings.from_environment(
+        username=api_username,
+        password=api_password,
+        secret=jwt_secret,
+        access_token_ttl_seconds=jwt_ttl_seconds,
+    )
     application = FastAPI(
         title="Autohome Catalog API",
         description=(
@@ -268,6 +290,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         redoc_url="/redoc",
         openapi_url="/openapi.json",
         openapi_tags=[
+            {"name": "Auth", "description": "Получение JWT для доступа к API."},
             {"name": "Brands", "description": "Бренды автомобилей."},
             {"name": "Series", "description": "Серии и их изображения."},
             {"name": "Modifications", "description": "Нормализованные технические модификации."},
@@ -276,6 +299,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         ],
         responses={
             400: {"model": ErrorResponse, "description": "Некорректный фильтр, диапазон или курсор."},
+            401: {"model": ErrorResponse, "description": "JWT отсутствует, истёк или недействителен."},
             404: {"model": ErrorResponse, "description": "Запрошенная сущность не найдена."},
         },
     )
@@ -285,10 +309,26 @@ def create_app(database_url: str | None = None) -> FastAPI:
     session_factory = sessionmaker(engine, expire_on_commit=False)
     application.state.engine = engine
     application.state.session_factory = session_factory
+    application.state.auth_settings = auth_settings
 
     async def get_session() -> AsyncGenerator[Session, None]:
         with session_factory() as session:
             yield session
+
+    bearer_scheme = HTTPBearer(
+        bearerFormat="JWT",
+        scheme_name="JWT Bearer",
+        description="JWT, полученный через POST /api/v1/auth/token.",
+        auto_error=False,
+    )
+
+    async def require_authenticated_user(
+        credentials: HTTPAuthorizationCredentials | None = Security(bearer_scheme),
+    ) -> str:
+        """Проверить JWT перед выполнением защищённого эндпоинта."""
+        return authenticate_bearer(credentials, auth_settings)
+
+    protected_router = APIRouter(dependencies=[Depends(require_authenticated_user)])
 
     @application.exception_handler(HTTPException)
     async def http_exception_handler(_, exc: HTTPException):
@@ -296,13 +336,42 @@ def create_app(database_url: str | None = None) -> FastAPI:
             payload = exc.detail
         else:
             payload = {"code": "HTTP_ERROR", "message": str(exc.detail)}
-        return JSONResponse(status_code=exc.status_code, content=jsonable_encoder(payload))
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=jsonable_encoder(payload),
+            headers=exc.headers,
+        )
 
-    @application.get("/health", include_in_schema=False)
+    @application.post(
+        "/api/v1/auth/token",
+        response_model=TokenResponse,
+        tags=["Auth"],
+        summary="Получить JWT",
+        description="Проверяет логин и пароль и выдаёт Bearer-токен с ограниченным сроком действия.",
+    )
+    async def issue_token(credentials: TokenRequest):
+        if not credentials_are_valid(
+            credentials.username, credentials.password, auth_settings
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "code": "INVALID_CREDENTIALS",
+                    "message": "Invalid username or password",
+                },
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return {
+            "access_token": create_access_token(credentials.username, auth_settings),
+            "token_type": "bearer",
+            "expires_in": auth_settings.access_token_ttl_seconds,
+        }
+
+    @protected_router.get("/health", include_in_schema=False)
     async def health():
         return {"status": "ok"}
 
-    @application.get(
+    @protected_router.get(
         "/api/v1/brands",
         response_model=BrandPage,
         tags=["Brands"],
@@ -361,7 +430,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         ]
         return {"items": items, "pagination": pagination}
 
-    @application.get(
+    @protected_router.get(
         "/api/v1/brands/{brand_id}",
         response_model=BrandResponse,
         tags=["Brands"],
@@ -424,7 +493,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
             )
         return result
 
-    @application.get(
+    @protected_router.get(
         "/api/v1/series",
         response_model=SeriesPage,
         tags=["Series"],
@@ -487,7 +556,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         } for item, brand, manufacturer, minimum, maximum in rows]
         return {"items": items, "pagination": pagination}
 
-    @application.get(
+    @protected_router.get(
         "/api/v1/series/{series_id}",
         response_model=SeriesResponse,
         tags=["Series"],
@@ -539,7 +608,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         } for item, minimum, maximum in rows]
         return {"items": items, "pagination": pagination}
 
-    @application.get(
+    @protected_router.get(
         "/api/v1/modifications",
         response_model=ModificationPage,
         tags=["Modifications"],
@@ -568,7 +637,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
             session, **{key: value for key, value in locals().items() if key in argument_names}
         )
 
-    @application.get(
+    @protected_router.get(
         "/api/v1/series/{series_id}/modifications",
         response_model=ModificationPage,
         tags=["Modifications"],
@@ -592,7 +661,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
             power_hp_to=power_hp_to, price_from=price_from, price_to=price_to,
             price_type=price_type, limit=limit, cursor=cursor)
 
-    @application.get(
+    @protected_router.get(
         "/api/v1/modifications/{modification_id}",
         response_model=ModificationResponse,
         tags=["Modifications"],
@@ -621,7 +690,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         rows, pagination = _page(session, statement, limit, cursor)
         return {"items": [_spec_payload(row) for row in rows], "pagination": pagination}
 
-    @application.get(
+    @protected_router.get(
         "/api/v1/specs",
         response_model=SpecPage,
         tags=["Specs"],
@@ -653,7 +722,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         values = {key: value for key, value in locals().items() if key in filter_names}
         return specs_impl(session, limit, cursor, sort=sort, order=order, **values)
 
-    @application.get(
+    @protected_router.get(
         "/api/v1/modifications/{modification_id}/specs",
         response_model=SpecPage,
         tags=["Specs"],
@@ -667,7 +736,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         return specs_impl(session, limit, cursor, modification_id=modification_id,
                           price_from=price_from, price_to=price_to, price_type=price_type)
 
-    @application.get(
+    @protected_router.get(
         "/api/v1/specs/{spec_id}",
         response_model=SpecDetailResponse,
         tags=["Specs"],
@@ -678,7 +747,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         if row is None: raise _not_found("Spec")
         return _spec_payload(row, detail=True)
 
-    @application.get(
+    @protected_router.get(
         "/api/v1/specs/{spec_id}/parameters",
         response_model=ParameterGroupsResponse,
         tags=["Specs"],
@@ -711,7 +780,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
                 "video_url": value.video_url, "subitems": subitems_by_parameter.get(definition.id, [])})
         return {"items": list(groups.values())}
 
-    @application.get(
+    @protected_router.get(
         "/api/v1/series/{series_id}/photos",
         response_model=PhotoPage,
         tags=["Series"],
@@ -752,7 +821,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
             "colors": by_photo.get(photo.id, [])} for photo in photos_list]
         return {"items": items, "pagination": pagination}
 
-    @application.get(
+    @protected_router.get(
         "/api/v1/series/{series_id}/gallery-colors",
         response_model=GalleryColorsResponse,
         tags=["Series"],
@@ -800,7 +869,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         rows, pagination = _page(session, statement, limit, cursor)
         return {"items": [calculation_payload(session, row[0]) for row in rows], "pagination": pagination}
 
-    @application.get(
+    @protected_router.get(
         "/api/v1/customs-calculations",
         response_model=CustomsCalculationPage,
         tags=["Customs"],
@@ -816,7 +885,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
             series_id=series_id, importer_type=importer_type, status=status,
             calculation_date_from=calculation_date_from, calculation_date_to=calculation_date_to)
 
-    @application.get(
+    @protected_router.get(
         "/api/v1/customs-calculations/{calculation_id}",
         response_model=CustomsCalculationResponse,
         tags=["Customs"],
@@ -827,7 +896,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         if item is None: raise _not_found("Customs calculation")
         return calculation_payload(session, item)
 
-    @application.get(
+    @protected_router.get(
         "/api/v1/specs/{spec_id}/customs-calculations",
         response_model=CustomsCalculationPage,
         tags=["Customs"],
@@ -841,6 +910,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         return calculations_impl(session, limit, cursor, spec_id=spec_id,
                                  importer_type=importer_type, calculation_date=calculation_date)
 
+    application.include_router(protected_router)
     return application
 
 

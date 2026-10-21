@@ -18,11 +18,29 @@ scrapy crawl cars
 ## HTTP API и Swagger
 
 API читает ту же базу, что и парсер. Адрес берётся из `DATABASE_URL`, а без
-переменной используется `data/autohome.sqlite3`.
+переменной используется `data/autohome.sqlite3`. Все прикладные эндпоинты,
+включая `/health`, требуют JWT. Перед запуском задайте собственные учётные
+данные и секрет подписи длиной не менее 32 байт:
 
 ```bash
+export API_USERNAME=autohome
+export API_PASSWORD='сложный-пароль'
+export API_JWT_SECRET="$(openssl rand -hex 32)"
+export API_JWT_TTL_SECONDS=3600
 uvicorn autohome.api.app:app --host 0.0.0.0 --port 8000
 ```
+
+Получение токена:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/token \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"autohome","password":"сложный-пароль"}'
+```
+
+Полученный `access_token` передаётся как `Authorization: Bearer <token>`.
+В Swagger UI токен можно ввести через кнопку **Authorize**. Страницы
+документации, схема OpenAPI и эндпоинт выдачи токена остаются публичными.
 
 После запуска доступны:
 
