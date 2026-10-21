@@ -15,6 +15,77 @@ python -m pip install -r requirements.txt
 scrapy crawl cars
 ```
 
+## HTTP API и Swagger
+
+API читает ту же базу, что и парсер. Адрес берётся из `DATABASE_URL`, а без
+переменной используется `data/autohome.sqlite3`. Все прикладные эндпоинты,
+включая `/health`, требуют JWT. Перед запуском задайте собственные учётные
+данные и секрет подписи длиной не менее 32 байт:
+
+```bash
+export API_USERNAME=autohome
+export API_PASSWORD='сложный-пароль'
+export API_JWT_SECRET="$(openssl rand -hex 32)"
+export API_JWT_TTL_SECONDS=3600
+uvicorn autohome.api.app:app --host 0.0.0.0 --port 8000
+```
+
+Получение токена:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/token \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"autohome","password":"сложный-пароль"}'
+```
+
+Полученный `access_token` передаётся как `Authorization: Bearer <token>`.
+В Swagger UI токен можно ввести через кнопку **Authorize**. Страницы
+документации, схема OpenAPI и эндпоинт выдачи токена остаются публичными.
+
+После запуска доступны:
+
+- API: `http://localhost:8000/api/v1`;
+- Swagger UI: `http://localhost:8000/docs`;
+- ReDoc: `http://localhost:8000/redoc`;
+- OpenAPI JSON: `http://localhost:8000/openapi.json`.
+
+OpenAPI формируется автоматически из документированных Pydantic-схем в
+`autohome/api/schemas.py`, поэтому описание API всегда соответствует коду.
+
+### Запуск в Docker
+
+API, парсер и PostgreSQL запускаются в Docker. Скопируйте пример настроек,
+замените пароль и JWT-секрет, а также проверьте имена сетевых интерфейсов:
+
+```bash
+cp .env.example .env
+make api-up
+```
+
+Команда собирает образ приложения, ожидает готовности PostgreSQL и запускает
+API на `http://127.0.0.1:8000`. Просмотр логов и остановка:
+
+```bash
+make api-logs
+make docker-down
+```
+
+Парсер использует сетевой стек хоста, поэтому видит физические Wi-Fi и Ethernet
+интерфейсы и использует временные правила маршрутизации, созданные командой
+`make network-up`. Каталог `data/` подключается в контейнер и сохраняет кеш
+каталога и состояние загрузки:
+
+```bash
+make network-up
+make parser-run
+# либо режим дозагрузки
+make parser-resume
+```
+
+`Ctrl+C` передаётся контейнеру, а `stop_grace_period` совпадает с
+`SHUTDOWN_TIMEOUT`, чтобы Scrapy успел штатно завершиться и записать буферы.
+Локальный запуск API через `make api-run` сохранён для разработки.
+
 Ограниченная проверка каталога:
 
 ```bash

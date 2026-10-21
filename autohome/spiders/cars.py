@@ -387,7 +387,7 @@ class CarsSpider(scrapy.Spider):
                 task["series_id"],
                 task["category_id"],
                 task["page_url"],
-                task["color_type"],
+                task["color_scope"],
                 task["color_id"],
                 task_id=task["id"],
             )
@@ -423,7 +423,7 @@ class CarsSpider(scrapy.Spider):
             GalleryCrawlTask.id,
             GalleryCrawlTask.series_id,
             GalleryCrawlTask.category_id,
-            GalleryCrawlTask.color_type,
+            GalleryCrawlTask.color_scope,
             GalleryCrawlTask.color_id,
             GalleryCrawlTask.page_url,
             GalleryCrawlTask.status,
@@ -921,7 +921,7 @@ class CarsSpider(scrapy.Spider):
         series_id: int,
         category_id: int,
         url: str,
-        color_type: str | None = None,
+        color_scope: str | None = None,
         color_id: int | None = None,
         task_id: int | None = None,
         attempts: int = 1,
@@ -934,7 +934,7 @@ class CarsSpider(scrapy.Spider):
             cb_kwargs={
                 "series_id": series_id,
                 "category_id": category_id,
-                "color_type": color_type,
+                "color_scope": color_scope,
                 "color_id": color_id,
                 "task_id": task_id,
                 "attempts": attempts,
@@ -948,7 +948,7 @@ class CarsSpider(scrapy.Spider):
         series_id: int,
         category_id: int,
         url: str | None = None,
-        color_type: str | None = None,
+        color_scope: str | None = None,
         color_id: int | None = None,
         task_id: int | None = None,
     ):
@@ -962,7 +962,7 @@ class CarsSpider(scrapy.Spider):
                 "gallery-page",
                 series_id,
                 category_id,
-                color_type,
+                color_scope,
                 color_id,
                 page_url,
             )
@@ -977,7 +977,7 @@ class CarsSpider(scrapy.Spider):
             task_id,
             series_id,
             category_id,
-            color_type,
+            color_scope,
             color_id,
             page_url,
             "pending",
@@ -987,7 +987,7 @@ class CarsSpider(scrapy.Spider):
             series_id,
             category_id,
             page_url,
-            color_type,
+            color_scope,
             color_id,
             task_id,
             attempts,
@@ -998,7 +998,7 @@ class CarsSpider(scrapy.Spider):
         task_id: int,
         series_id: int,
         category_id: int,
-        color_type: str | None,
+        color_scope: str | None,
         color_id: int | None,
         page_url: str,
         status: str,
@@ -1011,7 +1011,7 @@ class CarsSpider(scrapy.Spider):
             id=task_id,
             series_id=series_id,
             category_id=category_id,
-            color_type=color_type,
+            color_scope=color_scope,
             color_id=color_id,
             page_url=page_url,
             status=status,
@@ -1025,7 +1025,7 @@ class CarsSpider(scrapy.Spider):
         response,
         series_id: int,
         category_id: int,
-        color_type: str | None,
+        color_scope: str | None,
         color_id: int | None,
         task_id: int,
         attempts: int,
@@ -1034,13 +1034,13 @@ class CarsSpider(scrapy.Spider):
         photo_count = 0
         for block in response.css(".search-pic"):
             label = "".join(block.css(".search-pic-left::text").getall()).strip()
-            block_color_type = "interior" if "内饰" in label else "exterior"
+            block_color_scope = "interior" if "内饰" in label else "exterior"
             for link in block.css("a.color-cont[href]"):
                 href = link.attrib.get("href", "")
                 match = re.search(r"series-\d+-(i?)(\d+)-(\d+)-1\.html", href)
                 if not match:
                     continue
-                discovered_type = "interior" if match.group(1) else block_color_type
+                discovered_scope = "interior" if match.group(1) else block_color_scope
                 discovered_id = as_int(match.group(2))
                 discovered_category = as_int(match.group(3)) or category_id
                 if discovered_id is None:
@@ -1055,7 +1055,7 @@ class CarsSpider(scrapy.Spider):
                 gallery_url = response.urljoin(href.split("#", 1)[0])
                 yield SeriesGalleryColorItem(
                     series_id=series_id,
-                    color_type=discovered_type,
+                    color_scope=discovered_scope,
                     color_id=discovered_id,
                     name=name,
                     color_values=colors,
@@ -1106,11 +1106,11 @@ class CarsSpider(scrapy.Spider):
                 page_url=page_url,
                 raw={"href": href, "thumbnail_url": thumbnail},
             )
-            if color_type is not None and color_id is not None:
+            if color_scope is not None and color_id is not None:
                 yield SeriesPhotoColorItem(
                     photo_id=photo_id,
                     series_id=series_id,
-                    color_type=color_type,
+                    color_scope=color_scope,
                     color_id=color_id,
                 )
 
@@ -1120,7 +1120,7 @@ class CarsSpider(scrapy.Spider):
                 series_id,
                 category_id,
                 response.urljoin(next_href),
-                color_type,
+                color_scope,
                 color_id,
             )
         self.completed_gallery_task_ids.add(task_id)
@@ -1128,7 +1128,7 @@ class CarsSpider(scrapy.Spider):
             task_id,
             series_id,
             category_id,
-            color_type,
+            color_scope,
             color_id,
             response.url.split("#", 1)[0],
             "complete" if photo_count else "empty",
@@ -1148,7 +1148,7 @@ class CarsSpider(scrapy.Spider):
             context["task_id"],
             context["series_id"],
             context["category_id"],
-            context["color_type"],
+            context["color_scope"],
             context["color_id"],
             failure.request.url.split("#", 1)[0],
             "failed",
@@ -1502,12 +1502,12 @@ class CarsSpider(scrapy.Spider):
 
                 color_info = parameter.get("colorinfo")
                 if isinstance(color_info, dict):
-                    color_type = as_int(color_info.get("type"))
-                    if color_type is not None:
+                    color_set_type = as_int(color_info.get("type"))
+                    if color_set_type is not None:
                         yield ParameterColorSetItem(
                             spec_id=spec_id,
                             parameter_id=parameter_id,
-                            type=color_type,
+                            type=color_set_type,
                         )
                         for position, color in enumerate(color_info.get("list") or []):
                             if not isinstance(color, dict):

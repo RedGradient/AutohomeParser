@@ -649,10 +649,10 @@ class SeriesGalleryColor(Base):
     """Цвет кузова или салона в фотогалерее серии."""
 
     __tablename__ = "series_gallery_colors"
-    __table_args__ = (PrimaryKeyConstraint("series_id", "color_type", "color_id"),)
+    __table_args__ = (PrimaryKeyConstraint("series_id", "color_scope", "color_id"),)
 
     series_id: Mapped[int] = mapped_column(ForeignKey("series.id"), index=True)
-    color_type: Mapped[str] = mapped_column(String(20))
+    color_scope: Mapped[str] = mapped_column(String(20))
     color_id: Mapped[int] = mapped_column(Integer)
     name: Mapped[str] = mapped_column(String(300), nullable=False)
     color_values: Mapped[list[str]] = mapped_column(JSON_TYPE, nullable=False)
@@ -686,12 +686,12 @@ class SeriesPhotoColor(Base):
 
     __tablename__ = "series_photo_colors"
     __table_args__ = (
-        PrimaryKeyConstraint("photo_id", "series_id", "color_type", "color_id"),
+        PrimaryKeyConstraint("photo_id", "series_id", "color_scope", "color_id"),
         ForeignKeyConstraint(
-            ["series_id", "color_type", "color_id"],
+            ["series_id", "color_scope", "color_id"],
             [
                 "series_gallery_colors.series_id",
-                "series_gallery_colors.color_type",
+                "series_gallery_colors.color_scope",
                 "series_gallery_colors.color_id",
             ],
         ),
@@ -699,7 +699,7 @@ class SeriesPhotoColor(Base):
 
     photo_id: Mapped[int] = mapped_column(ForeignKey("series_photos.id"), index=True)
     series_id: Mapped[int] = mapped_column(Integer, index=True)
-    color_type: Mapped[str] = mapped_column(String(20))
+    color_scope: Mapped[str] = mapped_column(String(20))
     color_id: Mapped[int] = mapped_column(Integer)
 
 
@@ -711,7 +711,7 @@ class GalleryCrawlTask(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     series_id: Mapped[int] = mapped_column(ForeignKey("series.id"), index=True)
     category_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    color_type: Mapped[str | None] = mapped_column(String(20))
+    color_scope: Mapped[str | None] = mapped_column(String(20))
     color_id: Mapped[int | None] = mapped_column(Integer)
     page_url: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
