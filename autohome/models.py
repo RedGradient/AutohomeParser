@@ -281,6 +281,9 @@ class SpecVehicleAttributes(Base):
     spec_id: Mapped[int] = mapped_column(ForeignKey("specs.id"), primary_key=True)
     series_id: Mapped[int] = mapped_column(ForeignKey("series.id"), index=True)
     vehicle_class: Mapped[str | None] = mapped_column(String(100), index=True)
+    vehicle_technical_category: Mapped[str | None] = mapped_column(
+        String(10), index=True
+    )
     body_type: Mapped[str | None] = mapped_column(String(50), index=True)
     body_construction: Mapped[str | None] = mapped_column(String(50), index=True)
     seat_count_min: Mapped[int | None] = mapped_column(Integer)

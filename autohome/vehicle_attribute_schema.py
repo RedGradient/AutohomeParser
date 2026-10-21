@@ -6,6 +6,7 @@ from autohome.models import Base
 
 
 INFERENCE_COLUMNS = {
+    "vehicle_technical_category": "VARCHAR(10)",
     "vehicle_purpose_type": "VARCHAR(50)",
     "inference_details_json": "JSON",
     "inference_flags_json": "JSON",
@@ -40,6 +41,13 @@ def ensure_vehicle_attribute_schema(engine) -> None:
                     f"{clause} {name} {sql_type}"
                 )
             )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_spec_vehicle_attributes_vehicle_technical_category "
+                "ON spec_vehicle_attributes (vehicle_technical_category)"
+            )
+        )
         connection.execute(
             text(
                 "CREATE INDEX IF NOT EXISTS "

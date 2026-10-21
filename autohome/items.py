@@ -173,6 +173,7 @@ class SpecVehicleAttributesItem(scrapy.Item):
     spec_id = scrapy.Field()
     series_id = scrapy.Field()
     vehicle_class = scrapy.Field()
+    vehicle_technical_category = scrapy.Field()
     body_type = scrapy.Field()
     body_construction = scrapy.Field()
     seat_count_min = scrapy.Field()

@@ -29,6 +29,7 @@ class VehicleAttributeSchemaTests(unittest.TestCase):
             }
             self.assertTrue(
                 {
+                    "vehicle_technical_category",
                     "vehicle_purpose_type",
                     "inference_details_json",
                     "inference_flags_json",
