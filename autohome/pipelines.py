@@ -79,6 +79,7 @@ from autohome.models import (
     ResaleValueRanking,
     TechnologyRanking,
 )
+from autohome.powertrain_schema import ensure_powertrain_schema
 from autohome.vehicle_attribute_schema import ensure_vehicle_attribute_schema
 from autohome.translator import (
     translate_brand_name,
@@ -258,6 +259,7 @@ class SqlAlchemyPipeline:
         if self.engine.dialect.name == "sqlite":
             event.listen(self.engine, "connect", self._configure_sqlite)
         ensure_vehicle_attribute_schema(self.engine)
+        ensure_powertrain_schema(self.engine)
 
     @staticmethod
     def _configure_sqlite(dbapi_connection, _):

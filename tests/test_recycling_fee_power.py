@@ -7,6 +7,7 @@ from autohome.recycling_fee_power import (
     classify_recycling_fee_powertrain,
     select_recycling_fee_power,
 )
+from autohome.powertrain_normalizer import normalize_powertrain
 
 
 class RecyclingFeePowerTests(unittest.TestCase):
@@ -69,6 +70,40 @@ class RecyclingFeePowerTests(unittest.TestCase):
             result.source,
             RecyclingFeePowerSource.MAX_30_MIN_ELECTRIC_POWER_KW,
         )
+
+    def test_powertrain_normalizer_persists_normative_ice_power(self):
+        row = normalize_powertrain(
+            10,
+            20,
+            2026,
+            {
+                "energy_type": "GASOLINE",
+                "engine_power_kw": "117.5",
+            },
+        )
+
+        self.assertEqual(row["recycling_fee_powertrain_type"], "ICE")
+        self.assertEqual(row["recycling_fee_power_kw"], Decimal("117.5"))
+        self.assertEqual(
+            row["recycling_fee_power_source"],
+            "ENGINE_POWER_KW",
+        )
+
+    def test_powertrain_normalizer_does_not_use_bev_peak_power(self):
+        row = normalize_powertrain(
+            10,
+            20,
+            2026,
+            {
+                "energy_type": "BEV",
+                "maximum_power_kw": "250",
+                "motor_total_power_kw": "250",
+            },
+        )
+
+        self.assertEqual(row["recycling_fee_powertrain_type"], "EV")
+        self.assertIsNone(row["recycling_fee_power_kw"])
+        self.assertIsNone(row["recycling_fee_power_source"])
 
 
 if __name__ == "__main__":

@@ -44,7 +44,10 @@ class VehicleAttributeDictionaryTests(unittest.TestCase):
         )
 
     def test_powertrain_dictionary_closes_known_tail_values(self):
-        self.assertEqual(translate_powertrain_code("energy_type", "汽油电驱"), "HEV")
+        self.assertEqual(
+            translate_powertrain_code("energy_type", "汽油电驱"),
+            "SERIES_HEV",
+        )
         self.assertEqual(
             translate_powertrain_code("body_type", "5门5座两厢跨界车"),
             "HATCHBACK",

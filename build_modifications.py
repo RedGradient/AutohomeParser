@@ -24,7 +24,6 @@ from sqlalchemy import (
 )
 
 from autohome.models import (
-    Base,
     Modification,
     ParameterDefinition,
     ParameterSubitem,
@@ -32,13 +31,15 @@ from autohome.models import (
     SpecParameter,
     SpecPowertrain,
 )
+from autohome.powertrain_schema import ensure_powertrain_schema
+from autohome.recycling_fee_power import select_recycling_fee_power
 from autohome.translator import (
     translate_powertrain_code,
     translate_powertrain_field,
 )
 
 
-NORMALIZATION_VERSION = 3
+NORMALIZATION_VERSION = 4
 EMPTY_VALUES = {None, "", "-", "Нет", "Неизвестно"}
 NUMBER_RE = re.compile(r"[-+]?\d+(?:[.,]\d+)?")
 
@@ -81,7 +82,7 @@ INTEGER_FIELDS = {"engine_displacement_ml", "transmission_gears"}
 SUBITEM_FIELDS = {"drive_type", "battery_type"}
 DERIVED_TEXT_FIELDS = {"clutch_type", "engine_layout"}
 ELECTRIC_ENERGIES = {"BEV"}
-PLUG_IN_ENERGIES = {"PHEV", "EREV"}
+PLUG_IN_ENERGIES = {"PHEV", "EREV", "SERIES_HEV"}
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -161,7 +162,7 @@ def decimal_key(value: Decimal | None) -> str | None:
 
 def ensure_schema(engine) -> None:
     """Создать производные таблицы и добавить ссылку из specs при миграции."""
-    Base.metadata.create_all(engine)
+    ensure_powertrain_schema(engine)
     columns = {column["name"] for column in inspect(engine).get_columns("specs")}
     if "modification_id" in columns:
         return
@@ -222,9 +223,7 @@ def load_powertrains(connection, parameter_ids: dict[str, int]) -> dict[int, dic
         elif field not in SUBITEM_FIELDS:
             row[field] = clean_text(translate_powertrain_field(field, value))
             if field == "transmission_type":
-                row["clutch_type"] = translate_powertrain_code(
-                    "clutch_type", value
-                )
+                row["clutch_type"] = translate_powertrain_code("clutch_type", value)
 
     for field in SUBITEM_FIELDS:
         parameter_id = parameter_ids.get(field)
@@ -295,8 +294,7 @@ def modification_signature(row: dict, missing: list[str]) -> dict:
         "model_year": row.get("model_year"),
         "energy_type": energy,
         "maximum_power_kw": decimal_key(row.get("maximum_power_kw")),
-        "transmission": row.get("transmission_type")
-        or row.get("transmission_summary"),
+        "transmission": row.get("transmission_type") or row.get("transmission_summary"),
         "clutch_type": row.get("clutch_type"),
         "transmission_gears": row.get("transmission_gears"),
         "drive_type": row.get("drive_type"),
@@ -366,6 +364,20 @@ def rebuild(engine, batch_size: int) -> tuple[int, int, int]:
     for row in powertrains.values():
         for field in normalized_fields:
             row.setdefault(field, None)
+        recycling_fee_power = select_recycling_fee_power(
+            row.get("energy_type"),
+            engine_power_kw=row.get("engine_power_kw"),
+            maximum_power_kw=row.get("maximum_power_kw"),
+        )
+        row.update(
+            recycling_fee_powertrain_type=(recycling_fee_power.powertrain_type.value),
+            recycling_fee_power_kw=recycling_fee_power.power_kw,
+            recycling_fee_power_source=(
+                recycling_fee_power.source.value
+                if recycling_fee_power.source is not None
+                else None
+            ),
+        )
         missing = required_missing(row)
         incomplete_count += bool(missing)
         row.update(
@@ -377,7 +389,9 @@ def rebuild(engine, batch_size: int) -> tuple[int, int, int]:
         powertrain_rows.append(row)
 
         signature = modification_signature(row, missing)
-        key = json.dumps(signature, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        key = json.dumps(
+            signature, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
         modification_id = stable_id(key)
         existing = modifications.get(modification_id)
         if existing and existing["modification_key"] != key:
@@ -420,7 +434,9 @@ def rebuild(engine, batch_size: int) -> tuple[int, int, int]:
                 "normalization_version": NORMALIZATION_VERSION,
                 "generated_at": now,
             }
-        spec_links.append({"_spec_id": row["spec_id"], "modification_id": modification_id})
+        spec_links.append(
+            {"_spec_id": row["spec_id"], "modification_id": modification_id}
+        )
 
     with engine.begin() as connection:
         connection.execute(update(Spec).values(modification_id=None))

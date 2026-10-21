@@ -263,6 +263,11 @@ class SpecPowertrain(Base):
     motor_layout: Mapped[str | None] = mapped_column(String(200))
     system_power_kw: Mapped[Decimal | None] = mapped_column(Numeric(12, 3))
     system_power_hp: Mapped[Decimal | None] = mapped_column(Numeric(12, 3))
+    recycling_fee_powertrain_type: Mapped[str | None] = mapped_column(
+        String(30), index=True
+    )
+    recycling_fee_power_kw: Mapped[Decimal | None] = mapped_column(Numeric(12, 3))
+    recycling_fee_power_source: Mapped[str | None] = mapped_column(String(60))
     battery_capacity_kwh: Mapped[Decimal | None] = mapped_column(Numeric(12, 3))
     battery_type: Mapped[str | None] = mapped_column(String(300))
     is_complete: Mapped[bool] = mapped_column(Boolean, nullable=False, index=True)

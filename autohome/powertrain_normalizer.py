@@ -7,8 +7,10 @@ import json
 import re
 from typing import Any
 
+from autohome.recycling_fee_power import select_recycling_fee_power
 
-NORMALIZATION_VERSION = 3
+
+NORMALIZATION_VERSION = 4
 EMPTY_VALUES = {None, "", "-", "Нет", "Неизвестно"}
 NUMBER_RE = re.compile(r"[-+]?\d+(?:[.,]\d+)?")
 
@@ -51,7 +53,7 @@ INTEGER_FIELDS = {"engine_displacement_ml", "transmission_gears"}
 SUBITEM_FIELDS = {"drive_type", "battery_type"}
 DERIVED_TEXT_FIELDS = {"clutch_type", "engine_layout"}
 ELECTRIC_ENERGIES = {"BEV"}
-PLUG_IN_ENERGIES = {"PHEV", "EREV"}
+PLUG_IN_ENERGIES = {"PHEV", "EREV", "SERIES_HEV"}
 
 
 def semantic_key(path: tuple[str, str, str]) -> str:
@@ -131,6 +133,20 @@ def normalize_powertrain(
             row[field] = clean_text(value)
     for field in DERIVED_TEXT_FIELDS:
         row[field] = clean_text(values.get(field))
+    recycling_fee_power = select_recycling_fee_power(
+        row.get("energy_type"),
+        engine_power_kw=row.get("engine_power_kw"),
+        maximum_power_kw=row.get("maximum_power_kw"),
+    )
+    row.update(
+        recycling_fee_powertrain_type=recycling_fee_power.powertrain_type.value,
+        recycling_fee_power_kw=recycling_fee_power.power_kw,
+        recycling_fee_power_source=(
+            recycling_fee_power.source.value
+            if recycling_fee_power.source is not None
+            else None
+        ),
+    )
     missing = required_missing(row)
     row.update(
         is_complete=not missing,
@@ -181,8 +197,7 @@ def modification_signature(row: dict) -> dict:
         "model_year": row["model_year"],
         "energy_type": energy,
         "maximum_power_kw": decimal_key(row.get("maximum_power_kw")),
-        "transmission": row.get("transmission_type")
-        or row.get("transmission_summary"),
+        "transmission": row.get("transmission_type") or row.get("transmission_summary"),
         "clutch_type": row.get("clutch_type"),
         "transmission_gears": row.get("transmission_gears"),
         "drive_type": row.get("drive_type"),
@@ -218,7 +233,10 @@ def modification_signature(row: dict) -> dict:
 def modification_row(row: dict) -> dict:
     """Построить строку модификации и её стабильный идентификатор."""
     key = json.dumps(
-        modification_signature(row), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        modification_signature(row),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
     )
     modification_id = stable_id(key)
     engine = row.get("engine_summary") or row.get("engine_model")
