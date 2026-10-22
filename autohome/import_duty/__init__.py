@@ -1,12 +1,18 @@
 """Классификация транспорта и расчёт ввозной пошлины Китай → Россия."""
 
 from .calculator import calculate_import_duty
+from .classifier import (
+    CLASSIFICATION_RULES_VERSION,
+    VehicleClassificationInput,
+    VehicleClassificationResult,
+    classify_vehicle,
+)
 from .customs_fee import calculate_customs_fee
 from .recycling_fee import RecyclingFeeContext, calculate_recycling_fee
 from .recycling_fee_regulation import (
     RecyclingFeeRegulatoryInput,
-    RecyclingFeeRegulatorySection,
     RecyclingFeeRegulatoryResult,
+    RecyclingFeeRegulatorySection,
     RecyclingFeeRoutingStatus,
     RecyclingFeeVehicleKind,
     route_recycling_fee_regulation,
@@ -16,11 +22,9 @@ from .recycling_fee_section_ii import (
     SectionIIVehicleSubtype,
     calculate_section_ii_recycling_fee,
 )
-from .classifier import (
-    CLASSIFICATION_RULES_VERSION,
-    VehicleClassificationInput,
-    VehicleClassificationResult,
-    classify_vehicle,
+from .recycling_fee_section_iv import (
+    SectionIVRecyclingFeeContext,
+    calculate_section_iv_recycling_fee,
 )
 from .types import DutyContext, DutyResult, ExchangeRate, ImporterType
 
@@ -38,12 +42,14 @@ __all__ = (
     "RecyclingFeeVehicleKind",
     "SectionIIRecyclingFeeContext",
     "SectionIIVehicleSubtype",
+    "SectionIVRecyclingFeeContext",
     "VehicleClassificationInput",
     "VehicleClassificationResult",
-    "calculate_import_duty",
     "calculate_customs_fee",
-    "classify_vehicle",
+    "calculate_import_duty",
     "calculate_recycling_fee",
     "calculate_section_ii_recycling_fee",
+    "calculate_section_iv_recycling_fee",
+    "classify_vehicle",
     "route_recycling_fee_regulation",
 )
