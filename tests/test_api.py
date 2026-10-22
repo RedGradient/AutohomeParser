@@ -212,6 +212,15 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(token_response.json()["token_type"], "bearer")
         self.assertEqual(protected_response.status_code, 200)
 
+    async def test_brand_responses_do_not_include_price(self):
+        list_response = await self.client.get("/api/v1/brands")
+        detail_response = await self.client.get("/api/v1/brands/1")
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertNotIn("price", list_response.json()["items"][0])
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertNotIn("price", detail_response.json())
+
     async def test_token_endpoint_rejects_invalid_credentials(self):
         response = await self.client.post(
             "/api/v1/auth/token",

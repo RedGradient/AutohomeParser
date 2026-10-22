@@ -108,13 +108,12 @@ class PhotoPreview(ApiSchema):
 
 
 class BrandResponse(ApiSchema):
-    """Бренд и сводная ценовая информация."""
+    """Бренд автомобиля."""
 
     id: int = Field(description="Идентификатор бренда Autohome.")
     name: str = Field(description="Название бренда.")
     logo_url: str | None = Field(description="Ссылка на логотип бренда.")
     series_count: int | None = Field(description="Заявленное каталогом число серий бренда.")
-    price: PriceRange = Field(description="Диапазон цен комплектаций бренда.")
 
 
 class SeriesResponse(ApiSchema):

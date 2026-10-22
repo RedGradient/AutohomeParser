@@ -376,7 +376,7 @@ def create_app(
         response_model=BrandPage,
         tags=["Brands"],
         summary="Получить бренды",
-        description="Возвращает бренды с ценовым диапазоном и курсорной пагинацией.",
+        description="Возвращает бренды с фильтрацией и курсорной пагинацией.",
     )
     async def brands(
         q: str | None = None,
@@ -424,9 +424,8 @@ def create_app(
             {
                 "id": brand.id, "name": brand.name, "logo_url": brand.logo_url,
                 "series_count": brand.series_count,
-                "price": {"min_cny": _money(minimum), "max_cny": _money(maximum)},
             }
-            for brand, minimum, maximum in rows
+            for brand, _minimum, _maximum in rows
         ]
         return {"items": items, "pagination": pagination}
 
@@ -440,15 +439,9 @@ def create_app(
         brand = session.get(Brand, brand_id)
         if brand is None:
             raise _not_found("Brand")
-        minimum, maximum = session.execute(
-            select(func.min(_effective_price()), func.max(_effective_price()))
-            .join(Series, Series.id == Spec.series_id)
-            .where(Series.brand_id == brand_id)
-        ).one()
         return {
             "id": brand.id, "name": brand.name, "logo_url": brand.logo_url,
             "series_count": brand.series_count,
-            "price": {"min_cny": _money(minimum), "max_cny": _money(maximum)},
         }
 
     def series_statement():
