@@ -1,5 +1,6 @@
 scrapy
 sqlalchemy
+alembic
 psycopg[binary]
 fastapi
 uvicorn[standard]

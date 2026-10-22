@@ -18,6 +18,8 @@ RUN python -m pip install --upgrade pip \
     && python -m pip install -r requirements.txt
 
 COPY autohome ./autohome
+COPY alembic ./alembic
+COPY alembic.ini ./
 COPY scrapy.cfg run_multi.py calculate_import_duties.py ./
 
 USER autohome
