@@ -37,6 +37,7 @@ from autohome.api.schemas import (
     PhotoPage,
     SeriesPage,
     SeriesResponse,
+    SeriesState,
     SpecDetailResponse,
     SpecPage,
     TokenRequest,
@@ -68,6 +69,14 @@ DEFAULT_DATABASE_URL = f"sqlite:///{(PROJECT_ROOT / 'data' / 'autohome.sqlite3')
 
 PriceType = Literal["effective", "guide", "dealer"]
 SortOrder = Literal["asc", "desc"]
+SERIES_STATE_CODES = {
+    SeriesState.UPCOMING: (10,),
+    SeriesState.CURRENT: (20, 30),
+    SeriesState.DISCONTINUED: (0, 40),
+}
+KNOWN_SERIES_STATE_CODES = tuple(
+    code for codes in SERIES_STATE_CODES.values() for code in codes
+)
 
 
 def _money(value: Decimal | None) -> str | None:
@@ -76,6 +85,14 @@ def _money(value: Decimal | None) -> str | None:
 
 def _decimal(value: Decimal | None) -> str | None:
     return format(value, "f") if value is not None else None
+
+
+def _series_state(value: int | None) -> SeriesState:
+    """Преобразовать исходный код Autohome в публичную стадию продаж."""
+    for state, codes in SERIES_STATE_CODES.items():
+        if value in codes:
+            return state
+    return SeriesState.UNKNOWN
 
 
 def _effective_price():
@@ -545,7 +562,7 @@ def create_app(
     )
     async def series_list(
         q: str | None = None, brand_id: int | None = None, manufacturer_id: int | None = None,
-        is_new_energy: bool | None = None, state: int | None = None,
+        is_new_energy: bool | None = None, state: SeriesState | None = None,
         year_from: int | None = None, year_to: int | None = None,
         energy_type: str | None = None, body_type: str | None = None,
         drive_type: str | None = None, transmission_type: str | None = None,
@@ -561,9 +578,18 @@ def create_app(
             _check_range(low, high, name)
         statement = series_statement()
         direct = []
-        for column, value in ((Series.brand_id, brand_id), (Series.manufacturer_id, manufacturer_id), (Series.is_new_energy, is_new_energy), (Series.state, state)):
+        for column, value in ((Series.brand_id, brand_id), (Series.manufacturer_id, manufacturer_id), (Series.is_new_energy, is_new_energy)):
             if value is not None:
                 direct.append(column == value)
+        if state == SeriesState.UNKNOWN:
+            direct.append(
+                or_(
+                    Series.state.is_(None),
+                    Series.state.not_in(KNOWN_SERIES_STATE_CODES),
+                )
+            )
+        elif state is not None:
+            direct.append(Series.state.in_(SERIES_STATE_CODES[state]))
         if q:
             direct.append(func.lower(Series.name).like(f"%{q.lower()}%"))
         matching_specs = _apply_spec_filters(
@@ -593,7 +619,7 @@ def create_app(
         items = [{
             "id": item.id, "name": item.name, "brand": _brand_ref(brand),
             "manufacturer": _manufacturer_ref(manufacturer), "is_new_energy": item.is_new_energy,
-            "state": item.state, "spec_count": item.spec_count,
+            "state": _series_state(item.state), "spec_count": item.spec_count,
             "price": {"min_cny": _money(minimum), "max_cny": _money(maximum)},
             "official_images": images_by_series.get(item.id, []),
         } for item, brand, manufacturer, minimum, maximum in rows]
@@ -612,7 +638,7 @@ def create_app(
         item, brand, manufacturer, minimum, maximum = row
         return {"id": item.id, "name": item.name, "brand": _brand_ref(brand),
                 "manufacturer": _manufacturer_ref(manufacturer), "is_new_energy": item.is_new_energy,
-                "state": item.state, "spec_count": item.spec_count,
+                "state": _series_state(item.state), "spec_count": item.spec_count,
                 "price": {"min_cny": _money(minimum), "max_cny": _money(maximum)},
                 "official_images": official_images(session, [item.id]).get(item.id, [])}
 

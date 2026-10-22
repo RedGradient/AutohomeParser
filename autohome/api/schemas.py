@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from enum import Enum, StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -12,6 +13,15 @@ Money = str
 DecimalText = str
 ColorScope = Literal["EXTERIOR", "INTERIOR"]
 PriceSource = Literal["GUIDE", "DEALER", "MISSING", "NOT_REQUIRED"]
+
+
+class SeriesState(StrEnum):
+    """Публичная стадия продаж серии."""
+
+    UPCOMING = "UPCOMING"
+    CURRENT = "CURRENT"
+    DISCONTINUED = "DISCONTINUED"
+    UNKNOWN = "UNKNOWN"
 
 
 class ApiSchema(BaseModel):
@@ -131,7 +141,7 @@ class SeriesResponse(ApiSchema):
     brand: BrandRef | None = Field(description="Бренд серии.")
     manufacturer: ManufacturerRef | None = Field(description="Производитель серии.")
     is_new_energy: bool | None = Field(description="Относится ли серия к китайской категории NEV.")
-    state: int | None = Field(description="Исходный код стадии продаж серии в Autohome.")
+    state: SeriesState = Field(description="Нормализованная стадия продаж серии.")
     spec_count: int | None = Field(description="Заявленное число комплектаций.")
     price: PriceRange = Field(description="Диапазон цен комплектаций серии.")
     official_images: list[PhotoPreview] = Field(description="Официальные изображения серии.")

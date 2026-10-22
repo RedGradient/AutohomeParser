@@ -48,6 +48,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
                     brand_id=1,
                     manufacturer_id=2,
                     name="Test Series",
+                    state=20,
                     spec_count=2,
                     raw_json={},
                 )
@@ -243,6 +244,20 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             detail_response.json(),
             {"id": 2, "name": "Test Manufacturer"},
+        )
+
+    async def test_series_uses_normalized_state(self):
+        response = await self.client.get("/api/v1/series/10")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["state"], "CURRENT")
+
+        filtered_response = await self.client.get(
+            "/api/v1/series", params={"state": "CURRENT"}
+        )
+        self.assertEqual(filtered_response.status_code, 200)
+        self.assertEqual(
+            [item["id"] for item in filtered_response.json()["items"]],
+            [10],
         )
 
     async def test_token_endpoint_rejects_invalid_credentials(self):
