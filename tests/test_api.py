@@ -13,6 +13,8 @@ from autohome.api.auth import create_access_token
 from autohome.models import (
     Base,
     Brand,
+    BrandManufacturer,
+    Manufacturer,
     Modification,
     Series,
     SeriesGalleryColor,
@@ -38,10 +40,13 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         Base.metadata.create_all(self.app.state.engine)
         with Session(self.app.state.engine) as session:
             session.add(Brand(id=1, name="Test Brand", raw_json={}))
+            session.add(Manufacturer(id=2, name="Test Manufacturer", raw_json={}))
+            session.add(BrandManufacturer(brand_id=1, manufacturer_id=2, position=0))
             session.add(
                 Series(
                     id=10,
                     brand_id=1,
+                    manufacturer_id=2,
                     name="Test Series",
                     spec_count=2,
                     raw_json={},
@@ -221,6 +226,25 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail_response.status_code, 200)
         self.assertNotIn("price", detail_response.json())
 
+    async def test_manufacturers_support_search_and_brand_filter(self):
+        response = await self.client.get(
+            "/api/v1/manufacturers",
+            params={"q": "manufacturer", "brand_id": 1},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["items"],
+            [{"id": 2, "name": "Test Manufacturer"}],
+        )
+
+        detail_response = await self.client.get("/api/v1/manufacturers/2")
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(
+            detail_response.json(),
+            {"id": 2, "name": "Test Manufacturer"},
+        )
+
     async def test_token_endpoint_rejects_invalid_credentials(self):
         response = await self.client.post(
             "/api/v1/auth/token",
@@ -328,6 +352,8 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         urls = (
             "/api/v1/brands",
             "/api/v1/brands/1",
+            "/api/v1/manufacturers",
+            "/api/v1/manufacturers/2",
             "/api/v1/series",
             "/api/v1/series?sort=price",
             "/api/v1/series?sort=year&order=desc",

@@ -116,6 +116,13 @@ class BrandResponse(ApiSchema):
     series_count: int | None = Field(description="Заявленное каталогом число серий бренда.")
 
 
+class ManufacturerResponse(ApiSchema):
+    """Производитель автомобилей."""
+
+    id: int = Field(description="Идентификатор производителя Autohome.")
+    name: str = Field(description="Название производителя.")
+
+
 class SeriesResponse(ApiSchema):
     """Серия автомобилей."""
 
@@ -331,6 +338,13 @@ class BrandPage(ApiSchema):
     """Страница брендов."""
 
     items: list[BrandResponse]
+    pagination: Pagination
+
+
+class ManufacturerPage(ApiSchema):
+    """Страница производителей."""
+
+    items: list[ManufacturerResponse]
     pagination: Pagination
 
 

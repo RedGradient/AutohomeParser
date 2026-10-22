@@ -29,6 +29,8 @@ from autohome.api.schemas import (
     CustomsCalculationResponse,
     ErrorResponse,
     GalleryColorsResponse,
+    ManufacturerPage,
+    ManufacturerResponse,
     ModificationPage,
     ModificationResponse,
     ParameterGroupsResponse,
@@ -42,6 +44,7 @@ from autohome.api.schemas import (
 )
 from autohome.models import (
     Brand,
+    BrandManufacturer,
     CustomsCalculation,
     CustomsPaymentResult,
     Manufacturer,
@@ -292,6 +295,7 @@ def create_app(
         openapi_tags=[
             {"name": "Auth", "description": "Получение JWT для доступа к API."},
             {"name": "Brands", "description": "Бренды автомобилей."},
+            {"name": "Manufacturers", "description": "Производители автомобилей."},
             {"name": "Series", "description": "Серии и их изображения."},
             {"name": "Modifications", "description": "Нормализованные технические модификации."},
             {"name": "Specs", "description": "Комплектации и полные характеристики."},
@@ -443,6 +447,52 @@ def create_app(
             "id": brand.id, "name": brand.name, "logo_url": brand.logo_url,
             "series_count": brand.series_count,
         }
+
+    @protected_router.get(
+        "/api/v1/manufacturers",
+        response_model=ManufacturerPage,
+        tags=["Manufacturers"],
+        summary="Получить производителей",
+        description="Возвращает производителей с поиском по названию и фильтром по бренду.",
+    )
+    async def manufacturers(
+        q: str | None = None,
+        brand_id: int | None = None,
+        limit: int = Query(24, ge=1, le=100),
+        cursor: str | None = None,
+        session: Session = Depends(get_session),
+    ):
+        statement = select(Manufacturer)
+        if brand_id is not None:
+            statement = statement.join(
+                BrandManufacturer,
+                BrandManufacturer.manufacturer_id == Manufacturer.id,
+            ).where(BrandManufacturer.brand_id == brand_id)
+        if q:
+            statement = statement.where(
+                func.lower(Manufacturer.name).like(f"%{q.lower()}%")
+            )
+        statement = statement.order_by(Manufacturer.name, Manufacturer.id)
+        rows, pagination = _page(session, statement, limit, cursor)
+        return {
+            "items": [{"id": item.id, "name": item.name} for (item,) in rows],
+            "pagination": pagination,
+        }
+
+    @protected_router.get(
+        "/api/v1/manufacturers/{manufacturer_id}",
+        response_model=ManufacturerResponse,
+        tags=["Manufacturers"],
+        summary="Получить производителя",
+    )
+    async def manufacturer_detail(
+        manufacturer_id: int,
+        session: Session = Depends(get_session),
+    ):
+        manufacturer = session.get(Manufacturer, manufacturer_id)
+        if manufacturer is None:
+            raise _not_found("Manufacturer")
+        return {"id": manufacturer.id, "name": manufacturer.name}
 
     def series_statement():
         price = _effective_price()
