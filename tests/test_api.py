@@ -385,6 +385,10 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         schema = response.json()
         self.assertEqual(schema["openapi"], "3.1.0")
+        self.assertIn("- производители;", schema["info"]["description"])
+        self.assertIn("- фотографии.", schema["info"]["description"])
+        self.assertIn("ввозную таможенную пошлину", schema["info"]["description"])
+        self.assertIn("утилизационный сбор", schema["info"]["description"])
         self.assertIn(
             "/api/v1/series/{series_id}/modifications",
             schema["paths"],
