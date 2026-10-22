@@ -388,7 +388,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("description", spec_schema)
         self.assertEqual(
             spec_schema["properties"]["state"]["description"],
-            "Исходный код стадии продаж комплектации.",
+            "Код состояния комплектации.",
         )
         operation = schema["paths"]["/api/v1/specs"]["get"]
         self.assertEqual(
@@ -396,16 +396,41 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
             "#/components/schemas/SpecPage",
         )
         parameters = {item["name"]: item for item in operation["parameters"]}
-        self.assertIn("рекомендованная цена", parameters["price_type"]["description"])
-        self.assertIn("выбранного price_type", parameters["price_from"]["description"])
+        self.assertIn("effective", parameters["price_type"]["description"])
+        self.assertIn("параметром price_type", parameters["price_from"]["description"])
         brand_parameters = {
             item["name"]: item
             for item in schema["paths"]["/api/v1/brands"]["get"]["parameters"]
         }
         self.assertIn(
-            "эффективной цены",
+            "Минимальная цена",
             brand_parameters["price_from"]["description"],
         )
+        self.assertIn(
+            "Максимальная цена",
+            brand_parameters["price_to"]["description"],
+        )
+        for path, methods in schema["paths"].items():
+            operation = methods.get("get")
+            if operation is None:
+                continue
+            for parameter in operation.get("parameters", []):
+                self.assertTrue(
+                    parameter.get("description"),
+                    f"GET {path}: параметр {parameter['name']} не имеет description",
+                )
+        for page_name in (
+            "BrandPage",
+            "ManufacturerPage",
+            "SeriesPage",
+            "ModificationPage",
+            "SpecPage",
+            "PhotoPage",
+            "CustomsCalculationPage",
+        ):
+            properties = schema["components"]["schemas"][page_name]["properties"]
+            self.assertIn("description", properties["items"])
+            self.assertIn("description", properties["pagination"])
         self.assertEqual((await self.client.get("/docs")).status_code, 200)
 
     async def test_modifications_are_filtered_by_series(self):

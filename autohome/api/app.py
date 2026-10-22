@@ -7,7 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Security
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path as ApiPath, Query, Security
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -76,29 +76,24 @@ KNOWN_SERIES_STATE_CODES = tuple(
     code for codes in SERIES_STATE_CODES.values() for code in codes
 )
 PRICE_FROM_DESCRIPTION = (
-    "Нижняя граница цены в CNY для выбранного price_type. "
-    "Комплектации без выбранной цены исключаются."
+    "Минимальная цена в CNY. Тип цены задаётся параметром price_type. "
+    "Записи без цены выбранного типа не возвращаются."
 )
 PRICE_TO_DESCRIPTION = (
-    "Верхняя граница цены в CNY для выбранного price_type. "
-    "Комплектации без выбранной цены исключаются."
+    "Максимальная цена в CNY. Тип цены задаётся параметром price_type. "
+    "Записи без цены выбранного типа не возвращаются."
 )
 EFFECTIVE_PRICE_FROM_DESCRIPTION = (
-    "Нижняя граница эффективной цены в CNY: используется положительная "
-    "рекомендованная цена, а при её отсутствии — положительная дилерская. "
-    "Комплектации без обеих цен исключаются."
+    "Минимальная цена в CNY. Используется рекомендованная цена, "
+    "а если её нет — дилерская."
 )
 EFFECTIVE_PRICE_TO_DESCRIPTION = (
-    "Верхняя граница эффективной цены в CNY: используется положительная "
-    "рекомендованная цена, а при её отсутствии — положительная дилерская. "
-    "Комплектации без обеих цен исключаются."
+    "Максимальная цена в CNY. Используется рекомендованная цена, "
+    "а если её нет — дилерская."
 )
 PRICE_TYPE_DESCRIPTION = (
-    "Источник цены для фильтрации и сортировки: effective — положительная "
-    "рекомендованная цена либо, если она отсутствует, положительная дилерская; "
-    "guide — только рекомендованная; dealer — только дилерская. "
-    "Записи без выбранной цены не проходят ценовые фильтры и при сортировке "
-    "имеют значение NULL."
+    "Тип цены: effective — рекомендованная или дилерская при её отсутствии; "
+    "guide — рекомендованная; dealer — дилерская."
 )
 EXPECTED_CUSTOMS_PAYMENT_TYPES = {
     "IMPORT_DUTY",
@@ -106,8 +101,8 @@ EXPECTED_CUSTOMS_PAYMENT_TYPES = {
     "RECYCLING_FEE",
 }
 INCLUDE_TOTAL_DESCRIPTION = (
-    "Рассчитать точное общее число записей с учётом фильтров. "
-    "По умолчанию отключено, поскольку COUNT(*) может замедлить запрос."
+    "Если true, возвращает общее количество найденных записей. "
+    "Может увеличить время ответа."
 )
 
 
@@ -430,15 +425,15 @@ def create_app(
         description="Возвращает бренды с фильтрацией и offset-пагинацией.",
     )
     async def brands(
-        q: str | None = None,
-        manufacturer_id: int | None = None,
-        is_new_energy: bool | None = None,
+        q: str | None = Query(None, description="Поиск по части названия бренда без учёта регистра."),
+        manufacturer_id: int | None = Query(None, description="Оставить бренды указанного производителя."),
+        is_new_energy: bool | None = Query(None, description="Оставить бренды с сериями указанной категории NEV."),
         price_from: Decimal | None = Query(None, description=EFFECTIVE_PRICE_FROM_DESCRIPTION),
         price_to: Decimal | None = Query(None, description=EFFECTIVE_PRICE_TO_DESCRIPTION),
-        sort: Literal["name", "series_count", "min_price"] = "name",
-        order: SortOrder = "asc",
-        limit: int = Query(24, ge=1, le=100),
-        offset: int = Query(0, ge=0),
+        sort: Literal["name", "series_count", "min_price"] = Query("name", description="Поле сортировки."),
+        order: SortOrder = Query("asc", description="Направление сортировки: asc или desc."),
+        limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
+        offset: int = Query(0, ge=0, description="Количество записей, которые нужно пропустить."),
         include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
         session: Session = Depends(get_session),
     ):
@@ -488,7 +483,10 @@ def create_app(
         tags=["Brands"],
         summary="Получить бренд",
     )
-    async def brand_detail(brand_id: int, session: Session = Depends(get_session)):
+    async def brand_detail(
+        brand_id: int = ApiPath(description="Идентификатор бренда."),
+        session: Session = Depends(get_session),
+    ):
         brand = session.get(Brand, brand_id)
         if brand is None:
             raise _not_found("Brand")
@@ -505,10 +503,10 @@ def create_app(
         description="Возвращает производителей с поиском по названию и фильтром по бренду.",
     )
     async def manufacturers(
-        q: str | None = None,
-        brand_id: int | None = None,
-        limit: int = Query(24, ge=1, le=100),
-        offset: int = Query(0, ge=0),
+        q: str | None = Query(None, description="Поиск по части названия производителя без учёта регистра."),
+        brand_id: int | None = Query(None, description="Оставить производителей указанного бренда."),
+        limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
+        offset: int = Query(0, ge=0, description="Количество записей, которые нужно пропустить."),
         include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
         session: Session = Depends(get_session),
     ):
@@ -536,7 +534,7 @@ def create_app(
         summary="Получить производителя",
     )
     async def manufacturer_detail(
-        manufacturer_id: int,
+        manufacturer_id: int = ApiPath(description="Идентификатор производителя."),
         session: Session = Depends(get_session),
     ):
         manufacturer = session.get(Manufacturer, manufacturer_id)
@@ -594,19 +592,28 @@ def create_app(
         description="Фильтрует серии по бренду, производителю и характеристикам комплектаций.",
     )
     async def series_list(
-        q: str | None = None, brand_id: int | None = None, manufacturer_id: int | None = None,
-        is_new_energy: bool | None = None, state: SeriesState | None = None,
-        year_from: int | None = None, year_to: int | None = None,
-        energy_type: str | None = None, body_type: str | None = None,
-        drive_type: str | None = None, transmission_type: str | None = None,
-        engine_displacement_from: int | None = None, engine_displacement_to: int | None = None,
-        power_hp_from: Decimal | None = None, power_hp_to: Decimal | None = None,
+        q: str | None = Query(None, description="Поиск по части названия серии без учёта регистра."),
+        brand_id: int | None = Query(None, description="Идентификатор бренда."),
+        manufacturer_id: int | None = Query(None, description="Идентификатор производителя."),
+        is_new_energy: bool | None = Query(None, description="Фильтр по принадлежности к категории NEV."),
+        state: SeriesState | None = Query(None, description="Нормализованная стадия продаж серии."),
+        year_from: int | None = Query(None, description="Минимальный модельный год комплектаций серии."),
+        year_to: int | None = Query(None, description="Максимальный модельный год комплектаций серии."),
+        energy_type: str | None = Query(None, description="Нормализованный код типа энергии."),
+        body_type: str | None = Query(None, description="Нормализованный код типа кузова."),
+        drive_type: str | None = Query(None, description="Нормализованный код типа привода."),
+        transmission_type: str | None = Query(None, description="Нормализованный код типа трансмиссии."),
+        engine_displacement_from: int | None = Query(None, description="Минимальный рабочий объём ДВС в миллилитрах."),
+        engine_displacement_to: int | None = Query(None, description="Максимальный рабочий объём ДВС в миллилитрах."),
+        power_hp_from: Decimal | None = Query(None, description="Минимальная мощность ДВС в лошадиных силах."),
+        power_hp_to: Decimal | None = Query(None, description="Максимальная мощность ДВС в лошадиных силах."),
         price_from: Decimal | None = Query(None, description=PRICE_FROM_DESCRIPTION),
         price_to: Decimal | None = Query(None, description=PRICE_TO_DESCRIPTION),
         price_type: PriceType = Query("effective", description=PRICE_TYPE_DESCRIPTION),
-        sort: Literal["name", "price", "year"] = "name", order: SortOrder = "asc",
-        limit: int = Query(24, ge=1, le=100),
-        offset: int = Query(0, ge=0),
+        sort: Literal["name", "price", "year"] = Query("name", description="Поле сортировки."),
+        order: SortOrder = Query("asc", description="Направление сортировки: asc или desc."),
+        limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
+        offset: int = Query(0, ge=0, description="Количество записей, которые нужно пропустить."),
         include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
         session: Session = Depends(get_session),
     ):
@@ -667,7 +674,10 @@ def create_app(
         tags=["Series"],
         summary="Получить серию",
     )
-    async def series_detail(series_id: int, session: Session = Depends(get_session)):
+    async def series_detail(
+        series_id: int = ApiPath(description="Идентификатор серии."),
+        session: Session = Depends(get_session),
+    ):
         row = session.execute(series_statement().where(Series.id == series_id)).one_or_none()
         if row is None:
             raise _not_found("Series")
@@ -720,18 +730,25 @@ def create_app(
         summary="Получить модификации",
     )
     async def modifications(
-        series_id: int | None = None, brand_id: int | None = None,
-        year_from: int | None = None, year_to: int | None = None,
-        energy_type: str | None = None, body_type: str | None = None,
-        drive_type: str | None = None, transmission_type: str | None = None,
-        engine_displacement_from: int | None = None, engine_displacement_to: int | None = None,
-        power_hp_from: Decimal | None = None, power_hp_to: Decimal | None = None,
+        series_id: int | None = Query(None, description="Идентификатор серии."),
+        brand_id: int | None = Query(None, description="Идентификатор бренда."),
+        year_from: int | None = Query(None, description="Минимальный модельный год."),
+        year_to: int | None = Query(None, description="Максимальный модельный год."),
+        energy_type: str | None = Query(None, description="Нормализованный код типа энергии."),
+        body_type: str | None = Query(None, description="Нормализованный код типа кузова."),
+        drive_type: str | None = Query(None, description="Нормализованный код типа привода."),
+        transmission_type: str | None = Query(None, description="Нормализованный код типа трансмиссии."),
+        engine_displacement_from: int | None = Query(None, description="Минимальный рабочий объём ДВС в миллилитрах."),
+        engine_displacement_to: int | None = Query(None, description="Максимальный рабочий объём ДВС в миллилитрах."),
+        power_hp_from: Decimal | None = Query(None, description="Минимальная мощность ДВС в лошадиных силах."),
+        power_hp_to: Decimal | None = Query(None, description="Максимальная мощность ДВС в лошадиных силах."),
         price_from: Decimal | None = Query(None, description=PRICE_FROM_DESCRIPTION),
         price_to: Decimal | None = Query(None, description=PRICE_TO_DESCRIPTION),
         price_type: PriceType = Query("effective", description=PRICE_TYPE_DESCRIPTION),
-        sort: Literal["year", "power", "engine_displacement", "price", "name"] = "year",
-        order: SortOrder = "desc", limit: int = Query(24, ge=1, le=100),
-        offset: int = Query(0, ge=0),
+        sort: Literal["year", "power", "engine_displacement", "price", "name"] = Query("year", description="Поле сортировки."),
+        order: SortOrder = Query("desc", description="Направление сортировки: asc или desc."),
+        limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
+        offset: int = Query(0, ge=0, description="Количество записей, которые нужно пропустить."),
         include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
         session: Session = Depends(get_session),
     ):
@@ -753,16 +770,22 @@ def create_app(
         summary="Получить модификации серии",
     )
     async def series_modifications(
-        series_id: int, year_from: int | None = None, year_to: int | None = None,
-        energy_type: str | None = None, body_type: str | None = None,
-        drive_type: str | None = None, transmission_type: str | None = None,
-        engine_displacement_from: int | None = None, engine_displacement_to: int | None = None,
-        power_hp_from: Decimal | None = None, power_hp_to: Decimal | None = None,
+        series_id: int = ApiPath(description="Идентификатор серии."),
+        year_from: int | None = Query(None, description="Минимальный модельный год."),
+        year_to: int | None = Query(None, description="Максимальный модельный год."),
+        energy_type: str | None = Query(None, description="Нормализованный код типа энергии."),
+        body_type: str | None = Query(None, description="Нормализованный код типа кузова."),
+        drive_type: str | None = Query(None, description="Нормализованный код типа привода."),
+        transmission_type: str | None = Query(None, description="Нормализованный код типа трансмиссии."),
+        engine_displacement_from: int | None = Query(None, description="Минимальный рабочий объём ДВС в миллилитрах."),
+        engine_displacement_to: int | None = Query(None, description="Максимальный рабочий объём ДВС в миллилитрах."),
+        power_hp_from: Decimal | None = Query(None, description="Минимальная мощность ДВС в лошадиных силах."),
+        power_hp_to: Decimal | None = Query(None, description="Максимальная мощность ДВС в лошадиных силах."),
         price_from: Decimal | None = Query(None, description=PRICE_FROM_DESCRIPTION),
         price_to: Decimal | None = Query(None, description=PRICE_TO_DESCRIPTION),
         price_type: PriceType = Query("effective", description=PRICE_TYPE_DESCRIPTION),
-        limit: int = Query(24, ge=1, le=100),
-        offset: int = Query(0, ge=0),
+        limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
+        offset: int = Query(0, ge=0, description="Количество записей, которые нужно пропустить."),
         include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
         session: Session = Depends(get_session),
     ):
@@ -781,7 +804,10 @@ def create_app(
         tags=["Modifications"],
         summary="Получить модификацию",
     )
-    async def modification_detail(modification_id: int, session: Session = Depends(get_session)):
+    async def modification_detail(
+        modification_id: int = ApiPath(description="Идентификатор технической модификации."),
+        session: Session = Depends(get_session),
+    ):
         item = session.get(Modification, modification_id)
         if item is None: raise _not_found("Modification")
         price = _effective_price()
@@ -813,21 +839,33 @@ def create_app(
         description="Возвращает комплектации с ценами и нормализованной силовой установкой.",
     )
     async def specs(
-        q: str | None = None, brand_id: int | None = None, series_id: int | None = None,
-        modification_id: int | None = None, manufacturer_id: int | None = None,
-        year_from: int | None = None, year_to: int | None = None, state: int | None = None,
-        config_available: bool | None = None, energy_type: str | None = None,
-        body_type: str | None = None, drive_type: str | None = None,
-        transmission_type: str | None = None, engine_displacement_from: int | None = None,
-        engine_displacement_to: int | None = None, power_hp_from: Decimal | None = None,
-        power_hp_to: Decimal | None = None, seats_from: int | None = None, seats_to: int | None = None,
-        four_wheel_drive: bool | None = None,
+        q: str | None = Query(None, description="Поиск по части названия комплектации без учёта регистра."),
+        brand_id: int | None = Query(None, description="Идентификатор бренда."),
+        series_id: int | None = Query(None, description="Идентификатор серии."),
+        modification_id: int | None = Query(None, description="Идентификатор технической модификации."),
+        manufacturer_id: int | None = Query(None, description="Идентификатор производителя."),
+        year_from: int | None = Query(None, description="Минимальный модельный год."),
+        year_to: int | None = Query(None, description="Максимальный модельный год."),
+        state: int | None = Query(None, description="Код состояния комплектации."),
+        config_available: bool | None = Query(None, description="Фильтр по наличию полной конфигурации."),
+        energy_type: str | None = Query(None, description="Нормализованный код типа энергии."),
+        body_type: str | None = Query(None, description="Нормализованный код типа кузова."),
+        drive_type: str | None = Query(None, description="Нормализованный код типа привода."),
+        transmission_type: str | None = Query(None, description="Нормализованный код типа трансмиссии."),
+        engine_displacement_from: int | None = Query(None, description="Минимальный рабочий объём ДВС в миллилитрах."),
+        engine_displacement_to: int | None = Query(None, description="Максимальный рабочий объём ДВС в миллилитрах."),
+        power_hp_from: Decimal | None = Query(None, description="Минимальная мощность ДВС в лошадиных силах."),
+        power_hp_to: Decimal | None = Query(None, description="Максимальная мощность ДВС в лошадиных силах."),
+        seats_from: int | None = Query(None, description="Минимальное число мест."),
+        seats_to: int | None = Query(None, description="Максимальное число мест."),
+        four_wheel_drive: bool | None = Query(None, description="Фильтр по наличию полного привода."),
         price_from: Decimal | None = Query(None, description=PRICE_FROM_DESCRIPTION),
         price_to: Decimal | None = Query(None, description=PRICE_TO_DESCRIPTION),
         price_type: PriceType = Query("effective", description=PRICE_TYPE_DESCRIPTION),
-        sort: Literal["price", "year", "power", "engine_displacement", "name"] = "price",
-        order: SortOrder = "asc", limit: int = Query(24, ge=1, le=100),
-        offset: int = Query(0, ge=0),
+        sort: Literal["price", "year", "power", "engine_displacement", "name"] = Query("price", description="Поле сортировки."),
+        order: SortOrder = Query("asc", description="Направление сортировки: asc или desc."),
+        limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
+        offset: int = Query(0, ge=0, description="Количество записей, которые нужно пропустить."),
         include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
         session: Session = Depends(get_session),
     ):
@@ -848,12 +886,13 @@ def create_app(
         tags=["Specs"],
         summary="Получить комплектации модификации",
     )
-    async def modification_specs(modification_id: int,
+    async def modification_specs(
+        modification_id: int = ApiPath(description="Идентификатор технической модификации."),
         price_from: Decimal | None = Query(None, description=PRICE_FROM_DESCRIPTION),
         price_to: Decimal | None = Query(None, description=PRICE_TO_DESCRIPTION),
         price_type: PriceType = Query("effective", description=PRICE_TYPE_DESCRIPTION),
-        limit: int = Query(24, ge=1, le=100),
-        offset: int = Query(0, ge=0),
+        limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
+        offset: int = Query(0, ge=0, description="Количество записей, которые нужно пропустить."),
         include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
         session: Session = Depends(get_session)):
         if session.get(Modification, modification_id) is None: raise _not_found("Modification")
@@ -867,7 +906,10 @@ def create_app(
         tags=["Specs"],
         summary="Получить комплектацию",
     )
-    async def spec_detail(spec_id: int, session: Session = Depends(get_session)):
+    async def spec_detail(
+        spec_id: int = ApiPath(description="Идентификатор комплектации."),
+        session: Session = Depends(get_session),
+    ):
         row = session.execute(_spec_select().where(Spec.id == spec_id)).one_or_none()
         if row is None: raise _not_found("Spec")
         return _spec_payload(row, detail=True)
@@ -878,8 +920,12 @@ def create_app(
         tags=["Specs"],
         summary="Получить полную конфигурацию комплектации",
     )
-    async def spec_parameters(spec_id: int, group_id: int | None = None, section_id: int | None = None,
-                        session: Session = Depends(get_session)):
+    async def spec_parameters(
+        spec_id: int = ApiPath(description="Идентификатор комплектации."),
+        group_id: int | None = Query(None, description="Оставить указанную группу характеристик."),
+        section_id: int | None = Query(None, description="Оставить указанный раздел характеристик."),
+        session: Session = Depends(get_session),
+    ):
         if session.get(Spec, spec_id) is None: raise _not_found("Spec")
         statement = (select(ParameterGroup, ParameterSection, ParameterDefinition, SpecParameter)
             .join(ParameterSection, ParameterSection.group_id == ParameterGroup.id)
@@ -911,9 +957,14 @@ def create_app(
         tags=["Series"],
         summary="Получить фотографии серии",
     )
-    async def photos(series_id: int, spec_id: int | None = None, category_id: int | None = None,
-               color_scope: str | None = None, color_id: int | None = None,
-               limit: int = Query(24, ge=1, le=100), offset: int = Query(0, ge=0),
+    async def photos(
+               series_id: int = ApiPath(description="Идентификатор серии."),
+               spec_id: int | None = Query(None, description="Оставить фотографии указанной комплектации."),
+               category_id: int | None = Query(None, description="Оставить фотографии указанной категории."),
+               color_scope: str | None = Query(None, description="Область цвета: EXTERIOR или INTERIOR."),
+               color_id: int | None = Query(None, description="Идентификатор цвета."),
+               limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
+               offset: int = Query(0, ge=0, description="Количество записей, которые нужно пропустить."),
                include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
                session: Session = Depends(get_session)):
         if session.get(Series, series_id) is None: raise _not_found("Series")
@@ -953,7 +1004,11 @@ def create_app(
         tags=["Series"],
         summary="Получить цвета галереи",
     )
-    async def gallery_colors(series_id: int, color_scope: str | None = None, session: Session = Depends(get_session)):
+    async def gallery_colors(
+        series_id: int = ApiPath(description="Идентификатор серии."),
+        color_scope: str | None = Query(None, description="Область цвета: EXTERIOR или INTERIOR."),
+        session: Session = Depends(get_session),
+    ):
         if session.get(Series, series_id) is None: raise _not_found("Series")
         statement = select(SeriesGalleryColor).where(SeriesGalleryColor.series_id == series_id)
         if color_scope is not None:
@@ -1009,10 +1064,16 @@ def create_app(
         tags=["Customs"],
         summary="Получить таможенные расчёты",
     )
-    async def calculations(spec_id: int | None = None, brand_id: int | None = None, series_id: int | None = None,
-                     importer_type: str | None = None, status: str | None = None,
-                     calculation_date_from: date | None = None, calculation_date_to: date | None = None,
-                     limit: int = Query(24, ge=1, le=100), offset: int = Query(0, ge=0),
+    async def calculations(
+                     spec_id: int | None = Query(None, description="Идентификатор комплектации."),
+                     brand_id: int | None = Query(None, description="Идентификатор бренда."),
+                     series_id: int | None = Query(None, description="Идентификатор серии."),
+                     importer_type: str | None = Query(None, description="Тип импортёра: INDIVIDUAL или LEGAL_ENTITY."),
+                     status: str | None = Query(None, description="Итоговый статус расчёта."),
+                     calculation_date_from: date | None = Query(None, description="Начальная дата расчёта включительно."),
+                     calculation_date_to: date | None = Query(None, description="Конечная дата расчёта включительно."),
+                     limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
+                     offset: int = Query(0, ge=0, description="Количество записей, которые нужно пропустить."),
                      include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
                      session: Session = Depends(get_session)):
         _check_range(calculation_date_from, calculation_date_to, "calculation_date")
@@ -1027,7 +1088,10 @@ def create_app(
         tags=["Customs"],
         summary="Получить таможенный расчёт",
     )
-    async def calculation_detail(calculation_id: int, session: Session = Depends(get_session)):
+    async def calculation_detail(
+        calculation_id: int = ApiPath(description="Идентификатор сценария таможенного расчёта."),
+        session: Session = Depends(get_session),
+    ):
         item = session.get(CustomsCalculation, calculation_id)
         if item is None: raise _not_found("Customs calculation")
         return calculation_payload(session, item)
@@ -1038,9 +1102,12 @@ def create_app(
         tags=["Customs"],
         summary="Получить таможенные расчёты комплектации",
     )
-    async def spec_calculations(spec_id: int, importer_type: str | None = None,
-                          calculation_date: date | None = None,
-                          limit: int = Query(24, ge=1, le=100), offset: int = Query(0, ge=0),
+    async def spec_calculations(
+                          spec_id: int = ApiPath(description="Идентификатор комплектации."),
+                          importer_type: str | None = Query(None, description="Тип импортёра: INDIVIDUAL или LEGAL_ENTITY."),
+                          calculation_date: date | None = Query(None, description="Точная дата расчёта."),
+                          limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
+                          offset: int = Query(0, ge=0, description="Количество записей, которые нужно пропустить."),
                           include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
                           session: Session = Depends(get_session)):
         if session.get(Spec, spec_id) is None: raise _not_found("Spec")
