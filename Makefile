@@ -35,7 +35,7 @@ ETH_TABLE := 10102
 WIFI_PRIORITY := 10101
 ETH_PRIORITY := 10102
 
-.PHONY: help network-up network-down network-status network-test postgres-up api-up api-logs celery-logs parser-run parser-resume parser-logs api-run database-reset parameters-reset build-modifications normalize-vehicle-attributes audit-vehicle-classifications audit-indirect-vehicle-attributes backfill-vehicle-attribute-inferences translate-db calculate-import-duties docker-down
+.PHONY: help network-up network-down network-status network-test postgres-up database-migrate api-up api-logs celery-logs parser-run parser-resume parser-logs api-run database-reset parameters-reset build-modifications normalize-vehicle-attributes audit-vehicle-classifications audit-indirect-vehicle-attributes backfill-vehicle-attribute-inferences translate-db calculate-import-duties docker-down
 
 help:
 	@echo "Доступные команды:"
@@ -44,6 +44,7 @@ help:
 	@echo "  make network-status  — показать интерфейсы и правила"
 	@echo "  make network-test    — проверить маршруты и внешние IP"
 	@echo "  make postgres-up     — запустить PostgreSQL"
+	@echo "  make database-migrate — применить миграции Alembic"
 	@echo "  make api-up          — собрать и запустить API с PostgreSQL в Docker"
 	@echo "  make api-logs        — показать логи контейнера API"
 	@echo "  make celery-logs     — показать логи worker и beat"
@@ -127,6 +128,9 @@ network-test:
 
 postgres-up:
 	@docker compose -f '$(COMPOSE_FILE)' up -d --wait postgres
+
+database-migrate: postgres-up
+	@docker compose -f '$(COMPOSE_FILE)' run --rm --build migrate
 
 api-up:
 	@docker compose -f '$(COMPOSE_FILE)' up -d --build --wait \
