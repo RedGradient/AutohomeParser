@@ -508,6 +508,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             response.json()["items"][0]["colors"][0]["color_scope"], "EXTERIOR"
         )
+        self.assertNotIn("page_url", response.json()["items"][0])
         self.assertNotIn("series_id", response.json()["items"][0]["colors"][0])
 
         response = await self.client.get(

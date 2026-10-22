@@ -312,7 +312,6 @@ class PhotoResponse(ApiSchema):
     title: str | None = Field(description="Подпись фотографии.")
     image_url: str = Field(description="Прямая ссылка на полноразмерное изображение.")
     thumbnail_url: str | None = Field(description="Ссылка на миниатюру.")
-    page_url: str = Field(description="Исходная страница фотографии.")
     colors: list[PhotoColorResponse] = Field(description="Связанные цвета кузова или салона.")
 
 

@@ -989,7 +989,7 @@ def create_app(
                 "picture_count": color.picture_count, "gallery_url": color.gallery_url})
         items = [{"id": photo.id, "series_id": photo.series_id, "spec_id": photo.spec_id,
             "category_id": photo.category_id, "category_name": photo.category_name, "title": photo.title,
-            "image_url": photo.image_url, "thumbnail_url": photo.thumbnail_url, "page_url": photo.page_url,
+            "image_url": photo.image_url, "thumbnail_url": photo.thumbnail_url,
             "colors": by_photo.get(photo.id, [])} for photo in photos_list]
         return {"items": items, "pagination": pagination}
 
