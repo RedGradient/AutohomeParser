@@ -621,7 +621,7 @@ def create_app(
         energy_type=None, body_type=None, drive_type=None, transmission_type=None,
         engine_displacement_from=None, engine_displacement_to=None, power_hp_from=None,
         power_hp_to=None, price_from=None, price_to=None, price_type="effective",
-        is_complete=None, sort="year", order="desc", limit=24, cursor=None,
+        sort="year", order="desc", limit=24, cursor=None,
     ):
         for low, high, name in ((year_from, year_to, "year"), (engine_displacement_from, engine_displacement_to, "engine_displacement"), (power_hp_from, power_hp_to, "power_hp"), (price_from, price_to, "price")):
             _check_range(low, high, name)
@@ -629,7 +629,7 @@ def create_app(
         prices = select(Spec.modification_id, func.min(price).label("min_price"), func.max(price).label("max_price")).group_by(Spec.modification_id).subquery()
         statement = select(Modification, prices.c.min_price, prices.c.max_price).outerjoin(prices, prices.c.modification_id == Modification.id)
         filters = []
-        mappings = ((Modification.series_id, series_id), (Modification.energy_type, energy_type), (Modification.body_type, body_type), (Modification.drive_type, drive_type), (Modification.transmission_type, transmission_type), (Modification.is_complete, is_complete))
+        mappings = ((Modification.series_id, series_id), (Modification.energy_type, energy_type), (Modification.body_type, body_type), (Modification.drive_type, drive_type), (Modification.transmission_type, transmission_type))
         filters.extend(column == value for column, value in mappings if value is not None)
         if brand_id is not None:
             filters.append(exists(select(Series.id).where(Series.id == Modification.series_id, Series.brand_id == brand_id)))
@@ -646,7 +646,7 @@ def create_app(
             "engine_power_hp": _decimal(item.engine_power_hp), "transmission_summary": item.transmission_summary,
             "transmission_type": item.transmission_type, "drive_type": item.drive_type,
             "body_type": item.body_type, "battery_capacity_kwh": _decimal(item.battery_capacity_kwh),
-            "is_complete": item.is_complete, "spec_count": item.spec_count,
+            "spec_count": item.spec_count,
             "price": {"min_cny": _money(minimum), "max_cny": _money(maximum)},
         } for item, minimum, maximum in rows]
         return {"items": items, "pagination": pagination}
@@ -665,7 +665,7 @@ def create_app(
         engine_displacement_from: int | None = None, engine_displacement_to: int | None = None,
         power_hp_from: Decimal | None = None, power_hp_to: Decimal | None = None,
         price_from: Decimal | None = None, price_to: Decimal | None = None,
-        price_type: PriceType = "effective", is_complete: bool | None = None,
+        price_type: PriceType = "effective",
         sort: Literal["year", "power", "engine_displacement", "price", "name"] = "year",
         order: SortOrder = "desc", limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
         session: Session = Depends(get_session),
@@ -674,7 +674,7 @@ def create_app(
             "series_id", "brand_id", "year_from", "year_to", "energy_type", "body_type",
             "drive_type", "transmission_type", "engine_displacement_from",
             "engine_displacement_to", "power_hp_from", "power_hp_to", "price_from",
-            "price_to", "price_type", "is_complete", "sort", "order", "limit", "cursor",
+            "price_to", "price_type", "sort", "order", "limit", "cursor",
         }
         return modification_list_impl(
             session, **{key: value for key, value in locals().items() if key in argument_names}
@@ -721,7 +721,7 @@ def create_app(
                 "engine_power_hp": _decimal(item.engine_power_hp), "transmission_summary": item.transmission_summary,
                 "transmission_type": item.transmission_type, "drive_type": item.drive_type,
                 "body_type": item.body_type, "battery_capacity_kwh": _decimal(item.battery_capacity_kwh),
-                "is_complete": item.is_complete, "spec_count": item.spec_count,
+                "spec_count": item.spec_count,
                 "price": {"min_cny": _money(minimum), "max_cny": _money(maximum)}}
 
     def specs_impl(session: Session, limit: int, cursor: str | None, sort="price", order="asc", **filters):

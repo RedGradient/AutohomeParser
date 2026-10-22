@@ -299,6 +299,13 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.get("/api/v1/series/10/modifications")
         self.assertEqual(response.status_code, 200)
         self.assertEqual([item["id"] for item in response.json()["items"]], [100, 101])
+        self.assertTrue(
+            all("is_complete" not in item for item in response.json()["items"])
+        )
+
+        schema = (await self.client.get("/openapi.json")).json()
+        parameters = schema["paths"]["/api/v1/modifications"]["get"]["parameters"]
+        self.assertNotIn("is_complete", {item["name"] for item in parameters})
 
     async def test_specs_support_price_range_and_pagination(self):
         response = await self.client.get(

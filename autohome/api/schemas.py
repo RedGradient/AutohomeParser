@@ -154,7 +154,6 @@ class ModificationResponse(ApiSchema):
     drive_type: str | None = Field(description="Нормализованный код привода.")
     body_type: str | None = Field(description="Нормализованный код кузова.")
     battery_capacity_kwh: DecimalText | None = Field(description="Ёмкость батареи в кВт·ч.")
-    is_complete: bool = Field(description="Достаточно ли данных для однозначной группировки.")
     spec_count: int = Field(description="Число комплектаций, относящихся к модификации.")
     price: PriceRange = Field(description="Диапазон цен связанных комплектаций.")
 
