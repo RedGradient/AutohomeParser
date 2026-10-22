@@ -77,6 +77,31 @@ SERIES_STATE_CODES = {
 KNOWN_SERIES_STATE_CODES = tuple(
     code for codes in SERIES_STATE_CODES.values() for code in codes
 )
+PRICE_FROM_DESCRIPTION = (
+    "Нижняя граница цены в CNY для выбранного price_type. "
+    "Комплектации без выбранной цены исключаются."
+)
+PRICE_TO_DESCRIPTION = (
+    "Верхняя граница цены в CNY для выбранного price_type. "
+    "Комплектации без выбранной цены исключаются."
+)
+EFFECTIVE_PRICE_FROM_DESCRIPTION = (
+    "Нижняя граница эффективной цены в CNY: используется положительная "
+    "рекомендованная цена, а при её отсутствии — положительная дилерская. "
+    "Комплектации без обеих цен исключаются."
+)
+EFFECTIVE_PRICE_TO_DESCRIPTION = (
+    "Верхняя граница эффективной цены в CNY: используется положительная "
+    "рекомендованная цена, а при её отсутствии — положительная дилерская. "
+    "Комплектации без обеих цен исключаются."
+)
+PRICE_TYPE_DESCRIPTION = (
+    "Источник цены для фильтрации и сортировки: effective — положительная "
+    "рекомендованная цена либо, если она отсутствует, положительная дилерская; "
+    "guide — только рекомендованная; dealer — только дилерская. "
+    "Записи без выбранной цены не проходят ценовые фильтры и при сортировке "
+    "имеют значение NULL."
+)
 
 
 def _money(value: Decimal | None) -> str | None:
@@ -403,8 +428,8 @@ def create_app(
         q: str | None = None,
         manufacturer_id: int | None = None,
         is_new_energy: bool | None = None,
-        price_from: Decimal | None = None,
-        price_to: Decimal | None = None,
+        price_from: Decimal | None = Query(None, description=EFFECTIVE_PRICE_FROM_DESCRIPTION),
+        price_to: Decimal | None = Query(None, description=EFFECTIVE_PRICE_TO_DESCRIPTION),
         sort: Literal["name", "series_count", "min_price"] = "name",
         order: SortOrder = "asc",
         limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
@@ -568,8 +593,9 @@ def create_app(
         drive_type: str | None = None, transmission_type: str | None = None,
         engine_displacement_from: int | None = None, engine_displacement_to: int | None = None,
         power_hp_from: Decimal | None = None, power_hp_to: Decimal | None = None,
-        price_from: Decimal | None = None, price_to: Decimal | None = None,
-        price_type: PriceType = "effective",
+        price_from: Decimal | None = Query(None, description=PRICE_FROM_DESCRIPTION),
+        price_to: Decimal | None = Query(None, description=PRICE_TO_DESCRIPTION),
+        price_type: PriceType = Query("effective", description=PRICE_TYPE_DESCRIPTION),
         sort: Literal["name", "price", "year"] = "name", order: SortOrder = "asc",
         limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
         session: Session = Depends(get_session),
@@ -690,8 +716,9 @@ def create_app(
         drive_type: str | None = None, transmission_type: str | None = None,
         engine_displacement_from: int | None = None, engine_displacement_to: int | None = None,
         power_hp_from: Decimal | None = None, power_hp_to: Decimal | None = None,
-        price_from: Decimal | None = None, price_to: Decimal | None = None,
-        price_type: PriceType = "effective",
+        price_from: Decimal | None = Query(None, description=PRICE_FROM_DESCRIPTION),
+        price_to: Decimal | None = Query(None, description=PRICE_TO_DESCRIPTION),
+        price_type: PriceType = Query("effective", description=PRICE_TYPE_DESCRIPTION),
         sort: Literal["year", "power", "engine_displacement", "price", "name"] = "year",
         order: SortOrder = "desc", limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
         session: Session = Depends(get_session),
@@ -718,8 +745,10 @@ def create_app(
         drive_type: str | None = None, transmission_type: str | None = None,
         engine_displacement_from: int | None = None, engine_displacement_to: int | None = None,
         power_hp_from: Decimal | None = None, power_hp_to: Decimal | None = None,
-        price_from: Decimal | None = None, price_to: Decimal | None = None,
-        price_type: PriceType = "effective", limit: int = Query(24, ge=1, le=100),
+        price_from: Decimal | None = Query(None, description=PRICE_FROM_DESCRIPTION),
+        price_to: Decimal | None = Query(None, description=PRICE_TO_DESCRIPTION),
+        price_type: PriceType = Query("effective", description=PRICE_TYPE_DESCRIPTION),
+        limit: int = Query(24, ge=1, le=100),
         cursor: str | None = None, session: Session = Depends(get_session),
     ):
         if session.get(Series, series_id) is None: raise _not_found("Series")
@@ -775,8 +804,10 @@ def create_app(
         transmission_type: str | None = None, engine_displacement_from: int | None = None,
         engine_displacement_to: int | None = None, power_hp_from: Decimal | None = None,
         power_hp_to: Decimal | None = None, seats_from: int | None = None, seats_to: int | None = None,
-        four_wheel_drive: bool | None = None, price_from: Decimal | None = None,
-        price_to: Decimal | None = None, price_type: PriceType = "effective",
+        four_wheel_drive: bool | None = None,
+        price_from: Decimal | None = Query(None, description=PRICE_FROM_DESCRIPTION),
+        price_to: Decimal | None = Query(None, description=PRICE_TO_DESCRIPTION),
+        price_type: PriceType = Query("effective", description=PRICE_TYPE_DESCRIPTION),
         sort: Literal["price", "year", "power", "engine_displacement", "name"] = "price",
         order: SortOrder = "asc", limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
         session: Session = Depends(get_session),
@@ -797,8 +828,10 @@ def create_app(
         tags=["Specs"],
         summary="Получить комплектации модификации",
     )
-    async def modification_specs(modification_id: int, price_from: Decimal | None = None,
-        price_to: Decimal | None = None, price_type: PriceType = "effective",
+    async def modification_specs(modification_id: int,
+        price_from: Decimal | None = Query(None, description=PRICE_FROM_DESCRIPTION),
+        price_to: Decimal | None = Query(None, description=PRICE_TO_DESCRIPTION),
+        price_type: PriceType = Query("effective", description=PRICE_TYPE_DESCRIPTION),
         limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
         session: Session = Depends(get_session)):
         if session.get(Modification, modification_id) is None: raise _not_found("Modification")

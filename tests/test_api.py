@@ -308,6 +308,17 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
             operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
             "#/components/schemas/SpecPage",
         )
+        parameters = {item["name"]: item for item in operation["parameters"]}
+        self.assertIn("рекомендованная цена", parameters["price_type"]["description"])
+        self.assertIn("выбранного price_type", parameters["price_from"]["description"])
+        brand_parameters = {
+            item["name"]: item
+            for item in schema["paths"]["/api/v1/brands"]["get"]["parameters"]
+        }
+        self.assertIn(
+            "эффективной цены",
+            brand_parameters["price_from"]["description"],
+        )
         self.assertEqual((await self.client.get("/docs")).status_code, 200)
 
     async def test_modifications_are_filtered_by_series(self):
