@@ -83,14 +83,6 @@ PRICE_TO_DESCRIPTION = (
     "Максимальная цена в CNY. Тип цены задаётся параметром price_type. "
     "Записи без цены выбранного типа не возвращаются."
 )
-EFFECTIVE_PRICE_FROM_DESCRIPTION = (
-    "Минимальная цена в CNY. Используется рекомендованная цена, "
-    "а если её нет — дилерская."
-)
-EFFECTIVE_PRICE_TO_DESCRIPTION = (
-    "Максимальная цена в CNY. Используется рекомендованная цена, "
-    "а если её нет — дилерская."
-)
 PRICE_TYPE_DESCRIPTION = (
     "Тип цены: effective — рекомендованная или дилерская при её отсутствии; "
     "guide — рекомендованная; dealer — дилерская."
@@ -428,8 +420,6 @@ def create_app(
         q: str | None = Query(None, description="Поиск по части названия бренда без учёта регистра."),
         manufacturer_id: int | None = Query(None, description="Оставить бренды указанного производителя."),
         is_new_energy: bool | None = Query(None, description="Оставить бренды с сериями указанной категории NEV."),
-        price_from: Decimal | None = Query(None, description=EFFECTIVE_PRICE_FROM_DESCRIPTION),
-        price_to: Decimal | None = Query(None, description=EFFECTIVE_PRICE_TO_DESCRIPTION),
         sort: Literal["name", "series_count", "min_price"] = Query("name", description="Поле сортировки."),
         order: SortOrder = Query("asc", description="Направление сортировки: asc или desc."),
         limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
@@ -437,7 +427,6 @@ def create_app(
         include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
         session: Session = Depends(get_session),
     ):
-        _check_range(price_from, price_to, "price")
         price = _effective_price()
         aggregate = (
             select(
@@ -453,17 +442,13 @@ def create_app(
             aggregate = aggregate.where(Series.manufacturer_id == manufacturer_id)
         if is_new_energy is not None:
             aggregate = aggregate.where(Series.is_new_energy == is_new_energy)
-        if price_from is not None:
-            aggregate = aggregate.where(price >= price_from)
-        if price_to is not None:
-            aggregate = aggregate.where(price <= price_to)
         aggregate = aggregate.subquery()
         statement = select(Brand, aggregate.c.min_price, aggregate.c.max_price).outerjoin(
             aggregate, aggregate.c.brand_id == Brand.id
         )
         if q:
             statement = statement.where(func.lower(Brand.name).like(f"%{q.lower()}%"))
-        if any(v is not None for v in (manufacturer_id, is_new_energy, price_from, price_to)):
+        if any(v is not None for v in (manufacturer_id, is_new_energy)):
             statement = statement.where(aggregate.c.brand_id.is_not(None))
         sort_column = {"name": Brand.name, "series_count": Brand.series_count, "min_price": aggregate.c.min_price}[sort]
         statement = statement.order_by(sort_column.desc() if order == "desc" else sort_column.asc(), Brand.id.asc())

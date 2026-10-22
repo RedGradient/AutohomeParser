@@ -402,14 +402,8 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
             item["name"]: item
             for item in schema["paths"]["/api/v1/brands"]["get"]["parameters"]
         }
-        self.assertIn(
-            "Минимальная цена",
-            brand_parameters["price_from"]["description"],
-        )
-        self.assertIn(
-            "Максимальная цена",
-            brand_parameters["price_to"]["description"],
-        )
+        self.assertNotIn("price_from", brand_parameters)
+        self.assertNotIn("price_to", brand_parameters)
         for path, methods in schema["paths"].items():
             operation = methods.get("get")
             if operation is None:
