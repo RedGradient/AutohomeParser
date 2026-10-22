@@ -402,6 +402,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         )
         spec_schema = schema["components"]["schemas"]["SpecResponse"]
         self.assertIn("description", spec_schema)
+        self.assertNotIn("config_available", spec_schema["properties"])
         self.assertEqual(
             spec_schema["properties"]["state"]["description"],
             "Стадия продаж комплектации.",
@@ -412,6 +413,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
             "#/components/schemas/SpecPage",
         )
         parameters = {item["name"]: item for item in operation["parameters"]}
+        self.assertNotIn("config_available", parameters)
         self.assertIn("effective", parameters["price_type"]["description"])
         self.assertIn("параметром price_type", parameters["price_from"]["description"])
         brand_parameters = {

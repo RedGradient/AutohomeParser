@@ -225,7 +225,6 @@ class SpecResponse(ApiSchema):
     price: VehiclePrice = Field(description="Цены комплектации.")
     description: str | None = Field(description="Краткое техническое описание.")
     image_url: str | None = Field(description="Основное изображение комплектации.")
-    config_available: bool | None = Field(description="Доступна ли полная конфигурация.")
     powertrain: Powertrain | None = Field(description="Нормализованная силовая установка.")
 
 

@@ -260,7 +260,6 @@ def _spec_payload(row, *, detail: bool = False):
         "price": _price_payload(spec),
         "description": spec.description,
         "image_url": spec.image_url,
-        "config_available": spec.config_available,
         "powertrain": _powertrain_payload(powertrain),
     }
     if detail:
@@ -283,7 +282,7 @@ def _apply_spec_filters(
     statement,
     *,
     q=None, brand_id=None, series_id=None, modification_id=None, manufacturer_id=None,
-    year_from=None, year_to=None, state=None, config_available=None, energy_type=None,
+    year_from=None, year_to=None, state=None, energy_type=None,
     body_type=None, drive_type=None, transmission_type=None,
     engine_displacement_from=None, engine_displacement_to=None,
     power_hp_from=None, power_hp_to=None, seats_from=None, seats_to=None,
@@ -295,7 +294,6 @@ def _apply_spec_filters(
     mappings = (
         (Series.brand_id, brand_id), (Spec.series_id, series_id),
         (Spec.modification_id, modification_id), (Series.manufacturer_id, manufacturer_id),
-        (Spec.config_available, config_available),
         (SpecPowertrain.energy_type, energy_type), (SpecPowertrain.body_type, body_type),
         (SpecPowertrain.drive_type, drive_type),
         (SpecPowertrain.transmission_type, transmission_type),
@@ -845,7 +843,6 @@ def create_app(
         year_from: int | None = Query(None, description="Минимальный модельный год."),
         year_to: int | None = Query(None, description="Максимальный модельный год."),
         state: SeriesState | None = Query(None, description="Стадия продаж комплектации."),
-        config_available: bool | None = Query(None, description="Фильтр по наличию полной конфигурации."),
         energy_type: str | None = Query(None, description="Нормализованный код типа энергии."),
         body_type: str | None = Query(None, description="Нормализованный код типа кузова."),
         drive_type: str | None = Query(None, description="Нормализованный код типа привода."),
@@ -869,7 +866,7 @@ def create_app(
     ):
         filter_names = {
             "q", "brand_id", "series_id", "modification_id", "manufacturer_id",
-            "year_from", "year_to", "state", "config_available", "energy_type", "body_type",
+            "year_from", "year_to", "state", "energy_type", "body_type",
             "drive_type", "transmission_type", "engine_displacement_from",
             "engine_displacement_to", "power_hp_from", "power_hp_to", "seats_from",
             "seats_to", "four_wheel_drive", "price_from", "price_to", "price_type",
