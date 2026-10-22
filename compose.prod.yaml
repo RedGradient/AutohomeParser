@@ -37,7 +37,7 @@ services:
       API_JWT_SECRET: ${API_JWT_SECRET:?API_JWT_SECRET is required}
       API_JWT_TTL_SECONDS: ${API_JWT_TTL_SECONDS:-432000}
     ports:
-      - "127.0.0.1:${API_PORT:-8000}:8000"
+      - "${API_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
