@@ -1,13 +1,38 @@
 """Классификация транспорта и расчёт ввозной пошлины Китай → Россия."""
 
 from .calculator import calculate_import_duty
-from .customs_fee import calculate_customs_fee
-from .recycling_fee import RecyclingFeeContext, calculate_recycling_fee
 from .classifier import (
     CLASSIFICATION_RULES_VERSION,
     VehicleClassificationInput,
     VehicleClassificationResult,
     classify_vehicle,
+)
+from .customs_fee import calculate_customs_fee
+from .recycling_fee import RecyclingFeeContext, calculate_recycling_fee
+from .recycling_fee_regulation import (
+    RecyclingFeeRegulatoryInput,
+    RecyclingFeeRegulatoryResult,
+    RecyclingFeeRegulatorySection,
+    RecyclingFeeRoutingStatus,
+    RecyclingFeeVehicleKind,
+    route_recycling_fee_regulation,
+)
+from .recycling_fee_section_ii import (
+    SectionIIRecyclingFeeContext,
+    SectionIIVehicleSubtype,
+    calculate_section_ii_recycling_fee,
+)
+from .recycling_fee_section_iii import (
+    SectionIIIRecyclingFeeContext,
+    calculate_section_iii_recycling_fee,
+)
+from .recycling_fee_section_iv import (
+    SectionIVRecyclingFeeContext,
+    calculate_section_iv_recycling_fee,
+)
+from .recycling_fee_section_v import (
+    SectionVRecyclingFeeContext,
+    calculate_section_v_recycling_fee,
 )
 from .types import DutyContext, DutyResult, ExchangeRate, ImporterType
 
@@ -18,10 +43,25 @@ __all__ = (
     "ExchangeRate",
     "ImporterType",
     "RecyclingFeeContext",
+    "RecyclingFeeRegulatoryInput",
+    "RecyclingFeeRegulatoryResult",
+    "RecyclingFeeRegulatorySection",
+    "RecyclingFeeRoutingStatus",
+    "RecyclingFeeVehicleKind",
+    "SectionIIIRecyclingFeeContext",
+    "SectionIIRecyclingFeeContext",
+    "SectionIIVehicleSubtype",
+    "SectionIVRecyclingFeeContext",
+    "SectionVRecyclingFeeContext",
     "VehicleClassificationInput",
     "VehicleClassificationResult",
-    "calculate_import_duty",
     "calculate_customs_fee",
-    "classify_vehicle",
+    "calculate_import_duty",
     "calculate_recycling_fee",
+    "calculate_section_ii_recycling_fee",
+    "calculate_section_iii_recycling_fee",
+    "calculate_section_iv_recycling_fee",
+    "calculate_section_v_recycling_fee",
+    "classify_vehicle",
+    "route_recycling_fee_regulation",
 )

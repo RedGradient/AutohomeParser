@@ -15,6 +15,7 @@ SHUTDOWN_TIMEOUT ?= 120
 NORMALIZE_VEHICLE_ATTRIBUTES_ARGS ?=
 AUDIT_VEHICLE_CLASSIFICATIONS_ARGS ?=
 AUDIT_INDIRECT_VEHICLE_ATTRIBUTES_ARGS ?=
+AUDIT_RECYCLING_FEE_COMMERCIAL_CATEGORIES_ARGS ?=
 BACKFILL_VEHICLE_ATTRIBUTE_INFERENCES_ARGS ?=
 CALCULATE_IMPORT_DUTIES_ARGS ?=
 API_HOST ?= 0.0.0.0
@@ -35,7 +36,7 @@ ETH_TABLE := 10102
 WIFI_PRIORITY := 10101
 ETH_PRIORITY := 10102
 
-.PHONY: help network-up network-down network-status network-test postgres-up database-migrate api-up api-logs celery-logs parser-run parser-resume parser-logs api-run database-reset parameters-reset build-modifications normalize-vehicle-attributes audit-vehicle-classifications audit-indirect-vehicle-attributes backfill-vehicle-attribute-inferences translate-db calculate-import-duties docker-down
+.PHONY: help network-up network-down network-status network-test postgres-up database-migrate api-up api-logs celery-logs parser-run parser-resume parser-logs api-run database-reset parameters-reset build-modifications normalize-vehicle-attributes audit-vehicle-classifications audit-indirect-vehicle-attributes audit-recycling-fee-commercial-categories backfill-vehicle-attribute-inferences translate-db calculate-import-duties docker-down
 
 help:
 	@echo "Доступные команды:"
@@ -57,6 +58,7 @@ help:
 	@echo "  make normalize-vehicle-attributes — нормализовать кузовные характеристики"
 	@echo "  make audit-vehicle-classifications — проверить классификацию 8702–8704"
 	@echo "  make audit-indirect-vehicle-attributes — проверить косвенные признаки без записи"
+	@echo "  make audit-recycling-fee-commercial-categories — проверить готовность M2/M3/N1/N2/N3"
 	@echo "  make backfill-vehicle-attribute-inferences — dry-run косвенных признаков"
 	@echo "  make translate-db    — перевести уже сохранённые данные"
 	@echo "  make calculate-import-duties — рассчитать ввозную пошлину"
@@ -186,6 +188,11 @@ audit-indirect-vehicle-attributes: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
 		.venv/bin/python audit_indirect_vehicle_attributes.py \
 		$(AUDIT_INDIRECT_VEHICLE_ATTRIBUTES_ARGS)
+
+audit-recycling-fee-commercial-categories: postgres-up
+	@DATABASE_URL='$(DATABASE_URL)' \
+		.venv/bin/python audit_recycling_fee_commercial_categories.py \
+		$(AUDIT_RECYCLING_FEE_COMMERCIAL_CATEGORIES_ARGS)
 
 backfill-vehicle-attribute-inferences: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \

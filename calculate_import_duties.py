@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 from collections import Counter
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -17,15 +18,29 @@ from autohome.import_duty import (
     ExchangeRate,
     ImporterType,
     RecyclingFeeContext,
+    RecyclingFeeRegulatoryInput,
+    RecyclingFeeRegulatorySection,
+    RecyclingFeeRoutingStatus,
+    RecyclingFeeVehicleKind,
+    SectionIIIRecyclingFeeContext,
+    SectionIIRecyclingFeeContext,
+    SectionIVRecyclingFeeContext,
+    SectionVRecyclingFeeContext,
     VehicleClassificationInput,
-    calculate_import_duty,
     calculate_customs_fee,
+    calculate_import_duty,
     calculate_recycling_fee,
+    calculate_section_ii_recycling_fee,
+    calculate_section_iii_recycling_fee,
+    calculate_section_iv_recycling_fee,
+    calculate_section_v_recycling_fee,
     classify_vehicle,
+    route_recycling_fee_regulation,
 )
 from autohome.import_duty.calculator import assumed_production_date, completed_months
 from autohome.import_duty.currency import fetch_cbr_rates
 from autohome.import_duty.rates import RULES_VERSION
+from autohome.import_duty.recycling_fee import RecyclingFeeResult
 from autohome.import_duty.types import (
     CalculationStatus,
     ClassificationStatus,
@@ -34,15 +49,17 @@ from autohome.import_duty.types import (
 from autohome.models import (
     CustomsCalculation,
     CustomsPaymentResult,
+    Series,
     Spec,
     SpecPowertrain,
     SpecVehicleAttributes,
 )
-from autohome.vehicle_attribute_inference import INFERRED_INPUTS_USED
 from autohome.powertrain_schema import ensure_powertrain_schema
+from autohome.vehicle_attribute_inference import INFERRED_INPUTS_USED
 from autohome.vehicle_attribute_schema import ensure_vehicle_attribute_schema
 
 MAX_UPSERT_ROWS = 2000
+CHASSIS_NAME_RE = re.compile(r"(?:底盘|\bшасси\b)", re.IGNORECASE)
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -58,7 +75,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--date",
         type=date.fromisoformat,
-        default=date.today(),
+        default=date.today(),  # noqa: DTZ011 - CLI использует локальную календарную дату
         dest="calculation_date",
         help="Дата расчёта YYYY-MM-DD; по умолчанию сегодня.",
     )
@@ -186,6 +203,131 @@ def classification_failure(result) -> DutyResult:
     )
 
 
+def recycling_fee_vehicle_kind(row) -> tuple[RecyclingFeeVehicleKind, str]:
+    """Определить готовое ТС или шасси по доступным данным каталога."""
+    explicit = getattr(row, "recycling_fee_vehicle_kind", None)
+    if explicit is not None:
+        try:
+            return RecyclingFeeVehicleKind(explicit), "NORMALIZED_FIELD"
+        except ValueError:
+            pass
+    names = " ".join(
+        str(value)
+        for value in (
+            getattr(row, "spec_name", None),
+            getattr(row, "series_name", None),
+        )
+        if value
+    )
+    if CHASSIS_NAME_RE.search(names):
+        return RecyclingFeeVehicleKind.CHASSIS, "NAME_MARKER"
+    return RecyclingFeeVehicleKind.COMPLETE_VEHICLE, "NO_CHASSIS_NAME_MARKER"
+
+
+def recycling_routing_failure(route) -> RecyclingFeeResult:
+    """Преобразовать отказ нормативной маршрутизации в результат платежа."""
+    status_by_route = {
+        RecyclingFeeRoutingStatus.MISSING_DATA: CalculationStatus.MISSING_DATA,
+        RecyclingFeeRoutingStatus.MANUAL_REVIEW: CalculationStatus.MANUAL_REVIEW,
+        RecyclingFeeRoutingStatus.UNSUPPORTED: CalculationStatus.UNSUPPORTED,
+    }
+    return RecyclingFeeResult(
+        status=status_by_route.get(route.status, CalculationStatus.MANUAL_REVIEW),
+        rule_code=route.rule_code,
+        details={"regulation_route": dict(route.details)},
+    )
+
+
+def calculate_row_recycling_fee(
+    row,
+    importer: ImporterType,
+    calculation_date: date,
+    age_months: int | None,
+    personal_use: bool,
+) -> tuple[RecyclingFeeResult, RecyclingFeeVehicleKind | None, str | None]:
+    """Выбрать нормативный раздел и рассчитать утильсбор одной комплектации."""
+    category = getattr(row, "vehicle_technical_category", None)
+    if category == "M1":
+        return (
+            calculate_recycling_fee(
+                RecyclingFeeContext(
+                    importer_type=importer,
+                    calculation_date=calculation_date,
+                    personal_use=personal_use,
+                    vehicle_technical_category=category,
+                    age_months=age_months,
+                    powertrain_type=getattr(row, "recycling_fee_powertrain_type", None),
+                    power_kw=getattr(row, "recycling_fee_power_kw", None),
+                    power_source=getattr(row, "recycling_fee_power_source", None),
+                    engine_displacement_cc=row.engine_displacement_ml,
+                    engine_summary=getattr(row, "engine_summary", None),
+                )
+            ),
+            None,
+            None,
+        )
+
+    vehicle_kind, vehicle_kind_source = recycling_fee_vehicle_kind(row)
+    route = route_recycling_fee_regulation(
+        RecyclingFeeRegulatoryInput(
+            vehicle_technical_category=category,
+            vehicle_kind=vehicle_kind,
+            is_special_purpose=getattr(row, "is_special_purpose", None),
+            vehicle_purpose_type=getattr(row, "vehicle_purpose_type", None),
+        )
+    )
+    if route.status != RecyclingFeeRoutingStatus.ROUTED:
+        return recycling_routing_failure(route), vehicle_kind, vehicle_kind_source
+
+    if route.section == RecyclingFeeRegulatorySection.SECTION_II_N:
+        result = calculate_section_ii_recycling_fee(
+            SectionIIRecyclingFeeContext(
+                calculation_date=calculation_date,
+                vehicle_technical_category=category,
+                age_months=age_months,
+                gross_mass_kg=getattr(row, "gross_mass_kg", None),
+            )
+        )
+    elif route.section == RecyclingFeeRegulatorySection.SECTION_III_SPECIAL:
+        result = calculate_section_iii_recycling_fee(
+            SectionIIIRecyclingFeeContext(
+                calculation_date=calculation_date,
+                vehicle_technical_category=category,
+                age_months=age_months,
+                gross_mass_kg=getattr(row, "gross_mass_kg", None),
+                is_special_purpose=getattr(row, "is_special_purpose", None),
+                vehicle_purpose_type=getattr(row, "vehicle_purpose_type", None),
+            )
+        )
+    elif route.section == RecyclingFeeRegulatorySection.SECTION_IV_M:
+        result = calculate_section_iv_recycling_fee(
+            SectionIVRecyclingFeeContext(
+                calculation_date=calculation_date,
+                vehicle_technical_category=category,
+                age_months=age_months,
+                powertrain_type=getattr(row, "recycling_fee_powertrain_type", None),
+                engine_displacement_cc=row.engine_displacement_ml,
+            )
+        )
+    elif route.section == RecyclingFeeRegulatorySection.SECTION_V_CHASSIS:
+        result = calculate_section_v_recycling_fee(
+            SectionVRecyclingFeeContext(
+                calculation_date=calculation_date,
+                vehicle_technical_category=category,
+                vehicle_kind=vehicle_kind,
+                age_months=age_months,
+                gross_mass_kg=getattr(row, "gross_mass_kg", None),
+            )
+        )
+    else:
+        return recycling_routing_failure(route), vehicle_kind, vehicle_kind_source
+
+    result.details["regulation_route"] = dict(route.details)
+    result.details["recycling_fee_vehicle_kind"] = vehicle_kind.value
+    result.details["recycling_fee_vehicle_kind_source"] = vehicle_kind_source
+    return result, vehicle_kind, vehicle_kind_source
+
+
 def make_rows(
     row,
     importer: ImporterType,
@@ -239,18 +381,13 @@ def make_rows(
     customs_fee_result = calculate_customs_fee(customs_value_rub)
     if personal_use is None:
         personal_use = importer == ImporterType.INDIVIDUAL
-    recycling_fee_result = calculate_recycling_fee(
-        RecyclingFeeContext(
-            importer_type=importer,
-            calculation_date=calculation_date,
-            personal_use=personal_use,
-            vehicle_technical_category=getattr(row, "vehicle_technical_category", None),
-            age_months=age_months,
-            powertrain_type=getattr(row, "recycling_fee_powertrain_type", None),
-            power_kw=getattr(row, "recycling_fee_power_kw", None),
-            power_source=getattr(row, "recycling_fee_power_source", None),
-            engine_displacement_cc=row.engine_displacement_ml,
-            engine_summary=getattr(row, "engine_summary", None),
+    recycling_fee_result, recycling_vehicle_kind, recycling_vehicle_kind_source = (
+        calculate_row_recycling_fee(
+            row,
+            importer,
+            calculation_date,
+            age_months,
+            personal_use,
         )
     )
     calculation_id = stable_calculation_id(
@@ -284,6 +421,20 @@ def make_rows(
                 "code": INFERRED_INPUTS_USED,
                 "message": "В расчёте использованы косвенно определённые признаки.",
                 "fields": applied_fields,
+            }
+        )
+    if recycling_vehicle_kind_source in {
+        "NAME_MARKER",
+        "NO_CHASSIS_NAME_MARKER",
+    }:
+        calculation_warnings.append(
+            {
+                "code": INFERRED_INPUTS_USED,
+                "message": (
+                    "Вид объекта утильсбора определён по наличию маркера шасси "
+                    "в названии комплектации или серии."
+                ),
+                "fields": ["recycling_fee_vehicle_kind"],
             }
         )
     if (
@@ -360,6 +511,10 @@ def make_rows(
             "recycling_fee_power_source": getattr(
                 row, "recycling_fee_power_source", None
             ),
+            "recycling_fee_vehicle_kind": (
+                recycling_vehicle_kind.value if recycling_vehicle_kind else None
+            ),
+            "recycling_fee_vehicle_kind_source": recycling_vehicle_kind_source,
             "vehicle_class": getattr(row, "vehicle_class", None),
             "axle_count": getattr(row, "axle_count", None),
             "seat_count_min": getattr(row, "seat_count_min", None),
@@ -382,6 +537,7 @@ def make_rows(
                 None,
             ),
             "is_special_purpose": getattr(row, "is_special_purpose", None),
+            "vehicle_purpose_type": getattr(row, "vehicle_purpose_type", None),
             "classification_rules_version": CLASSIFICATION_RULES_VERSION,
             "classification_status": classification.status.value,
             "classification_tnved_heading": classification.tnved_heading,
@@ -504,6 +660,8 @@ def main() -> int:
     query = (
         select(
             Spec.id,
+            Spec.name.label("spec_name"),
+            Series.name.label("series_name"),
             Spec.guide_price_yuan,
             Spec.dealer_price_yuan,
             Spec.year,
@@ -542,8 +700,10 @@ def main() -> int:
             SpecVehicleAttributes.has_rear_windowed_door,
             SpecVehicleAttributes.has_separate_cargo_compartment,
             SpecVehicleAttributes.is_special_purpose,
+            SpecVehicleAttributes.vehicle_purpose_type,
             *inference_select_columns,
         )
+        .join(Series, Series.id == Spec.series_id)
         .outerjoin(SpecPowertrain, SpecPowertrain.spec_id == Spec.id)
         .outerjoin(
             SpecVehicleAttributes,
