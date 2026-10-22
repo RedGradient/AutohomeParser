@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import base64
-import json
 import os
 from collections.abc import AsyncGenerator
 from datetime import date, datetime
@@ -9,7 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Security
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path as ApiPath, Query, Security
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -29,12 +27,15 @@ from autohome.api.schemas import (
     CustomsCalculationResponse,
     ErrorResponse,
     GalleryColorsResponse,
+    ManufacturerPage,
+    ManufacturerResponse,
     ModificationPage,
     ModificationResponse,
     ParameterGroupsResponse,
     PhotoPage,
     SeriesPage,
     SeriesResponse,
+    SeriesState,
     SpecDetailResponse,
     SpecPage,
     TokenRequest,
@@ -42,6 +43,7 @@ from autohome.api.schemas import (
 )
 from autohome.models import (
     Brand,
+    BrandManufacturer,
     CustomsCalculation,
     CustomsPaymentResult,
     Manufacturer,
@@ -65,6 +67,43 @@ DEFAULT_DATABASE_URL = f"sqlite:///{(PROJECT_ROOT / 'data' / 'autohome.sqlite3')
 
 PriceType = Literal["effective", "guide", "dealer"]
 SortOrder = Literal["asc", "desc"]
+SERIES_STATE_CODES = {
+    SeriesState.UPCOMING: (10,),
+    SeriesState.CURRENT: (20, 30),
+    SeriesState.DISCONTINUED: (0, 40),
+}
+KNOWN_SERIES_STATE_CODES = tuple(
+    code for codes in SERIES_STATE_CODES.values() for code in codes
+)
+SPEC_STATE_CODES = {
+    SeriesState.UPCOMING: (0, 10),
+    SeriesState.CURRENT: (20, 30),
+    SeriesState.DISCONTINUED: (40,),
+}
+KNOWN_SPEC_STATE_CODES = tuple(
+    code for codes in SPEC_STATE_CODES.values() for code in codes
+)
+PRICE_FROM_DESCRIPTION = (
+    "Минимальная цена в CNY. Тип цены задаётся параметром price_type. "
+    "Записи без цены выбранного типа не возвращаются."
+)
+PRICE_TO_DESCRIPTION = (
+    "Максимальная цена в CNY. Тип цены задаётся параметром price_type. "
+    "Записи без цены выбранного типа не возвращаются."
+)
+PRICE_TYPE_DESCRIPTION = (
+    "Тип цены: effective — рекомендованная или дилерская при её отсутствии; "
+    "guide — рекомендованная; dealer — дилерская."
+)
+EXPECTED_CUSTOMS_PAYMENT_TYPES = {
+    "IMPORT_DUTY",
+    "CUSTOMS_FEE",
+    "RECYCLING_FEE",
+}
+INCLUDE_TOTAL_DESCRIPTION = (
+    "Если true, возвращает общее количество найденных записей. "
+    "Может увеличить время ответа."
+)
 
 
 def _money(value: Decimal | None) -> str | None:
@@ -73,6 +112,27 @@ def _money(value: Decimal | None) -> str | None:
 
 def _decimal(value: Decimal | None) -> str | None:
     return format(value, "f") if value is not None else None
+
+
+def _series_state(value: int | None) -> SeriesState:
+    """Преобразовать исходный код Autohome в публичную стадию продаж."""
+    for state, codes in SERIES_STATE_CODES.items():
+        if value in codes:
+            return state
+    return SeriesState.UNKNOWN
+
+
+def _spec_state(value: int | None) -> SeriesState:
+    """Преобразовать исходный код комплектации в публичную стадию продаж."""
+    for state, codes in SPEC_STATE_CODES.items():
+        if value in codes:
+            return state
+    return SeriesState.UNKNOWN
+
+
+def _public_payment_details(details: dict[str, Any]) -> dict[str, Any]:
+    """Исключить устаревшие интерфейсные подписи из деталей платежа."""
+    return {key: value for key, value in details.items() if key != "field_labels"}
 
 
 def _effective_price():
@@ -91,32 +151,25 @@ def _price_column(price_type: PriceType):
     }[price_type]
 
 
-def _encode_cursor(offset: int) -> str:
-    payload = json.dumps({"offset": offset}, separators=(",", ":")).encode()
-    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
-
-
-def _decode_cursor(cursor: str | None) -> int:
-    if cursor is None:
-        return 0
-    try:
-        padded = cursor + "=" * (-len(cursor) % 4)
-        value = json.loads(base64.urlsafe_b64decode(padded).decode())
-        offset = int(value["offset"])
-        if offset < 0:
-            raise ValueError
-        return offset
-    except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
-        raise HTTPException(400, detail={"code": "INVALID_CURSOR", "message": "Invalid cursor"}) from exc
-
-
-def _page(session: Session, statement, limit: int, cursor: str | None):
-    offset = _decode_cursor(cursor)
+def _page(
+    session: Session,
+    statement,
+    limit: int,
+    offset: int,
+    include_total: bool,
+):
+    total = None
+    if include_total:
+        count_statement = select(func.count()).select_from(
+            statement.order_by(None).subquery()
+        )
+        total = int(session.scalar(count_statement) or 0)
     rows = session.execute(statement.offset(offset).limit(limit + 1)).all()
     has_more = len(rows) > limit
     return rows[:limit], {
         "limit": limit,
-        "next_cursor": _encode_cursor(offset + limit) if has_more else None,
+        "offset": offset,
+        "total": total,
         "has_more": has_more,
     }
 
@@ -198,7 +251,7 @@ def _spec_payload(row, *, detail: bool = False):
         "id": spec.id,
         "name": spec.name,
         "year": spec.year,
-        "state": spec.state,
+        "state": _spec_state(spec.state),
         "brand": _brand_ref(brand),
         "series": _series_ref(series),
         "modification": (
@@ -207,7 +260,6 @@ def _spec_payload(row, *, detail: bool = False):
         "price": _price_payload(spec),
         "description": spec.description,
         "image_url": spec.image_url,
-        "config_available": spec.config_available,
         "powertrain": _powertrain_payload(powertrain),
     }
     if detail:
@@ -230,7 +282,7 @@ def _apply_spec_filters(
     statement,
     *,
     q=None, brand_id=None, series_id=None, modification_id=None, manufacturer_id=None,
-    year_from=None, year_to=None, state=None, config_available=None, energy_type=None,
+    year_from=None, year_to=None, state=None, energy_type=None,
     body_type=None, drive_type=None, transmission_type=None,
     engine_displacement_from=None, engine_displacement_to=None,
     power_hp_from=None, power_hp_to=None, seats_from=None, seats_to=None,
@@ -242,13 +294,18 @@ def _apply_spec_filters(
     mappings = (
         (Series.brand_id, brand_id), (Spec.series_id, series_id),
         (Spec.modification_id, modification_id), (Series.manufacturer_id, manufacturer_id),
-        (Spec.state, state), (Spec.config_available, config_available),
         (SpecPowertrain.energy_type, energy_type), (SpecPowertrain.body_type, body_type),
         (SpecPowertrain.drive_type, drive_type),
         (SpecPowertrain.transmission_type, transmission_type),
         (SpecVehicleAttributes.is_four_wheel_drive, four_wheel_drive),
     )
     filters.extend(column == value for column, value in mappings if value is not None)
+    if state == SeriesState.UNKNOWN:
+        filters.append(
+            or_(Spec.state.is_(None), Spec.state.not_in(KNOWN_SPEC_STATE_CODES))
+        )
+    elif state is not None:
+        filters.append(Spec.state.in_(SPEC_STATE_CODES[state]))
     ranges = (
         (Spec.year, year_from, year_to),
         (SpecPowertrain.engine_displacement_ml, engine_displacement_from, engine_displacement_to),
@@ -281,9 +338,16 @@ def create_app(
     application = FastAPI(
         title="Autohome Catalog API",
         description=(
-            "API чтения каталога Autohome: бренды, серии, комплектации, "
-            "технические модификации, характеристики, фотографии и "
-            "предварительно рассчитанные таможенные платежи."
+            "API чтения каталога Autohome. Доступные данные:\n\n"
+            "- бренды;\n"
+            "- производители;\n"
+            "- серии;\n"
+            "- комплектации;\n"
+            "- технические модификации;\n"
+            "- характеристики;\n"
+            "- фотографии.\n\n"
+            "API также возвращает предварительно рассчитанные таможенные платежи: "
+            "ввозную таможенную пошлину, таможенный сбор и утилизационный сбор."
         ),
         version="1.0.0",
         docs_url="/docs",
@@ -292,13 +356,14 @@ def create_app(
         openapi_tags=[
             {"name": "Auth", "description": "Получение JWT для доступа к API."},
             {"name": "Brands", "description": "Бренды автомобилей."},
+            {"name": "Manufacturers", "description": "Производители автомобилей."},
             {"name": "Series", "description": "Серии и их изображения."},
             {"name": "Modifications", "description": "Нормализованные технические модификации."},
             {"name": "Specs", "description": "Комплектации и полные характеристики."},
             {"name": "Customs", "description": "Сохранённые расчёты таможенных платежей."},
         ],
         responses={
-            400: {"model": ErrorResponse, "description": "Некорректный фильтр, диапазон или курсор."},
+            400: {"model": ErrorResponse, "description": "Некорректный фильтр или диапазон."},
             401: {"model": ErrorResponse, "description": "JWT отсутствует, истёк или недействителен."},
             404: {"model": ErrorResponse, "description": "Запрошенная сущность не найдена."},
         },
@@ -376,57 +441,42 @@ def create_app(
         response_model=BrandPage,
         tags=["Brands"],
         summary="Получить бренды",
-        description="Возвращает бренды с ценовым диапазоном и курсорной пагинацией.",
+        description="Возвращает бренды с фильтрацией и offset-пагинацией.",
     )
     async def brands(
-        q: str | None = None,
-        manufacturer_id: int | None = None,
-        is_new_energy: bool | None = None,
-        price_from: Decimal | None = None,
-        price_to: Decimal | None = None,
-        sort: Literal["name", "series_count", "min_price"] = "name",
-        order: SortOrder = "asc",
-        limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
+        q: str | None = Query(None, description="Поиск по части названия бренда без учёта регистра."),
+        manufacturer_id: int | None = Query(None, description="Оставить бренды указанного производителя."),
+        is_new_energy: bool | None = Query(None, description="Оставить бренды с сериями указанной категории NEV."),
+        sort: Literal["name", "series_count"] = Query("name", description="Поле сортировки."),
+        order: SortOrder = Query("asc", description="Направление сортировки: asc или desc."),
+        limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
+        offset: int = Query(0, ge=0, description="Количество записей, которые нужно пропустить."),
+        include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
         session: Session = Depends(get_session),
     ):
-        _check_range(price_from, price_to, "price")
-        price = _effective_price()
-        aggregate = (
-            select(
-                Series.brand_id.label("brand_id"),
-                func.min(price).label("min_price"),
-                func.max(price).label("max_price"),
-            )
-            .join(Spec, Spec.series_id == Series.id)
-            .outerjoin(SpecPowertrain, SpecPowertrain.spec_id == Spec.id)
-            .group_by(Series.brand_id)
-        )
+        statement = select(Brand)
+        matching_series = select(Series.id).where(Series.brand_id == Brand.id)
         if manufacturer_id is not None:
-            aggregate = aggregate.where(Series.manufacturer_id == manufacturer_id)
+            matching_series = matching_series.where(
+                Series.manufacturer_id == manufacturer_id
+            )
         if is_new_energy is not None:
-            aggregate = aggregate.where(Series.is_new_energy == is_new_energy)
-        if price_from is not None:
-            aggregate = aggregate.where(price >= price_from)
-        if price_to is not None:
-            aggregate = aggregate.where(price <= price_to)
-        aggregate = aggregate.subquery()
-        statement = select(Brand, aggregate.c.min_price, aggregate.c.max_price).outerjoin(
-            aggregate, aggregate.c.brand_id == Brand.id
-        )
+            matching_series = matching_series.where(
+                Series.is_new_energy == is_new_energy
+            )
         if q:
             statement = statement.where(func.lower(Brand.name).like(f"%{q.lower()}%"))
-        if any(v is not None for v in (manufacturer_id, is_new_energy, price_from, price_to)):
-            statement = statement.where(aggregate.c.brand_id.is_not(None))
-        sort_column = {"name": Brand.name, "series_count": Brand.series_count, "min_price": aggregate.c.min_price}[sort]
+        if any(v is not None for v in (manufacturer_id, is_new_energy)):
+            statement = statement.where(exists(matching_series))
+        sort_column = {"name": Brand.name, "series_count": Brand.series_count}[sort]
         statement = statement.order_by(sort_column.desc() if order == "desc" else sort_column.asc(), Brand.id.asc())
-        rows, pagination = _page(session, statement, limit, cursor)
+        rows, pagination = _page(session, statement, limit, offset, include_total)
         items = [
             {
                 "id": brand.id, "name": brand.name, "logo_url": brand.logo_url,
                 "series_count": brand.series_count,
-                "price": {"min_cny": _money(minimum), "max_cny": _money(maximum)},
             }
-            for brand, minimum, maximum in rows
+            for (brand,) in rows
         ]
         return {"items": items, "pagination": pagination}
 
@@ -436,20 +486,64 @@ def create_app(
         tags=["Brands"],
         summary="Получить бренд",
     )
-    async def brand_detail(brand_id: int, session: Session = Depends(get_session)):
+    async def brand_detail(
+        brand_id: int = ApiPath(description="Идентификатор бренда."),
+        session: Session = Depends(get_session),
+    ):
         brand = session.get(Brand, brand_id)
         if brand is None:
             raise _not_found("Brand")
-        minimum, maximum = session.execute(
-            select(func.min(_effective_price()), func.max(_effective_price()))
-            .join(Series, Series.id == Spec.series_id)
-            .where(Series.brand_id == brand_id)
-        ).one()
         return {
             "id": brand.id, "name": brand.name, "logo_url": brand.logo_url,
             "series_count": brand.series_count,
-            "price": {"min_cny": _money(minimum), "max_cny": _money(maximum)},
         }
+
+    @protected_router.get(
+        "/api/v1/manufacturers",
+        response_model=ManufacturerPage,
+        tags=["Manufacturers"],
+        summary="Получить производителей",
+        description="Возвращает производителей с поиском по названию и фильтром по бренду.",
+    )
+    async def manufacturers(
+        q: str | None = Query(None, description="Поиск по части названия производителя без учёта регистра."),
+        brand_id: int | None = Query(None, description="Оставить производителей указанного бренда."),
+        limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
+        offset: int = Query(0, ge=0, description="Количество записей, которые нужно пропустить."),
+        include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
+        session: Session = Depends(get_session),
+    ):
+        statement = select(Manufacturer)
+        if brand_id is not None:
+            statement = statement.join(
+                BrandManufacturer,
+                BrandManufacturer.manufacturer_id == Manufacturer.id,
+            ).where(BrandManufacturer.brand_id == brand_id)
+        if q:
+            statement = statement.where(
+                func.lower(Manufacturer.name).like(f"%{q.lower()}%")
+            )
+        statement = statement.order_by(Manufacturer.name, Manufacturer.id)
+        rows, pagination = _page(session, statement, limit, offset, include_total)
+        return {
+            "items": [{"id": item.id, "name": item.name} for (item,) in rows],
+            "pagination": pagination,
+        }
+
+    @protected_router.get(
+        "/api/v1/manufacturers/{manufacturer_id}",
+        response_model=ManufacturerResponse,
+        tags=["Manufacturers"],
+        summary="Получить производителя",
+    )
+    async def manufacturer_detail(
+        manufacturer_id: int = ApiPath(description="Идентификатор производителя."),
+        session: Session = Depends(get_session),
+    ):
+        manufacturer = session.get(Manufacturer, manufacturer_id)
+        if manufacturer is None:
+            raise _not_found("Manufacturer")
+        return {"id": manufacturer.id, "name": manufacturer.name}
 
     def series_statement():
         price = _effective_price()
@@ -501,26 +595,47 @@ def create_app(
         description="Фильтрует серии по бренду, производителю и характеристикам комплектаций.",
     )
     async def series_list(
-        q: str | None = None, brand_id: int | None = None, manufacturer_id: int | None = None,
-        is_new_energy: bool | None = None, state: int | None = None,
-        year_from: int | None = None, year_to: int | None = None,
-        energy_type: str | None = None, body_type: str | None = None,
-        drive_type: str | None = None, transmission_type: str | None = None,
-        engine_displacement_from: int | None = None, engine_displacement_to: int | None = None,
-        power_hp_from: Decimal | None = None, power_hp_to: Decimal | None = None,
-        price_from: Decimal | None = None, price_to: Decimal | None = None,
-        price_type: PriceType = "effective",
-        sort: Literal["name", "price", "year"] = "name", order: SortOrder = "asc",
-        limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
+        q: str | None = Query(None, description="Поиск по части названия серии без учёта регистра."),
+        brand_id: int | None = Query(None, description="Идентификатор бренда."),
+        manufacturer_id: int | None = Query(None, description="Идентификатор производителя."),
+        is_new_energy: bool | None = Query(None, description="Фильтр по принадлежности к категории NEV."),
+        state: SeriesState | None = Query(None, description="Нормализованная стадия продаж серии."),
+        year_from: int | None = Query(None, description="Минимальный модельный год комплектаций серии."),
+        year_to: int | None = Query(None, description="Максимальный модельный год комплектаций серии."),
+        energy_type: str | None = Query(None, description="Нормализованный код типа энергии."),
+        body_type: str | None = Query(None, description="Нормализованный код типа кузова."),
+        drive_type: str | None = Query(None, description="Нормализованный код типа привода."),
+        transmission_type: str | None = Query(None, description="Нормализованный код типа трансмиссии."),
+        engine_displacement_from: int | None = Query(None, description="Минимальный рабочий объём ДВС в миллилитрах."),
+        engine_displacement_to: int | None = Query(None, description="Максимальный рабочий объём ДВС в миллилитрах."),
+        power_hp_from: Decimal | None = Query(None, description="Минимальная мощность ДВС в лошадиных силах."),
+        power_hp_to: Decimal | None = Query(None, description="Максимальная мощность ДВС в лошадиных силах."),
+        price_from: Decimal | None = Query(None, description=PRICE_FROM_DESCRIPTION),
+        price_to: Decimal | None = Query(None, description=PRICE_TO_DESCRIPTION),
+        price_type: PriceType = Query("effective", description=PRICE_TYPE_DESCRIPTION),
+        sort: Literal["name", "price", "year"] = Query("name", description="Поле сортировки."),
+        order: SortOrder = Query("asc", description="Направление сортировки: asc или desc."),
+        limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
+        offset: int = Query(0, ge=0, description="Количество записей, которые нужно пропустить."),
+        include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
         session: Session = Depends(get_session),
     ):
         for low, high, name in ((year_from, year_to, "year"), (engine_displacement_from, engine_displacement_to, "engine_displacement"), (power_hp_from, power_hp_to, "power_hp"), (price_from, price_to, "price")):
             _check_range(low, high, name)
         statement = series_statement()
         direct = []
-        for column, value in ((Series.brand_id, brand_id), (Series.manufacturer_id, manufacturer_id), (Series.is_new_energy, is_new_energy), (Series.state, state)):
+        for column, value in ((Series.brand_id, brand_id), (Series.manufacturer_id, manufacturer_id), (Series.is_new_energy, is_new_energy)):
             if value is not None:
                 direct.append(column == value)
+        if state == SeriesState.UNKNOWN:
+            direct.append(
+                or_(
+                    Series.state.is_(None),
+                    Series.state.not_in(KNOWN_SERIES_STATE_CODES),
+                )
+            )
+        elif state is not None:
+            direct.append(Series.state.in_(SERIES_STATE_CODES[state]))
         if q:
             direct.append(func.lower(Series.name).like(f"%{q.lower()}%"))
         matching_specs = _apply_spec_filters(
@@ -545,12 +660,12 @@ def create_app(
             "year": latest_year,
         }[sort]
         statement = statement.order_by(sort_column.desc() if order == "desc" else sort_column.asc(), Series.id.asc())
-        rows, pagination = _page(session, statement, limit, cursor)
+        rows, pagination = _page(session, statement, limit, offset, include_total)
         images_by_series = official_images(session, [row[0].id for row in rows])
         items = [{
             "id": item.id, "name": item.name, "brand": _brand_ref(brand),
             "manufacturer": _manufacturer_ref(manufacturer), "is_new_energy": item.is_new_energy,
-            "state": item.state, "spec_count": item.spec_count,
+            "state": _series_state(item.state), "spec_count": item.spec_count,
             "price": {"min_cny": _money(minimum), "max_cny": _money(maximum)},
             "official_images": images_by_series.get(item.id, []),
         } for item, brand, manufacturer, minimum, maximum in rows]
@@ -562,14 +677,17 @@ def create_app(
         tags=["Series"],
         summary="Получить серию",
     )
-    async def series_detail(series_id: int, session: Session = Depends(get_session)):
+    async def series_detail(
+        series_id: int = ApiPath(description="Идентификатор серии."),
+        session: Session = Depends(get_session),
+    ):
         row = session.execute(series_statement().where(Series.id == series_id)).one_or_none()
         if row is None:
             raise _not_found("Series")
         item, brand, manufacturer, minimum, maximum = row
         return {"id": item.id, "name": item.name, "brand": _brand_ref(brand),
                 "manufacturer": _manufacturer_ref(manufacturer), "is_new_energy": item.is_new_energy,
-                "state": item.state, "spec_count": item.spec_count,
+                "state": _series_state(item.state), "spec_count": item.spec_count,
                 "price": {"min_cny": _money(minimum), "max_cny": _money(maximum)},
                 "official_images": official_images(session, [item.id]).get(item.id, [])}
 
@@ -578,7 +696,7 @@ def create_app(
         energy_type=None, body_type=None, drive_type=None, transmission_type=None,
         engine_displacement_from=None, engine_displacement_to=None, power_hp_from=None,
         power_hp_to=None, price_from=None, price_to=None, price_type="effective",
-        is_complete=None, sort="year", order="desc", limit=24, cursor=None,
+        sort="year", order="desc", limit=24, offset=0, include_total=False,
     ):
         for low, high, name in ((year_from, year_to, "year"), (engine_displacement_from, engine_displacement_to, "engine_displacement"), (power_hp_from, power_hp_to, "power_hp"), (price_from, price_to, "price")):
             _check_range(low, high, name)
@@ -586,7 +704,7 @@ def create_app(
         prices = select(Spec.modification_id, func.min(price).label("min_price"), func.max(price).label("max_price")).group_by(Spec.modification_id).subquery()
         statement = select(Modification, prices.c.min_price, prices.c.max_price).outerjoin(prices, prices.c.modification_id == Modification.id)
         filters = []
-        mappings = ((Modification.series_id, series_id), (Modification.energy_type, energy_type), (Modification.body_type, body_type), (Modification.drive_type, drive_type), (Modification.transmission_type, transmission_type), (Modification.is_complete, is_complete))
+        mappings = ((Modification.series_id, series_id), (Modification.energy_type, energy_type), (Modification.body_type, body_type), (Modification.drive_type, drive_type), (Modification.transmission_type, transmission_type))
         filters.extend(column == value for column, value in mappings if value is not None)
         if brand_id is not None:
             filters.append(exists(select(Series.id).where(Series.id == Modification.series_id, Series.brand_id == brand_id)))
@@ -595,7 +713,7 @@ def create_app(
             if high is not None: filters.append(column <= high)
         sort_column = {"year": Modification.model_year, "power": Modification.engine_power_hp, "engine_displacement": Modification.engine_displacement_ml, "price": prices.c.min_price, "name": Modification.name}[sort]
         statement = statement.where(*filters).order_by(sort_column.desc() if order == "desc" else sort_column.asc(), Modification.id.asc())
-        rows, pagination = _page(session, statement, limit, cursor)
+        rows, pagination = _page(session, statement, limit, offset, include_total)
         items = [{
             "id": item.id, "series_id": item.series_id, "model_year": item.model_year,
             "name": item.name, "energy_type": item.energy_type, "engine_summary": item.engine_summary,
@@ -603,7 +721,7 @@ def create_app(
             "engine_power_hp": _decimal(item.engine_power_hp), "transmission_summary": item.transmission_summary,
             "transmission_type": item.transmission_type, "drive_type": item.drive_type,
             "body_type": item.body_type, "battery_capacity_kwh": _decimal(item.battery_capacity_kwh),
-            "is_complete": item.is_complete, "spec_count": item.spec_count,
+            "spec_count": item.spec_count,
             "price": {"min_cny": _money(minimum), "max_cny": _money(maximum)},
         } for item, minimum, maximum in rows]
         return {"items": items, "pagination": pagination}
@@ -615,23 +733,34 @@ def create_app(
         summary="Получить модификации",
     )
     async def modifications(
-        series_id: int | None = None, brand_id: int | None = None,
-        year_from: int | None = None, year_to: int | None = None,
-        energy_type: str | None = None, body_type: str | None = None,
-        drive_type: str | None = None, transmission_type: str | None = None,
-        engine_displacement_from: int | None = None, engine_displacement_to: int | None = None,
-        power_hp_from: Decimal | None = None, power_hp_to: Decimal | None = None,
-        price_from: Decimal | None = None, price_to: Decimal | None = None,
-        price_type: PriceType = "effective", is_complete: bool | None = None,
-        sort: Literal["year", "power", "engine_displacement", "price", "name"] = "year",
-        order: SortOrder = "desc", limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
+        series_id: int | None = Query(None, description="Идентификатор серии."),
+        brand_id: int | None = Query(None, description="Идентификатор бренда."),
+        year_from: int | None = Query(None, description="Минимальный модельный год."),
+        year_to: int | None = Query(None, description="Максимальный модельный год."),
+        energy_type: str | None = Query(None, description="Нормализованный код типа энергии."),
+        body_type: str | None = Query(None, description="Нормализованный код типа кузова."),
+        drive_type: str | None = Query(None, description="Нормализованный код типа привода."),
+        transmission_type: str | None = Query(None, description="Нормализованный код типа трансмиссии."),
+        engine_displacement_from: int | None = Query(None, description="Минимальный рабочий объём ДВС в миллилитрах."),
+        engine_displacement_to: int | None = Query(None, description="Максимальный рабочий объём ДВС в миллилитрах."),
+        power_hp_from: Decimal | None = Query(None, description="Минимальная мощность ДВС в лошадиных силах."),
+        power_hp_to: Decimal | None = Query(None, description="Максимальная мощность ДВС в лошадиных силах."),
+        price_from: Decimal | None = Query(None, description=PRICE_FROM_DESCRIPTION),
+        price_to: Decimal | None = Query(None, description=PRICE_TO_DESCRIPTION),
+        price_type: PriceType = Query("effective", description=PRICE_TYPE_DESCRIPTION),
+        sort: Literal["year", "power", "engine_displacement", "price", "name"] = Query("year", description="Поле сортировки."),
+        order: SortOrder = Query("desc", description="Направление сортировки: asc или desc."),
+        limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
+        offset: int = Query(0, ge=0, description="Количество записей, которые нужно пропустить."),
+        include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
         session: Session = Depends(get_session),
     ):
         argument_names = {
             "series_id", "brand_id", "year_from", "year_to", "energy_type", "body_type",
             "drive_type", "transmission_type", "engine_displacement_from",
             "engine_displacement_to", "power_hp_from", "power_hp_to", "price_from",
-            "price_to", "price_type", "is_complete", "sort", "order", "limit", "cursor",
+            "price_to", "price_type", "sort", "order", "limit", "offset",
+            "include_total",
         }
         return modification_list_impl(
             session, **{key: value for key, value in locals().items() if key in argument_names}
@@ -644,14 +773,24 @@ def create_app(
         summary="Получить модификации серии",
     )
     async def series_modifications(
-        series_id: int, year_from: int | None = None, year_to: int | None = None,
-        energy_type: str | None = None, body_type: str | None = None,
-        drive_type: str | None = None, transmission_type: str | None = None,
-        engine_displacement_from: int | None = None, engine_displacement_to: int | None = None,
-        power_hp_from: Decimal | None = None, power_hp_to: Decimal | None = None,
-        price_from: Decimal | None = None, price_to: Decimal | None = None,
-        price_type: PriceType = "effective", limit: int = Query(24, ge=1, le=100),
-        cursor: str | None = None, session: Session = Depends(get_session),
+        series_id: int = ApiPath(description="Идентификатор серии."),
+        year_from: int | None = Query(None, description="Минимальный модельный год."),
+        year_to: int | None = Query(None, description="Максимальный модельный год."),
+        energy_type: str | None = Query(None, description="Нормализованный код типа энергии."),
+        body_type: str | None = Query(None, description="Нормализованный код типа кузова."),
+        drive_type: str | None = Query(None, description="Нормализованный код типа привода."),
+        transmission_type: str | None = Query(None, description="Нормализованный код типа трансмиссии."),
+        engine_displacement_from: int | None = Query(None, description="Минимальный рабочий объём ДВС в миллилитрах."),
+        engine_displacement_to: int | None = Query(None, description="Максимальный рабочий объём ДВС в миллилитрах."),
+        power_hp_from: Decimal | None = Query(None, description="Минимальная мощность ДВС в лошадиных силах."),
+        power_hp_to: Decimal | None = Query(None, description="Максимальная мощность ДВС в лошадиных силах."),
+        price_from: Decimal | None = Query(None, description=PRICE_FROM_DESCRIPTION),
+        price_to: Decimal | None = Query(None, description=PRICE_TO_DESCRIPTION),
+        price_type: PriceType = Query("effective", description=PRICE_TYPE_DESCRIPTION),
+        limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
+        offset: int = Query(0, ge=0, description="Количество записей, которые нужно пропустить."),
+        include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
+        session: Session = Depends(get_session),
     ):
         if session.get(Series, series_id) is None: raise _not_found("Series")
         return modification_list_impl(session, series_id=series_id, year_from=year_from, year_to=year_to,
@@ -659,7 +798,8 @@ def create_app(
             transmission_type=transmission_type, engine_displacement_from=engine_displacement_from,
             engine_displacement_to=engine_displacement_to, power_hp_from=power_hp_from,
             power_hp_to=power_hp_to, price_from=price_from, price_to=price_to,
-            price_type=price_type, limit=limit, cursor=cursor)
+            price_type=price_type, limit=limit, offset=offset,
+            include_total=include_total)
 
     @protected_router.get(
         "/api/v1/modifications/{modification_id}",
@@ -667,7 +807,10 @@ def create_app(
         tags=["Modifications"],
         summary="Получить модификацию",
     )
-    async def modification_detail(modification_id: int, session: Session = Depends(get_session)):
+    async def modification_detail(
+        modification_id: int = ApiPath(description="Идентификатор технической модификации."),
+        session: Session = Depends(get_session),
+    ):
         item = session.get(Modification, modification_id)
         if item is None: raise _not_found("Modification")
         price = _effective_price()
@@ -678,16 +821,17 @@ def create_app(
                 "engine_power_hp": _decimal(item.engine_power_hp), "transmission_summary": item.transmission_summary,
                 "transmission_type": item.transmission_type, "drive_type": item.drive_type,
                 "body_type": item.body_type, "battery_capacity_kwh": _decimal(item.battery_capacity_kwh),
-                "is_complete": item.is_complete, "spec_count": item.spec_count,
+                "spec_count": item.spec_count,
                 "price": {"min_cny": _money(minimum), "max_cny": _money(maximum)}}
 
-    def specs_impl(session: Session, limit: int, cursor: str | None, sort="price", order="asc", **filters):
+    def specs_impl(session: Session, limit: int, offset: int, include_total: bool,
+                   sort="price", order="asc", **filters):
         ranges = ((filters.get("year_from"), filters.get("year_to"), "year"), (filters.get("engine_displacement_from"), filters.get("engine_displacement_to"), "engine_displacement"), (filters.get("power_hp_from"), filters.get("power_hp_to"), "power_hp"), (filters.get("seats_from"), filters.get("seats_to"), "seats"), (filters.get("price_from"), filters.get("price_to"), "price"))
         for low, high, name in ranges: _check_range(low, high, name)
         statement = _apply_spec_filters(_spec_select(), **filters)
         sort_column = {"price": _price_column(filters.get("price_type", "effective")), "year": Spec.year, "power": SpecPowertrain.engine_power_hp, "engine_displacement": SpecPowertrain.engine_displacement_ml, "name": Spec.name}[sort]
         statement = statement.order_by(sort_column.desc() if order == "desc" else sort_column.asc(), Spec.id.asc())
-        rows, pagination = _page(session, statement, limit, cursor)
+        rows, pagination = _page(session, statement, limit, offset, include_total)
         return {"items": [_spec_payload(row) for row in rows], "pagination": pagination}
 
     @protected_router.get(
@@ -698,29 +842,45 @@ def create_app(
         description="Возвращает комплектации с ценами и нормализованной силовой установкой.",
     )
     async def specs(
-        q: str | None = None, brand_id: int | None = None, series_id: int | None = None,
-        modification_id: int | None = None, manufacturer_id: int | None = None,
-        year_from: int | None = None, year_to: int | None = None, state: int | None = None,
-        config_available: bool | None = None, energy_type: str | None = None,
-        body_type: str | None = None, drive_type: str | None = None,
-        transmission_type: str | None = None, engine_displacement_from: int | None = None,
-        engine_displacement_to: int | None = None, power_hp_from: Decimal | None = None,
-        power_hp_to: Decimal | None = None, seats_from: int | None = None, seats_to: int | None = None,
-        four_wheel_drive: bool | None = None, price_from: Decimal | None = None,
-        price_to: Decimal | None = None, price_type: PriceType = "effective",
-        sort: Literal["price", "year", "power", "engine_displacement", "name"] = "price",
-        order: SortOrder = "asc", limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
+        q: str | None = Query(None, description="Поиск по части названия комплектации без учёта регистра."),
+        brand_id: int | None = Query(None, description="Идентификатор бренда."),
+        series_id: int | None = Query(None, description="Идентификатор серии."),
+        modification_id: int | None = Query(None, description="Идентификатор технической модификации."),
+        manufacturer_id: int | None = Query(None, description="Идентификатор производителя."),
+        year_from: int | None = Query(None, description="Минимальный модельный год."),
+        year_to: int | None = Query(None, description="Максимальный модельный год."),
+        state: SeriesState | None = Query(None, description="Стадия продаж комплектации."),
+        energy_type: str | None = Query(None, description="Нормализованный код типа энергии."),
+        body_type: str | None = Query(None, description="Нормализованный код типа кузова."),
+        drive_type: str | None = Query(None, description="Нормализованный код типа привода."),
+        transmission_type: str | None = Query(None, description="Нормализованный код типа трансмиссии."),
+        engine_displacement_from: int | None = Query(None, description="Минимальный рабочий объём ДВС в миллилитрах."),
+        engine_displacement_to: int | None = Query(None, description="Максимальный рабочий объём ДВС в миллилитрах."),
+        power_hp_from: Decimal | None = Query(None, description="Минимальная мощность ДВС в лошадиных силах."),
+        power_hp_to: Decimal | None = Query(None, description="Максимальная мощность ДВС в лошадиных силах."),
+        seats_from: int | None = Query(None, description="Минимальное число мест."),
+        seats_to: int | None = Query(None, description="Максимальное число мест."),
+        four_wheel_drive: bool | None = Query(None, description="Фильтр по наличию полного привода."),
+        price_from: Decimal | None = Query(None, description=PRICE_FROM_DESCRIPTION),
+        price_to: Decimal | None = Query(None, description=PRICE_TO_DESCRIPTION),
+        price_type: PriceType = Query("effective", description=PRICE_TYPE_DESCRIPTION),
+        sort: Literal["price", "year", "power", "engine_displacement", "name"] = Query("price", description="Поле сортировки."),
+        order: SortOrder = Query("asc", description="Направление сортировки: asc или desc."),
+        limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
+        offset: int = Query(0, ge=0, description="Количество записей, которые нужно пропустить."),
+        include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
         session: Session = Depends(get_session),
     ):
         filter_names = {
             "q", "brand_id", "series_id", "modification_id", "manufacturer_id",
-            "year_from", "year_to", "state", "config_available", "energy_type", "body_type",
+            "year_from", "year_to", "state", "energy_type", "body_type",
             "drive_type", "transmission_type", "engine_displacement_from",
             "engine_displacement_to", "power_hp_from", "power_hp_to", "seats_from",
             "seats_to", "four_wheel_drive", "price_from", "price_to", "price_type",
         }
         values = {key: value for key, value in locals().items() if key in filter_names}
-        return specs_impl(session, limit, cursor, sort=sort, order=order, **values)
+        return specs_impl(session, limit, offset, include_total,
+                          sort=sort, order=order, **values)
 
     @protected_router.get(
         "/api/v1/modifications/{modification_id}/specs",
@@ -728,12 +888,18 @@ def create_app(
         tags=["Specs"],
         summary="Получить комплектации модификации",
     )
-    async def modification_specs(modification_id: int, price_from: Decimal | None = None,
-        price_to: Decimal | None = None, price_type: PriceType = "effective",
-        limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
+    async def modification_specs(
+        modification_id: int = ApiPath(description="Идентификатор технической модификации."),
+        price_from: Decimal | None = Query(None, description=PRICE_FROM_DESCRIPTION),
+        price_to: Decimal | None = Query(None, description=PRICE_TO_DESCRIPTION),
+        price_type: PriceType = Query("effective", description=PRICE_TYPE_DESCRIPTION),
+        limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
+        offset: int = Query(0, ge=0, description="Количество записей, которые нужно пропустить."),
+        include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
         session: Session = Depends(get_session)):
         if session.get(Modification, modification_id) is None: raise _not_found("Modification")
-        return specs_impl(session, limit, cursor, modification_id=modification_id,
+        return specs_impl(session, limit, offset, include_total,
+                          modification_id=modification_id,
                           price_from=price_from, price_to=price_to, price_type=price_type)
 
     @protected_router.get(
@@ -742,7 +908,10 @@ def create_app(
         tags=["Specs"],
         summary="Получить комплектацию",
     )
-    async def spec_detail(spec_id: int, session: Session = Depends(get_session)):
+    async def spec_detail(
+        spec_id: int = ApiPath(description="Идентификатор комплектации."),
+        session: Session = Depends(get_session),
+    ):
         row = session.execute(_spec_select().where(Spec.id == spec_id)).one_or_none()
         if row is None: raise _not_found("Spec")
         return _spec_payload(row, detail=True)
@@ -753,8 +922,12 @@ def create_app(
         tags=["Specs"],
         summary="Получить полную конфигурацию комплектации",
     )
-    async def spec_parameters(spec_id: int, group_id: int | None = None, section_id: int | None = None,
-                        session: Session = Depends(get_session)):
+    async def spec_parameters(
+        spec_id: int = ApiPath(description="Идентификатор комплектации."),
+        group_id: int | None = Query(None, description="Оставить указанную группу характеристик."),
+        section_id: int | None = Query(None, description="Оставить указанный раздел характеристик."),
+        session: Session = Depends(get_session),
+    ):
         if session.get(Spec, spec_id) is None: raise _not_found("Spec")
         statement = (select(ParameterGroup, ParameterSection, ParameterDefinition, SpecParameter)
             .join(ParameterSection, ParameterSection.group_id == ParameterGroup.id)
@@ -786,9 +959,15 @@ def create_app(
         tags=["Series"],
         summary="Получить фотографии серии",
     )
-    async def photos(series_id: int, spec_id: int | None = None, category_id: int | None = None,
-               color_scope: str | None = None, color_id: int | None = None,
-               limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
+    async def photos(
+               series_id: int = ApiPath(description="Идентификатор серии."),
+               spec_id: int | None = Query(None, description="Оставить фотографии указанной комплектации."),
+               category_id: int | None = Query(None, description="Оставить фотографии указанной категории."),
+               color_scope: str | None = Query(None, description="Область цвета: EXTERIOR или INTERIOR."),
+               color_id: int | None = Query(None, description="Идентификатор цвета."),
+               limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
+               offset: int = Query(0, ge=0, description="Количество записей, которые нужно пропустить."),
+               include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
                session: Session = Depends(get_session)):
         if session.get(Series, series_id) is None: raise _not_found("Series")
         statement = select(SeriesPhoto).where(SeriesPhoto.series_id == series_id)
@@ -803,7 +982,7 @@ def create_app(
             if color_id is not None: color_match = color_match.where(SeriesPhotoColor.color_id == color_id)
             statement = statement.where(exists(color_match))
         statement = statement.order_by(SeriesPhoto.id)
-        rows, pagination = _page(session, statement, limit, cursor)
+        rows, pagination = _page(session, statement, limit, offset, include_total)
         photos_list = [row[0] for row in rows]
         ids = [photo.id for photo in photos_list]
         color_rows = session.execute(select(SeriesPhotoColor, SeriesGalleryColor)
@@ -812,12 +991,12 @@ def create_app(
             .where(SeriesPhotoColor.photo_id.in_(ids))).all() if ids else []
         by_photo: dict[int, list] = {}
         for link, color in color_rows:
-            by_photo.setdefault(link.photo_id, []).append({"series_id": color.series_id, "color_scope": color.color_scope.upper(),
+            by_photo.setdefault(link.photo_id, []).append({"color_scope": color.color_scope.upper(),
                 "color_id": color.color_id, "name": color.name, "color_values": color.color_values,
                 "picture_count": color.picture_count, "gallery_url": color.gallery_url})
         items = [{"id": photo.id, "series_id": photo.series_id, "spec_id": photo.spec_id,
             "category_id": photo.category_id, "category_name": photo.category_name, "title": photo.title,
-            "image_url": photo.image_url, "thumbnail_url": photo.thumbnail_url, "page_url": photo.page_url,
+            "image_url": photo.image_url, "thumbnail_url": photo.thumbnail_url,
             "colors": by_photo.get(photo.id, [])} for photo in photos_list]
         return {"items": items, "pagination": pagination}
 
@@ -827,7 +1006,11 @@ def create_app(
         tags=["Series"],
         summary="Получить цвета галереи",
     )
-    async def gallery_colors(series_id: int, color_scope: str | None = None, session: Session = Depends(get_session)):
+    async def gallery_colors(
+        series_id: int = ApiPath(description="Идентификатор серии."),
+        color_scope: str | None = Query(None, description="Область цвета: EXTERIOR или INTERIOR."),
+        session: Session = Depends(get_session),
+    ):
         if session.get(Series, series_id) is None: raise _not_found("Series")
         statement = select(SeriesGalleryColor).where(SeriesGalleryColor.series_id == series_id)
         if color_scope is not None:
@@ -841,8 +1024,14 @@ def create_app(
 
     def calculation_payload(session: Session, calculation: CustomsCalculation):
         payments = list(session.execute(select(CustomsPaymentResult).where(CustomsPaymentResult.calculation_id == calculation.id).order_by(CustomsPaymentResult.payment_type)).scalars())
-        amounts = [item.amount_rub for item in payments if item.status == "CALCULATED" and item.amount_rub is not None]
-        complete = bool(payments) and all(item.status == "CALCULATED" for item in payments)
+        complete = (
+            {item.payment_type for item in payments} == EXPECTED_CUSTOMS_PAYMENT_TYPES
+            and all(
+                item.status == "CALCULATED" and item.amount_rub is not None
+                for item in payments
+            )
+        )
+        amounts = [item.amount_rub for item in payments] if complete else []
         return {"id": calculation.id, "spec_id": calculation.spec_id, "importer_type": calculation.importer_type,
             "calculation_date": calculation.calculation_date, "rules_version": calculation.rules_version,
             "price_source": calculation.price_source, "vehicle_price_cny": _money(calculation.vehicle_price_cny),
@@ -851,10 +1040,12 @@ def create_app(
             "tnved_code": calculation.tnved_code, "classification_status": calculation.classification_status,
             "status": calculation.status, "warnings": calculation.warnings_json,
             "payments": [{"payment_type": item.payment_type, "amount_rub": _money(item.amount_rub),
-                "status": item.status, "rule_code": item.rule_code, "details": item.details_json} for item in payments],
+                "status": item.status, "rule_code": item.rule_code,
+                "details": _public_payment_details(item.details_json)} for item in payments],
             "total_rub": _money(sum(amounts, Decimal(0))) if complete else None, "is_total_complete": complete}
 
-    def calculations_impl(session: Session, limit: int, cursor: str | None, spec_id=None, brand_id=None,
+    def calculations_impl(session: Session, limit: int, offset: int,
+                          include_total: bool, spec_id=None, brand_id=None,
                           series_id=None, importer_type=None, status=None, calculation_date=None,
                           calculation_date_from=None, calculation_date_to=None):
         statement = select(CustomsCalculation).join(Spec, Spec.id == CustomsCalculation.spec_id).join(Series, Series.id == Spec.series_id)
@@ -866,7 +1057,7 @@ def create_app(
         if calculation_date_from is not None: filters.append(CustomsCalculation.calculation_date >= calculation_date_from)
         if calculation_date_to is not None: filters.append(CustomsCalculation.calculation_date <= calculation_date_to)
         statement = statement.where(*filters).order_by(CustomsCalculation.calculation_date.desc(), CustomsCalculation.id.desc())
-        rows, pagination = _page(session, statement, limit, cursor)
+        rows, pagination = _page(session, statement, limit, offset, include_total)
         return {"items": [calculation_payload(session, row[0]) for row in rows], "pagination": pagination}
 
     @protected_router.get(
@@ -875,13 +1066,21 @@ def create_app(
         tags=["Customs"],
         summary="Получить таможенные расчёты",
     )
-    async def calculations(spec_id: int | None = None, brand_id: int | None = None, series_id: int | None = None,
-                     importer_type: str | None = None, status: str | None = None,
-                     calculation_date_from: date | None = None, calculation_date_to: date | None = None,
-                     limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
+    async def calculations(
+                     spec_id: int | None = Query(None, description="Идентификатор комплектации."),
+                     brand_id: int | None = Query(None, description="Идентификатор бренда."),
+                     series_id: int | None = Query(None, description="Идентификатор серии."),
+                     importer_type: str | None = Query(None, description="Тип импортёра: INDIVIDUAL или LEGAL_ENTITY."),
+                     status: str | None = Query(None, description="Итоговый статус расчёта."),
+                     calculation_date_from: date | None = Query(None, description="Начальная дата расчёта включительно."),
+                     calculation_date_to: date | None = Query(None, description="Конечная дата расчёта включительно."),
+                     limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
+                     offset: int = Query(0, ge=0, description="Количество записей, которые нужно пропустить."),
+                     include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
                      session: Session = Depends(get_session)):
         _check_range(calculation_date_from, calculation_date_to, "calculation_date")
-        return calculations_impl(session, limit, cursor, spec_id=spec_id, brand_id=brand_id,
+        return calculations_impl(session, limit, offset, include_total,
+            spec_id=spec_id, brand_id=brand_id,
             series_id=series_id, importer_type=importer_type, status=status,
             calculation_date_from=calculation_date_from, calculation_date_to=calculation_date_to)
 
@@ -891,7 +1090,10 @@ def create_app(
         tags=["Customs"],
         summary="Получить таможенный расчёт",
     )
-    async def calculation_detail(calculation_id: int, session: Session = Depends(get_session)):
+    async def calculation_detail(
+        calculation_id: int = ApiPath(description="Идентификатор сценария таможенного расчёта."),
+        session: Session = Depends(get_session),
+    ):
         item = session.get(CustomsCalculation, calculation_id)
         if item is None: raise _not_found("Customs calculation")
         return calculation_payload(session, item)
@@ -902,12 +1104,16 @@ def create_app(
         tags=["Customs"],
         summary="Получить таможенные расчёты комплектации",
     )
-    async def spec_calculations(spec_id: int, importer_type: str | None = None,
-                          calculation_date: date | None = None,
-                          limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
+    async def spec_calculations(
+                          spec_id: int = ApiPath(description="Идентификатор комплектации."),
+                          importer_type: str | None = Query(None, description="Тип импортёра: INDIVIDUAL или LEGAL_ENTITY."),
+                          calculation_date: date | None = Query(None, description="Точная дата расчёта."),
+                          limit: int = Query(24, ge=1, le=100, description="Максимальное число элементов на странице."),
+                          offset: int = Query(0, ge=0, description="Количество записей, которые нужно пропустить."),
+                          include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
                           session: Session = Depends(get_session)):
         if session.get(Spec, spec_id) is None: raise _not_found("Spec")
-        return calculations_impl(session, limit, cursor, spec_id=spec_id,
+        return calculations_impl(session, limit, offset, include_total, spec_id=spec_id,
                                  importer_type=importer_type, calculation_date=calculation_date)
 
     application.include_router(protected_router)

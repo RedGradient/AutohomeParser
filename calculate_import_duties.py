@@ -25,7 +25,6 @@ from autohome.import_duty import (
 )
 from autohome.import_duty.calculator import assumed_production_date, completed_months
 from autohome.import_duty.currency import fetch_cbr_rates
-from autohome.import_duty.detail_labels import add_detail_field_labels
 from autohome.import_duty.rates import RULES_VERSION
 from autohome.import_duty.types import (
     CalculationStatus,
@@ -391,7 +390,7 @@ def make_rows(
             "amount_rub": result.amount_rub,
             "status": result.status.value,
             "rule_code": result.rule_code,
-            "details_json": add_detail_field_labels(result.details),
+            "details_json": dict(result.details),
         },
         {
             "calculation_id": calculation_id,
@@ -399,7 +398,7 @@ def make_rows(
             "amount_rub": customs_fee_result.amount_rub,
             "status": customs_fee_result.status.value,
             "rule_code": customs_fee_result.rule_code,
-            "details_json": add_detail_field_labels(customs_fee_result.details),
+            "details_json": dict(customs_fee_result.details),
         },
         {
             "calculation_id": calculation_id,
@@ -407,7 +406,7 @@ def make_rows(
             "amount_rub": recycling_fee_result.amount_rub,
             "status": recycling_fee_result.status.value,
             "rule_code": recycling_fee_result.rule_code,
-            "details_json": add_detail_field_labels(recycling_fee_result.details),
+            "details_json": dict(recycling_fee_result.details),
         },
     ]
     return calculation, payments

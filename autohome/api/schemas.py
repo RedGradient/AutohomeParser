@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from enum import Enum, StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -12,6 +13,15 @@ Money = str
 DecimalText = str
 ColorScope = Literal["EXTERIOR", "INTERIOR"]
 PriceSource = Literal["GUIDE", "DEALER", "MISSING", "NOT_REQUIRED"]
+
+
+class SeriesState(StrEnum):
+    """Публичная стадия продаж серии."""
+
+    UPCOMING = "UPCOMING"
+    CURRENT = "CURRENT"
+    DISCONTINUED = "DISCONTINUED"
+    UNKNOWN = "UNKNOWN"
 
 
 class ApiSchema(BaseModel):
@@ -47,11 +57,16 @@ class TokenResponse(ApiSchema):
 
 
 class Pagination(ApiSchema):
-    """Метаданные курсорной пагинации."""
+    """Метаданные offset-пагинации."""
 
     limit: int = Field(description="Максимальное число элементов на странице.", ge=1)
-    next_cursor: str | None = Field(
-        description="Непрозрачный курсор следующей страницы; null для последней страницы."
+    offset: int = Field(description="Количество записей, которые нужно пропустить.", ge=0)
+    total: int | None = Field(
+        description=(
+            "Общее число элементов с учётом фильтров; рассчитывается только "
+            "при include_total=true."
+        ),
+        ge=0,
     )
     has_more: bool = Field(description="Есть ли после текущей страницы другие элементы.")
 
@@ -59,7 +74,7 @@ class Pagination(ApiSchema):
 class EntityRef(ApiSchema):
     """Краткая ссылка на связанную сущность."""
 
-    id: int = Field(description="Идентификатор сущности в Autohome.")
+    id: int = Field(description="Идентификатор сущности.")
     name: str = Field(description="Нормализованное отображаемое название.")
 
 
@@ -92,9 +107,11 @@ class VehiclePrice(ApiSchema):
     guide_cny: Money | None = Field(description="Рекомендованная производителем цена в CNY.")
     dealer_cny: Money | None = Field(description="Цена дилера в CNY.")
     discount_cny: Money | None = Field(description="Размер скидки в CNY.")
-    effective_cny: Money | None = Field(description="Цена, выбранная API для фильтрации и расчётов.")
+    effective_cny: Money | None = Field(
+        description="Рекомендованная цена, а при её отсутствии — дилерская."
+    )
     source: Literal["GUIDE", "DEALER", "MISSING"] = Field(
-        description="Источник эффективной цены."
+        description="Источник значения effective_cny."
     )
 
 
@@ -108,25 +125,31 @@ class PhotoPreview(ApiSchema):
 
 
 class BrandResponse(ApiSchema):
-    """Бренд и сводная ценовая информация."""
+    """Бренд автомобиля."""
 
-    id: int = Field(description="Идентификатор бренда Autohome.")
+    id: int = Field(description="Идентификатор бренда.")
     name: str = Field(description="Название бренда.")
     logo_url: str | None = Field(description="Ссылка на логотип бренда.")
-    series_count: int | None = Field(description="Заявленное каталогом число серий бренда.")
-    price: PriceRange = Field(description="Диапазон цен комплектаций бренда.")
+    series_count: int | None = Field(description="Количество серий бренда.")
+
+
+class ManufacturerResponse(ApiSchema):
+    """Производитель автомобилей."""
+
+    id: int = Field(description="Идентификатор производителя.")
+    name: str = Field(description="Название производителя.")
 
 
 class SeriesResponse(ApiSchema):
     """Серия автомобилей."""
 
-    id: int = Field(description="Идентификатор серии Autohome.")
+    id: int = Field(description="Идентификатор серии.")
     name: str = Field(description="Название серии.")
     brand: BrandRef | None = Field(description="Бренд серии.")
     manufacturer: ManufacturerRef | None = Field(description="Производитель серии.")
     is_new_energy: bool | None = Field(description="Относится ли серия к китайской категории NEV.")
-    state: int | None = Field(description="Исходный код стадии продаж серии в Autohome.")
-    spec_count: int | None = Field(description="Заявленное число комплектаций.")
+    state: SeriesState = Field(description="Нормализованная стадия продаж серии.")
+    spec_count: int | None = Field(description="Количество комплектаций серии.")
     price: PriceRange = Field(description="Диапазон цен комплектаций серии.")
     official_images: list[PhotoPreview] = Field(description="Официальные изображения серии.")
 
@@ -134,7 +157,7 @@ class SeriesResponse(ApiSchema):
 class ModificationResponse(ApiSchema):
     """Нормализованная техническая модификация серии."""
 
-    id: int = Field(description="Внутренний устойчивый идентификатор модификации.")
+    id: int = Field(description="Идентификатор модификации.")
     series_id: int = Field(description="Идентификатор серии.")
     model_year: int | None = Field(description="Модельный год.")
     name: str = Field(description="Сформированное название модификации.")
@@ -148,7 +171,6 @@ class ModificationResponse(ApiSchema):
     drive_type: str | None = Field(description="Нормализованный код привода.")
     body_type: str | None = Field(description="Нормализованный код кузова.")
     battery_capacity_kwh: DecimalText | None = Field(description="Ёмкость батареи в кВт·ч.")
-    is_complete: bool = Field(description="Достаточно ли данных для однозначной группировки.")
     spec_count: int = Field(description="Число комплектаций, относящихся к модификации.")
     price: PriceRange = Field(description="Диапазон цен связанных комплектаций.")
 
@@ -174,7 +196,7 @@ class Powertrain(ApiSchema):
 class VehicleAttributes(ApiSchema):
     """Кузовные, массовые и классификационные признаки автомобиля."""
 
-    vehicle_class: str | None = Field(description="Исходный нормализованный класс автомобиля.")
+    vehicle_class: str | None = Field(description="Нормализованный класс автомобиля.")
     vehicle_technical_category: str | None = Field(description="Техническая категория, например M1 или N1.")
     body_type: str | None = Field(description="Нормализованный тип кузова.")
     body_construction: str | None = Field(description="Тип конструкции кузова.")
@@ -193,17 +215,16 @@ class VehicleAttributes(ApiSchema):
 class SpecResponse(ApiSchema):
     """Комплектация автомобиля."""
 
-    id: int = Field(description="Идентификатор комплектации Autohome.")
+    id: int = Field(description="Идентификатор комплектации.")
     name: str = Field(description="Название комплектации.")
     year: int | None = Field(description="Модельный год.")
-    state: int | None = Field(description="Исходный код стадии продаж комплектации.")
+    state: SeriesState = Field(description="Стадия продаж комплектации.")
     brand: BrandRef | None = Field(description="Бренд автомобиля.")
     series: SeriesRef | None = Field(description="Серия автомобиля.")
     modification: ModificationRef | None = Field(description="Нормализованная техническая модификация.")
     price: VehiclePrice = Field(description="Цены комплектации.")
     description: str | None = Field(description="Краткое техническое описание.")
     image_url: str | None = Field(description="Основное изображение комплектации.")
-    config_available: bool | None = Field(description="Доступна ли полная конфигурация.")
     powertrain: Powertrain | None = Field(description="Нормализованная силовая установка.")
 
 
@@ -231,7 +252,7 @@ class ParameterResponse(ApiSchema):
     name: str = Field(description="Название параметра.")
     value: str | None = Field(description="Нормализованное текстовое значение.")
     option_price_cny: Money | None = Field(description="Доплата в CNY.")
-    video_url: str | None = Field(description="Ссылка на поясняющее видео Autohome.")
+    video_url: str | None = Field(description="Ссылка на поясняющее видео.")
     subitems: list[ParameterSubitemResponse] = Field(description="Вложенные варианты и опции.")
 
 
@@ -257,16 +278,21 @@ class ParameterGroupsResponse(ApiSchema):
     items: list[ParameterGroupResponse] = Field(description="Группы характеристик.")
 
 
-class GalleryColorResponse(ApiSchema):
+class PhotoColorResponse(ApiSchema):
+    """Цвет кузова или салона, связанный с фотографией."""
+
+    color_scope: ColorScope = Field(description="Область цвета: кузов или салон.")
+    color_id: int = Field(description="Идентификатор цвета.")
+    name: str = Field(description="Название цвета.")
+    color_values: list[str] = Field(description="HEX-значения составляющих оттенков.")
+    picture_count: int | None = Field(description="Количество фотографий этого цвета.")
+    gallery_url: str = Field(description="Страница галереи соответствующего цвета.")
+
+
+class GalleryColorResponse(PhotoColorResponse):
     """Цвет кузова или салона в галерее серии."""
 
     series_id: int = Field(description="Идентификатор серии.")
-    color_scope: ColorScope = Field(description="Область цвета: кузов или салон.")
-    color_id: int = Field(description="Идентификатор цвета Autohome.")
-    name: str = Field(description="Название цвета.")
-    color_values: list[str] = Field(description="HEX-значения составляющих оттенков.")
-    picture_count: int | None = Field(description="Заявленное число фотографий этого цвета.")
-    gallery_url: str = Field(description="Страница галереи соответствующего цвета.")
 
 
 class GalleryColorsResponse(ApiSchema):
@@ -286,8 +312,7 @@ class PhotoResponse(ApiSchema):
     title: str | None = Field(description="Подпись фотографии.")
     image_url: str = Field(description="Прямая ссылка на полноразмерное изображение.")
     thumbnail_url: str | None = Field(description="Ссылка на миниатюру.")
-    page_url: str = Field(description="Исходная страница фотографии.")
-    colors: list[GalleryColorResponse] = Field(description="Связанные цвета кузова или салона.")
+    colors: list[PhotoColorResponse] = Field(description="Связанные цвета кузова или салона.")
 
 
 class CustomsPaymentResponse(ApiSchema):
@@ -303,7 +328,7 @@ class CustomsPaymentResponse(ApiSchema):
 class CustomsCalculationResponse(ApiSchema):
     """Сохранённый сценарий расчёта таможенных платежей."""
 
-    id: int = Field(description="Устойчивый идентификатор сценария.")
+    id: int = Field(description="Идентификатор таможенного расчёта.")
     spec_id: int = Field(description="Идентификатор комплектации.")
     importer_type: str = Field(description="Тип импортёра: INDIVIDUAL или LEGAL_ENTITY.")
     calculation_date: date = Field(description="Дата, на которую выполнен расчёт.")
@@ -317,7 +342,9 @@ class CustomsCalculationResponse(ApiSchema):
     tnved_code: str | None = Field(description="Определённый код ТН ВЭД.")
     classification_status: str = Field(description="Статус товарной классификации.")
     status: str = Field(description="Итоговый статус расчёта.")
-    warnings: list[dict[str, Any]] = Field(description="Предупреждения и ограничения результата.")
+    warnings: list[dict[str, Any]] = Field(
+        description="Предупреждения о неполных или неточных исходных данных."
+    )
     payments: list[CustomsPaymentResponse] = Field(description="Отдельные компоненты платежей.")
     total_rub: Money | None = Field(description="Итоговая сумма в RUB, если рассчитаны все компоненты.")
     is_total_complete: bool = Field(description="Полностью ли рассчитана итоговая сумма.")
@@ -326,40 +353,47 @@ class CustomsCalculationResponse(ApiSchema):
 class BrandPage(ApiSchema):
     """Страница брендов."""
 
-    items: list[BrandResponse]
-    pagination: Pagination
+    items: list[BrandResponse] = Field(description="Бренды текущей страницы.")
+    pagination: Pagination = Field(description="Метаданные пагинации.")
+
+
+class ManufacturerPage(ApiSchema):
+    """Страница производителей."""
+
+    items: list[ManufacturerResponse] = Field(description="Производители текущей страницы.")
+    pagination: Pagination = Field(description="Метаданные пагинации.")
 
 
 class SeriesPage(ApiSchema):
     """Страница серий."""
 
-    items: list[SeriesResponse]
-    pagination: Pagination
+    items: list[SeriesResponse] = Field(description="Серии текущей страницы.")
+    pagination: Pagination = Field(description="Метаданные пагинации.")
 
 
 class ModificationPage(ApiSchema):
     """Страница технических модификаций."""
 
-    items: list[ModificationResponse]
-    pagination: Pagination
+    items: list[ModificationResponse] = Field(description="Модификации текущей страницы.")
+    pagination: Pagination = Field(description="Метаданные пагинации.")
 
 
 class SpecPage(ApiSchema):
     """Страница комплектаций."""
 
-    items: list[SpecResponse]
-    pagination: Pagination
+    items: list[SpecResponse] = Field(description="Комплектации текущей страницы.")
+    pagination: Pagination = Field(description="Метаданные пагинации.")
 
 
 class PhotoPage(ApiSchema):
     """Страница фотографий."""
 
-    items: list[PhotoResponse]
-    pagination: Pagination
+    items: list[PhotoResponse] = Field(description="Фотографии текущей страницы.")
+    pagination: Pagination = Field(description="Метаданные пагинации.")
 
 
 class CustomsCalculationPage(ApiSchema):
     """Страница таможенных расчётов."""
 
-    items: list[CustomsCalculationResponse]
-    pagination: Pagination
+    items: list[CustomsCalculationResponse] = Field(description="Таможенные расчёты текущей страницы.")
+    pagination: Pagination = Field(description="Метаданные пагинации.")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
@@ -13,6 +14,10 @@ from autohome.api.auth import create_access_token
 from autohome.models import (
     Base,
     Brand,
+    BrandManufacturer,
+    CustomsCalculation,
+    CustomsPaymentResult,
+    Manufacturer,
     Modification,
     Series,
     SeriesGalleryColor,
@@ -38,11 +43,15 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         Base.metadata.create_all(self.app.state.engine)
         with Session(self.app.state.engine) as session:
             session.add(Brand(id=1, name="Test Brand", raw_json={}))
+            session.add(Manufacturer(id=2, name="Test Manufacturer", raw_json={}))
+            session.add(BrandManufacturer(brand_id=1, manufacturer_id=2, position=0))
             session.add(
                 Series(
                     id=10,
                     brand_id=1,
+                    manufacturer_id=2,
                     name="Test Series",
+                    state=20,
                     spec_count=2,
                     raw_json={},
                 )
@@ -77,12 +86,80 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
             )
             session.add_all(
                 [
+                    CustomsCalculation(
+                    id=900,
+                    spec_id=1000,
+                    importer_type="INDIVIDUAL",
+                    calculation_date=date(2026, 10, 1),
+                    rules_version="test-v1",
+                    price_source="GUIDE",
+                    classification_status="CLASSIFIED",
+                    status="CALCULATED",
+                    input_snapshot_json={},
+                    warnings_json=[],
+                    ),
+                    CustomsCalculation(
+                        id=901,
+                        spec_id=1001,
+                        importer_type="INDIVIDUAL",
+                        calculation_date=date(2026, 10, 1),
+                        rules_version="test-v1",
+                        price_source="GUIDE",
+                        classification_status="CLASSIFIED",
+                        status="PARTIAL",
+                        input_snapshot_json={},
+                        warnings_json=[],
+                    ),
+                ]
+            )
+            session.add_all(
+                [
+                    CustomsPaymentResult(
+                        calculation_id=900,
+                        payment_type="CUSTOMS_FEE",
+                        amount_rub=Decimal("4924.00"),
+                        status="CALCULATED",
+                        rule_code="TEST_RULE",
+                        details_json={
+                            "source": "https://example.test/rule",
+                            "field_labels": {"source": "Нормативный источник"},
+                        },
+                    ),
+                    CustomsPaymentResult(
+                        calculation_id=900,
+                        payment_type="IMPORT_DUTY",
+                        amount_rub=Decimal("100000.00"),
+                        status="CALCULATED",
+                        rule_code="TEST_RULE",
+                        details_json={},
+                    ),
+                    CustomsPaymentResult(
+                        calculation_id=900,
+                        payment_type="RECYCLING_FEE",
+                        amount_rub=Decimal("3400.00"),
+                        status="CALCULATED",
+                        rule_code="TEST_RULE",
+                        details_json={},
+                    ),
+                    CustomsPaymentResult(
+                        calculation_id=901,
+                        payment_type="CUSTOMS_FEE",
+                        amount_rub=Decimal("4924.00"),
+                        status="CALCULATED",
+                        rule_code="TEST_RULE",
+                        details_json={},
+                    ),
+                ]
+            )
+            session.add_all(
+                [
                     Spec(
                         id=1000,
                         series_id=10,
                         modification_id=100,
                         name="Premium",
                         year=2026,
+                        state=20,
                         guide_price_yuan=Decimal("200000"),
                         raw_json={},
                     ),
@@ -92,6 +169,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
                         modification_id=101,
                         name="Comfort",
                         year=2025,
+                        state=40,
                         guide_price_yuan=Decimal("120000"),
                         raw_json={},
                     ),
@@ -212,6 +290,79 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(token_response.json()["token_type"], "bearer")
         self.assertEqual(protected_response.status_code, 200)
 
+    async def test_brand_responses_do_not_include_price(self):
+        list_response = await self.client.get("/api/v1/brands")
+        detail_response = await self.client.get("/api/v1/brands/1")
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertNotIn("price", list_response.json()["items"][0])
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertNotIn("price", detail_response.json())
+
+    async def test_manufacturers_support_search_and_brand_filter(self):
+        response = await self.client.get(
+            "/api/v1/manufacturers",
+            params={"q": "manufacturer", "brand_id": 1},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["items"],
+            [{"id": 2, "name": "Test Manufacturer"}],
+        )
+
+        detail_response = await self.client.get("/api/v1/manufacturers/2")
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(
+            detail_response.json(),
+            {"id": 2, "name": "Test Manufacturer"},
+        )
+
+    async def test_series_uses_normalized_state(self):
+        response = await self.client.get("/api/v1/series/10")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["state"], "CURRENT")
+
+        filtered_response = await self.client.get(
+            "/api/v1/series", params={"state": "CURRENT"}
+        )
+        self.assertEqual(filtered_response.status_code, 200)
+        self.assertEqual(
+            [item["id"] for item in filtered_response.json()["items"]],
+            [10],
+        )
+
+    async def test_specs_use_normalized_state(self):
+        detail_response = await self.client.get("/api/v1/specs/1000")
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_response.json()["state"], "CURRENT")
+
+        filtered_response = await self.client.get(
+            "/api/v1/specs", params={"state": "DISCONTINUED"}
+        )
+        self.assertEqual(filtered_response.status_code, 200)
+        self.assertEqual(
+            [item["id"] for item in filtered_response.json()["items"]],
+            [1001],
+        )
+
+    async def test_customs_response_hides_legacy_field_labels(self):
+        response = await self.client.get("/api/v1/customs-calculations/900")
+
+        self.assertEqual(response.status_code, 200)
+        details = response.json()["payments"][0]["details"]
+        self.assertNotIn("field_labels", details)
+        self.assertEqual(details["source"], "https://example.test/rule")
+        self.assertEqual(response.json()["total_rub"], "108324.00")
+        self.assertTrue(response.json()["is_total_complete"])
+
+    async def test_customs_response_has_no_total_for_incomplete_payments(self):
+        response = await self.client.get("/api/v1/customs-calculations/901")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["total_rub"])
+        self.assertFalse(response.json()["is_total_complete"])
+
     async def test_token_endpoint_rejects_invalid_credentials(self):
         response = await self.client.post(
             "/api/v1/auth/token",
@@ -234,6 +385,10 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         schema = response.json()
         self.assertEqual(schema["openapi"], "3.1.0")
+        self.assertIn("- производители;", schema["info"]["description"])
+        self.assertIn("- фотографии.", schema["info"]["description"])
+        self.assertIn("ввозную таможенную пошлину", schema["info"]["description"])
+        self.assertIn("утилизационный сбор", schema["info"]["description"])
         self.assertIn(
             "/api/v1/series/{series_id}/modifications",
             schema["paths"],
@@ -251,21 +406,64 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         )
         spec_schema = schema["components"]["schemas"]["SpecResponse"]
         self.assertIn("description", spec_schema)
+        self.assertNotIn("config_available", spec_schema["properties"])
         self.assertEqual(
             spec_schema["properties"]["state"]["description"],
-            "Исходный код стадии продаж комплектации.",
+            "Стадия продаж комплектации.",
         )
         operation = schema["paths"]["/api/v1/specs"]["get"]
         self.assertEqual(
             operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
             "#/components/schemas/SpecPage",
         )
+        parameters = {item["name"]: item for item in operation["parameters"]}
+        self.assertNotIn("config_available", parameters)
+        self.assertIn("effective", parameters["price_type"]["description"])
+        self.assertIn("параметром price_type", parameters["price_from"]["description"])
+        brand_parameters = {
+            item["name"]: item
+            for item in schema["paths"]["/api/v1/brands"]["get"]["parameters"]
+        }
+        self.assertNotIn("price_from", brand_parameters)
+        self.assertNotIn("price_to", brand_parameters)
+        self.assertEqual(
+            brand_parameters["sort"]["schema"]["enum"],
+            ["name", "series_count"],
+        )
+        for path, methods in schema["paths"].items():
+            operation = methods.get("get")
+            if operation is None:
+                continue
+            for parameter in operation.get("parameters", []):
+                self.assertTrue(
+                    parameter.get("description"),
+                    f"GET {path}: параметр {parameter['name']} не имеет description",
+                )
+        for page_name in (
+            "BrandPage",
+            "ManufacturerPage",
+            "SeriesPage",
+            "ModificationPage",
+            "SpecPage",
+            "PhotoPage",
+            "CustomsCalculationPage",
+        ):
+            properties = schema["components"]["schemas"][page_name]["properties"]
+            self.assertIn("description", properties["items"])
+            self.assertIn("description", properties["pagination"])
         self.assertEqual((await self.client.get("/docs")).status_code, 200)
 
     async def test_modifications_are_filtered_by_series(self):
         response = await self.client.get("/api/v1/series/10/modifications")
         self.assertEqual(response.status_code, 200)
         self.assertEqual([item["id"] for item in response.json()["items"]], [100, 101])
+        self.assertTrue(
+            all("is_complete" not in item for item in response.json()["items"])
+        )
+
+        schema = (await self.client.get("/openapi.json")).json()
+        parameters = schema["paths"]["/api/v1/modifications"]["get"]["parameters"]
+        self.assertNotIn("is_complete", {item["name"] for item in parameters})
 
     async def test_specs_support_price_range_and_pagination(self):
         response = await self.client.get(
@@ -276,6 +474,27 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         body = response.json()
         self.assertEqual([item["id"] for item in body["items"]], [1000])
         self.assertFalse(body["pagination"]["has_more"])
+        self.assertEqual(body["pagination"]["offset"], 0)
+        self.assertIsNone(body["pagination"]["total"])
+
+        next_page = await self.client.get(
+            "/api/v1/specs",
+            params={"limit": 1, "offset": 1, "include_total": True},
+        )
+        self.assertEqual(next_page.status_code, 200)
+        self.assertEqual([item["id"] for item in next_page.json()["items"]], [1000])
+        self.assertEqual(next_page.json()["pagination"]["offset"], 1)
+        self.assertEqual(next_page.json()["pagination"]["total"], 2)
+        self.assertFalse(next_page.json()["pagination"]["has_more"])
+
+        schema = (await self.client.get("/openapi.json")).json()
+        parameters = {
+            item["name"]
+            for item in schema["paths"]["/api/v1/specs"]["get"]["parameters"]
+        }
+        self.assertIn("offset", parameters)
+        self.assertIn("include_total", parameters)
+        self.assertNotIn("cursor", parameters)
 
     async def test_invalid_price_range_returns_domain_error(self):
         response = await self.client.get(
@@ -293,6 +512,8 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             response.json()["items"][0]["colors"][0]["color_scope"], "EXTERIOR"
         )
+        self.assertNotIn("page_url", response.json()["items"][0])
+        self.assertNotIn("series_id", response.json()["items"][0]["colors"][0])
 
         response = await self.client.get(
             "/api/v1/series/10/photos", params={"color_scope": "exterior"}
@@ -318,6 +539,8 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         urls = (
             "/api/v1/brands",
             "/api/v1/brands/1",
+            "/api/v1/manufacturers",
+            "/api/v1/manufacturers/2",
             "/api/v1/series",
             "/api/v1/series?sort=price",
             "/api/v1/series?sort=year&order=desc",
