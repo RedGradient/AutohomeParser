@@ -11,24 +11,26 @@ from calculate_import_duties import classify_database_row, make_rows
 
 CALCULATION_DATE = date(2026, 10, 19)
 RATES = {
-    "CNY": ExchangeRate("CNY", 10, Decimal("110"), CALCULATION_DATE),
-    "EUR": ExchangeRate("EUR", 1, Decimal("100"), CALCULATION_DATE),
+    "CNY": ExchangeRate("CNY", 10, Decimal(110), CALCULATION_DATE),
+    "EUR": ExchangeRate("EUR", 1, Decimal(100), CALCULATION_DATE),
 }
 
 
 def database_row(**overrides):
     values = {
         "id": 101,
-        "guide_price_yuan": Decimal("100000"),
+        "spec_name": "2026 базовая комплектация",
+        "series_name": "Тестовая серия",
+        "guide_price_yuan": Decimal(100000),
         "dealer_price_yuan": None,
         "year": 2026,
         "energy_type": "GASOLINE",
         "engine_displacement_ml": 2000,
         "engine_summary": "2.0T 150 л.с. I4",
-        "engine_power_hp": Decimal("150"),
+        "engine_power_hp": Decimal(150),
         "motor_total_power_kw": None,
         "recycling_fee_powertrain_type": "ICE",
-        "recycling_fee_power_kw": Decimal("110"),
+        "recycling_fee_power_kw": Decimal(110),
         "recycling_fee_power_source": "ENGINE_POWER_KW",
         "vehicle_class": "MIDSIZE_CAR",
         "vehicle_technical_category": "M1",
@@ -52,6 +54,7 @@ def database_row(**overrides):
         "has_rear_windowed_door": None,
         "has_separate_cargo_compartment": None,
         "is_special_purpose": None,
+        "vehicle_purpose_type": None,
         "inference_details_json": None,
         "inference_flags_json": None,
         "inference_rules_version": None,
@@ -148,7 +151,7 @@ class ImportDutyClassificationIntegrationTests(unittest.TestCase):
 
     def test_customs_fee_is_added_as_separate_payment(self):
         calculation, payments = make_rows(
-            database_row(guide_price_yuan=Decimal("150000")),
+            database_row(guide_price_yuan=Decimal(150000)),
             ImporterType.INDIVIDUAL,
             CALCULATION_DATE,
             RATES,
@@ -177,6 +180,102 @@ class ImportDutyClassificationIntegrationTests(unittest.TestCase):
         self.assertEqual(fee["status"], "CALCULATED")
         self.assertEqual(fee["amount_rub"], Decimal("3400.00"))
         self.assertNotIn("field_labels", fee["details_json"])
+
+    def test_n_category_recycling_fee_uses_section_ii(self):
+        calculation, payments = make_rows(
+            database_row(
+                vehicle_technical_category="N1",
+                vehicle_class="LIGHT_TRUCK",
+                body_type="PICKUP",
+                gross_mass_kg=3500,
+                is_special_purpose=False,
+            ),
+            ImporterType.LEGAL_ENTITY,
+            CALCULATION_DATE,
+            RATES,
+        )
+
+        fee = next(p for p in payments if p["payment_type"] == "RECYCLING_FEE")
+        self.assertEqual(fee["status"], "CALCULATED")
+        self.assertEqual(fee["amount_rub"], Decimal("990000.00"))
+        self.assertEqual(fee["details_json"]["regulatory_section"], "SECTION_II_N")
+        self.assertEqual(
+            calculation["input_snapshot_json"]["recycling_fee_vehicle_kind"],
+            "COMPLETE_VEHICLE",
+        )
+
+    def test_m2_recycling_fee_uses_section_iv(self):
+        _, payments = make_rows(
+            database_row(
+                vehicle_technical_category="M2",
+                vehicle_class="LIGHT_COMMERCIAL_VAN",
+                body_type="VAN",
+                seat_count_min=11,
+                seat_count_max=11,
+                gross_mass_kg=4200,
+                engine_displacement_ml=5990,
+                is_special_purpose=False,
+            ),
+            ImporterType.LEGAL_ENTITY,
+            CALCULATION_DATE,
+            RATES,
+        )
+
+        fee = next(p for p in payments if p["payment_type"] == "RECYCLING_FEE")
+        self.assertEqual(fee["status"], "CALCULATED")
+        self.assertEqual(fee["amount_rub"], Decimal("3807000.00"))
+        self.assertEqual(fee["details_json"]["regulatory_section"], "SECTION_IV_M")
+
+    def test_special_vehicle_recycling_fee_uses_section_iii(self):
+        _, payments = make_rows(
+            database_row(
+                vehicle_technical_category="N1",
+                vehicle_class="LIGHT_TRUCK",
+                gross_mass_kg=3500,
+                is_special_purpose=True,
+                vehicle_purpose_type="FIRE_FIGHTING",
+            ),
+            ImporterType.LEGAL_ENTITY,
+            CALCULATION_DATE,
+            RATES,
+        )
+
+        fee = next(p for p in payments if p["payment_type"] == "RECYCLING_FEE")
+        self.assertEqual(fee["status"], "CALCULATED")
+        self.assertEqual(fee["amount_rub"], Decimal("990000.00"))
+        self.assertEqual(
+            fee["details_json"]["regulatory_section"], "SECTION_III_SPECIAL"
+        )
+
+    def test_chassis_name_marker_routes_recycling_fee_to_section_v(self):
+        calculation, payments = make_rows(
+            database_row(
+                spec_name="N2 5吨底盘",
+                vehicle_technical_category="N2",
+                vehicle_class="LIGHT_TRUCK",
+                gross_mass_kg=5000,
+                is_special_purpose=False,
+            ),
+            ImporterType.LEGAL_ENTITY,
+            CALCULATION_DATE,
+            RATES,
+        )
+
+        fee = next(p for p in payments if p["payment_type"] == "RECYCLING_FEE")
+        self.assertEqual(fee["status"], "CALCULATED")
+        self.assertEqual(fee["amount_rub"], Decimal("1036500.00"))
+        self.assertEqual(fee["details_json"]["regulatory_section"], "SECTION_V_CHASSIS")
+        self.assertEqual(
+            fee["details_json"]["recycling_fee_vehicle_kind_source"],
+            "NAME_MARKER",
+        )
+        inferred_fields = {
+            field
+            for warning in calculation["warnings_json"]
+            if warning["code"] == "INFERRED_INPUTS_USED"
+            for field in warning["fields"]
+        }
+        self.assertIn("recycling_fee_vehicle_kind", inferred_fields)
 
     def test_customs_fee_reports_missing_value_without_vehicle_price(self):
         _, payments = make_rows(
