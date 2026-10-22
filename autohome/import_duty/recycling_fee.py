@@ -127,6 +127,20 @@ COMMERCIAL_ICE_COEFFICIENTS_2026 = {
     ),
 }
 
+# Общие коэффициенты 2026 года для электромобилей и последовательных гибридов.
+# После 205,94 кВт ставка одинакова для всех последующих диапазонов мощности.
+GENERAL_ELECTRIC_COEFFICIENTS_2026 = (
+    (Decimal("40.04"), Decimal("70.44")),
+    (Decimal("49.56"), Decimal("82.08")),
+    (Decimal("65.88"), Decimal("95.64")),
+    (Decimal("78"), Decimal("111.36")),
+    (Decimal("92.4"), Decimal("129.72")),
+    (Decimal("109.68"), Decimal("151.2")),
+    (Decimal("129.96"), Decimal("176.16")),
+    (Decimal("153.96"), Decimal("205.2")),
+    *((Decimal("182.4"), Decimal("239.04")),) * 8,
+)
+
 
 def _power_band_index(power_kw: Decimal) -> int:
     for index, upper_bound in enumerate(POWER_BAND_MAX_KW):
@@ -218,22 +232,16 @@ def calculate_recycling_fee(context: RecyclingFeeContext) -> RecyclingFeeResult:
         coefficient = Decimal("0.26") if is_older else Decimal("0.17")
         return _result(context, coefficient, "RECYCLING_FEE_M1_PERSONAL_PREFERENTIAL")
 
-    if context.importer_type == ImporterType.INDIVIDUAL and context.personal_use:
-        return RecyclingFeeResult(
-            status=CalculationStatus.MANUAL_REVIEW,
-            details={
-                **common,
-                "reason": "PERSONAL_NON_PREFERENTIAL_RATE_NOT_IMPLEMENTED",
-            },
-        )
     if electric_branch:
-        return RecyclingFeeResult(
-            status=CalculationStatus.UNSUPPORTED,
-            details={
-                **common,
-                "reason": "COMMERCIAL_ELECTRIC_RATE_NOT_IMPLEMENTED",
-            },
+        coefficient = GENERAL_ELECTRIC_COEFFICIENTS_2026[
+            _power_band_index(context.power_kw)
+        ][age_index]
+        rule_code = (
+            "RECYCLING_FEE_M1_PERSONAL_NON_PREFERENTIAL_2026"
+            if context.importer_type == ImporterType.INDIVIDUAL and context.personal_use
+            else "RECYCLING_FEE_M1_GENERAL_ELECTRIC_2026"
         )
+        return _result(context, coefficient, rule_code)
     if context.powertrain_type not in {"ICE", "HEV", "PHEV"}:
         return RecyclingFeeResult(
             status=CalculationStatus.UNSUPPORTED,
@@ -247,4 +255,9 @@ def calculate_recycling_fee(context: RecyclingFeeContext) -> RecyclingFeeResult:
     coefficient = COMMERCIAL_ICE_COEFFICIENTS_2026[
         _volume_band(context.engine_displacement_cc)
     ][_power_band_index(context.power_kw)][age_index]
-    return _result(context, coefficient, "RECYCLING_FEE_M1_COMMERCIAL_2026")
+    rule_code = (
+        "RECYCLING_FEE_M1_PERSONAL_NON_PREFERENTIAL_2026"
+        if context.importer_type == ImporterType.INDIVIDUAL and context.personal_use
+        else "RECYCLING_FEE_M1_COMMERCIAL_2026"
+    )
+    return _result(context, coefficient, rule_code)
