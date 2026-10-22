@@ -57,12 +57,11 @@ class TokenResponse(ApiSchema):
 
 
 class Pagination(ApiSchema):
-    """Метаданные курсорной пагинации."""
+    """Метаданные offset-пагинации."""
 
     limit: int = Field(description="Максимальное число элементов на странице.", ge=1)
-    next_cursor: str | None = Field(
-        description="Непрозрачный курсор следующей страницы; null для последней страницы."
-    )
+    offset: int = Field(description="Смещение текущей страницы от начала выборки.", ge=0)
+    total: int = Field(description="Общее число элементов с учётом фильтров.", ge=0)
     has_more: bool = Field(description="Есть ли после текущей страницы другие элементы.")
 
 

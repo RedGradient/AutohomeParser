@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import base64
-import json
 import os
 from collections.abc import AsyncGenerator
 from datetime import date, datetime
@@ -146,33 +144,17 @@ def _price_column(price_type: PriceType):
     }[price_type]
 
 
-def _encode_cursor(offset: int) -> str:
-    payload = json.dumps({"offset": offset}, separators=(",", ":")).encode()
-    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
-
-
-def _decode_cursor(cursor: str | None) -> int:
-    if cursor is None:
-        return 0
-    try:
-        padded = cursor + "=" * (-len(cursor) % 4)
-        value = json.loads(base64.urlsafe_b64decode(padded).decode())
-        offset = int(value["offset"])
-        if offset < 0:
-            raise ValueError
-        return offset
-    except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
-        raise HTTPException(400, detail={"code": "INVALID_CURSOR", "message": "Invalid cursor"}) from exc
-
-
-def _page(session: Session, statement, limit: int, cursor: str | None):
-    offset = _decode_cursor(cursor)
-    rows = session.execute(statement.offset(offset).limit(limit + 1)).all()
-    has_more = len(rows) > limit
-    return rows[:limit], {
+def _page(session: Session, statement, limit: int, offset: int):
+    count_statement = select(func.count()).select_from(
+        statement.order_by(None).subquery()
+    )
+    total = int(session.scalar(count_statement) or 0)
+    rows = session.execute(statement.offset(offset).limit(limit)).all()
+    return rows, {
         "limit": limit,
-        "next_cursor": _encode_cursor(offset + limit) if has_more else None,
-        "has_more": has_more,
+        "offset": offset,
+        "total": total,
+        "has_more": offset + len(rows) < total,
     }
 
 
@@ -354,7 +336,7 @@ def create_app(
             {"name": "Customs", "description": "Сохранённые расчёты таможенных платежей."},
         ],
         responses={
-            400: {"model": ErrorResponse, "description": "Некорректный фильтр, диапазон или курсор."},
+            400: {"model": ErrorResponse, "description": "Некорректный фильтр или диапазон."},
             401: {"model": ErrorResponse, "description": "JWT отсутствует, истёк или недействителен."},
             404: {"model": ErrorResponse, "description": "Запрошенная сущность не найдена."},
         },
@@ -432,7 +414,7 @@ def create_app(
         response_model=BrandPage,
         tags=["Brands"],
         summary="Получить бренды",
-        description="Возвращает бренды с фильтрацией и курсорной пагинацией.",
+        description="Возвращает бренды с фильтрацией и offset-пагинацией.",
     )
     async def brands(
         q: str | None = None,
@@ -442,7 +424,8 @@ def create_app(
         price_to: Decimal | None = Query(None, description=EFFECTIVE_PRICE_TO_DESCRIPTION),
         sort: Literal["name", "series_count", "min_price"] = "name",
         order: SortOrder = "asc",
-        limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
+        limit: int = Query(24, ge=1, le=100),
+        offset: int = Query(0, ge=0),
         session: Session = Depends(get_session),
     ):
         _check_range(price_from, price_to, "price")
@@ -475,7 +458,7 @@ def create_app(
             statement = statement.where(aggregate.c.brand_id.is_not(None))
         sort_column = {"name": Brand.name, "series_count": Brand.series_count, "min_price": aggregate.c.min_price}[sort]
         statement = statement.order_by(sort_column.desc() if order == "desc" else sort_column.asc(), Brand.id.asc())
-        rows, pagination = _page(session, statement, limit, cursor)
+        rows, pagination = _page(session, statement, limit, offset)
         items = [
             {
                 "id": brand.id, "name": brand.name, "logo_url": brand.logo_url,
@@ -511,7 +494,7 @@ def create_app(
         q: str | None = None,
         brand_id: int | None = None,
         limit: int = Query(24, ge=1, le=100),
-        cursor: str | None = None,
+        offset: int = Query(0, ge=0),
         session: Session = Depends(get_session),
     ):
         statement = select(Manufacturer)
@@ -525,7 +508,7 @@ def create_app(
                 func.lower(Manufacturer.name).like(f"%{q.lower()}%")
             )
         statement = statement.order_by(Manufacturer.name, Manufacturer.id)
-        rows, pagination = _page(session, statement, limit, cursor)
+        rows, pagination = _page(session, statement, limit, offset)
         return {
             "items": [{"id": item.id, "name": item.name} for (item,) in rows],
             "pagination": pagination,
@@ -607,7 +590,8 @@ def create_app(
         price_to: Decimal | None = Query(None, description=PRICE_TO_DESCRIPTION),
         price_type: PriceType = Query("effective", description=PRICE_TYPE_DESCRIPTION),
         sort: Literal["name", "price", "year"] = "name", order: SortOrder = "asc",
-        limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
+        limit: int = Query(24, ge=1, le=100),
+        offset: int = Query(0, ge=0),
         session: Session = Depends(get_session),
     ):
         for low, high, name in ((year_from, year_to, "year"), (engine_displacement_from, engine_displacement_to, "engine_displacement"), (power_hp_from, power_hp_to, "power_hp"), (price_from, price_to, "price")):
@@ -650,7 +634,7 @@ def create_app(
             "year": latest_year,
         }[sort]
         statement = statement.order_by(sort_column.desc() if order == "desc" else sort_column.asc(), Series.id.asc())
-        rows, pagination = _page(session, statement, limit, cursor)
+        rows, pagination = _page(session, statement, limit, offset)
         images_by_series = official_images(session, [row[0].id for row in rows])
         items = [{
             "id": item.id, "name": item.name, "brand": _brand_ref(brand),
@@ -683,7 +667,7 @@ def create_app(
         energy_type=None, body_type=None, drive_type=None, transmission_type=None,
         engine_displacement_from=None, engine_displacement_to=None, power_hp_from=None,
         power_hp_to=None, price_from=None, price_to=None, price_type="effective",
-        sort="year", order="desc", limit=24, cursor=None,
+        sort="year", order="desc", limit=24, offset=0,
     ):
         for low, high, name in ((year_from, year_to, "year"), (engine_displacement_from, engine_displacement_to, "engine_displacement"), (power_hp_from, power_hp_to, "power_hp"), (price_from, price_to, "price")):
             _check_range(low, high, name)
@@ -700,7 +684,7 @@ def create_app(
             if high is not None: filters.append(column <= high)
         sort_column = {"year": Modification.model_year, "power": Modification.engine_power_hp, "engine_displacement": Modification.engine_displacement_ml, "price": prices.c.min_price, "name": Modification.name}[sort]
         statement = statement.where(*filters).order_by(sort_column.desc() if order == "desc" else sort_column.asc(), Modification.id.asc())
-        rows, pagination = _page(session, statement, limit, cursor)
+        rows, pagination = _page(session, statement, limit, offset)
         items = [{
             "id": item.id, "series_id": item.series_id, "model_year": item.model_year,
             "name": item.name, "energy_type": item.energy_type, "engine_summary": item.engine_summary,
@@ -730,14 +714,15 @@ def create_app(
         price_to: Decimal | None = Query(None, description=PRICE_TO_DESCRIPTION),
         price_type: PriceType = Query("effective", description=PRICE_TYPE_DESCRIPTION),
         sort: Literal["year", "power", "engine_displacement", "price", "name"] = "year",
-        order: SortOrder = "desc", limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
+        order: SortOrder = "desc", limit: int = Query(24, ge=1, le=100),
+        offset: int = Query(0, ge=0),
         session: Session = Depends(get_session),
     ):
         argument_names = {
             "series_id", "brand_id", "year_from", "year_to", "energy_type", "body_type",
             "drive_type", "transmission_type", "engine_displacement_from",
             "engine_displacement_to", "power_hp_from", "power_hp_to", "price_from",
-            "price_to", "price_type", "sort", "order", "limit", "cursor",
+            "price_to", "price_type", "sort", "order", "limit", "offset",
         }
         return modification_list_impl(
             session, **{key: value for key, value in locals().items() if key in argument_names}
@@ -759,7 +744,7 @@ def create_app(
         price_to: Decimal | None = Query(None, description=PRICE_TO_DESCRIPTION),
         price_type: PriceType = Query("effective", description=PRICE_TYPE_DESCRIPTION),
         limit: int = Query(24, ge=1, le=100),
-        cursor: str | None = None, session: Session = Depends(get_session),
+        offset: int = Query(0, ge=0), session: Session = Depends(get_session),
     ):
         if session.get(Series, series_id) is None: raise _not_found("Series")
         return modification_list_impl(session, series_id=series_id, year_from=year_from, year_to=year_to,
@@ -767,7 +752,7 @@ def create_app(
             transmission_type=transmission_type, engine_displacement_from=engine_displacement_from,
             engine_displacement_to=engine_displacement_to, power_hp_from=power_hp_from,
             power_hp_to=power_hp_to, price_from=price_from, price_to=price_to,
-            price_type=price_type, limit=limit, cursor=cursor)
+            price_type=price_type, limit=limit, offset=offset)
 
     @protected_router.get(
         "/api/v1/modifications/{modification_id}",
@@ -789,13 +774,13 @@ def create_app(
                 "spec_count": item.spec_count,
                 "price": {"min_cny": _money(minimum), "max_cny": _money(maximum)}}
 
-    def specs_impl(session: Session, limit: int, cursor: str | None, sort="price", order="asc", **filters):
+    def specs_impl(session: Session, limit: int, offset: int, sort="price", order="asc", **filters):
         ranges = ((filters.get("year_from"), filters.get("year_to"), "year"), (filters.get("engine_displacement_from"), filters.get("engine_displacement_to"), "engine_displacement"), (filters.get("power_hp_from"), filters.get("power_hp_to"), "power_hp"), (filters.get("seats_from"), filters.get("seats_to"), "seats"), (filters.get("price_from"), filters.get("price_to"), "price"))
         for low, high, name in ranges: _check_range(low, high, name)
         statement = _apply_spec_filters(_spec_select(), **filters)
         sort_column = {"price": _price_column(filters.get("price_type", "effective")), "year": Spec.year, "power": SpecPowertrain.engine_power_hp, "engine_displacement": SpecPowertrain.engine_displacement_ml, "name": Spec.name}[sort]
         statement = statement.order_by(sort_column.desc() if order == "desc" else sort_column.asc(), Spec.id.asc())
-        rows, pagination = _page(session, statement, limit, cursor)
+        rows, pagination = _page(session, statement, limit, offset)
         return {"items": [_spec_payload(row) for row in rows], "pagination": pagination}
 
     @protected_router.get(
@@ -819,7 +804,8 @@ def create_app(
         price_to: Decimal | None = Query(None, description=PRICE_TO_DESCRIPTION),
         price_type: PriceType = Query("effective", description=PRICE_TYPE_DESCRIPTION),
         sort: Literal["price", "year", "power", "engine_displacement", "name"] = "price",
-        order: SortOrder = "asc", limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
+        order: SortOrder = "asc", limit: int = Query(24, ge=1, le=100),
+        offset: int = Query(0, ge=0),
         session: Session = Depends(get_session),
     ):
         filter_names = {
@@ -830,7 +816,7 @@ def create_app(
             "seats_to", "four_wheel_drive", "price_from", "price_to", "price_type",
         }
         values = {key: value for key, value in locals().items() if key in filter_names}
-        return specs_impl(session, limit, cursor, sort=sort, order=order, **values)
+        return specs_impl(session, limit, offset, sort=sort, order=order, **values)
 
     @protected_router.get(
         "/api/v1/modifications/{modification_id}/specs",
@@ -842,10 +828,11 @@ def create_app(
         price_from: Decimal | None = Query(None, description=PRICE_FROM_DESCRIPTION),
         price_to: Decimal | None = Query(None, description=PRICE_TO_DESCRIPTION),
         price_type: PriceType = Query("effective", description=PRICE_TYPE_DESCRIPTION),
-        limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
+        limit: int = Query(24, ge=1, le=100),
+        offset: int = Query(0, ge=0),
         session: Session = Depends(get_session)):
         if session.get(Modification, modification_id) is None: raise _not_found("Modification")
-        return specs_impl(session, limit, cursor, modification_id=modification_id,
+        return specs_impl(session, limit, offset, modification_id=modification_id,
                           price_from=price_from, price_to=price_to, price_type=price_type)
 
     @protected_router.get(
@@ -900,7 +887,7 @@ def create_app(
     )
     async def photos(series_id: int, spec_id: int | None = None, category_id: int | None = None,
                color_scope: str | None = None, color_id: int | None = None,
-               limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
+               limit: int = Query(24, ge=1, le=100), offset: int = Query(0, ge=0),
                session: Session = Depends(get_session)):
         if session.get(Series, series_id) is None: raise _not_found("Series")
         statement = select(SeriesPhoto).where(SeriesPhoto.series_id == series_id)
@@ -915,7 +902,7 @@ def create_app(
             if color_id is not None: color_match = color_match.where(SeriesPhotoColor.color_id == color_id)
             statement = statement.where(exists(color_match))
         statement = statement.order_by(SeriesPhoto.id)
-        rows, pagination = _page(session, statement, limit, cursor)
+        rows, pagination = _page(session, statement, limit, offset)
         photos_list = [row[0] for row in rows]
         ids = [photo.id for photo in photos_list]
         color_rows = session.execute(select(SeriesPhotoColor, SeriesGalleryColor)
@@ -973,7 +960,7 @@ def create_app(
                 "details": _public_payment_details(item.details_json)} for item in payments],
             "total_rub": _money(sum(amounts, Decimal(0))) if complete else None, "is_total_complete": complete}
 
-    def calculations_impl(session: Session, limit: int, cursor: str | None, spec_id=None, brand_id=None,
+    def calculations_impl(session: Session, limit: int, offset: int, spec_id=None, brand_id=None,
                           series_id=None, importer_type=None, status=None, calculation_date=None,
                           calculation_date_from=None, calculation_date_to=None):
         statement = select(CustomsCalculation).join(Spec, Spec.id == CustomsCalculation.spec_id).join(Series, Series.id == Spec.series_id)
@@ -985,7 +972,7 @@ def create_app(
         if calculation_date_from is not None: filters.append(CustomsCalculation.calculation_date >= calculation_date_from)
         if calculation_date_to is not None: filters.append(CustomsCalculation.calculation_date <= calculation_date_to)
         statement = statement.where(*filters).order_by(CustomsCalculation.calculation_date.desc(), CustomsCalculation.id.desc())
-        rows, pagination = _page(session, statement, limit, cursor)
+        rows, pagination = _page(session, statement, limit, offset)
         return {"items": [calculation_payload(session, row[0]) for row in rows], "pagination": pagination}
 
     @protected_router.get(
@@ -997,10 +984,10 @@ def create_app(
     async def calculations(spec_id: int | None = None, brand_id: int | None = None, series_id: int | None = None,
                      importer_type: str | None = None, status: str | None = None,
                      calculation_date_from: date | None = None, calculation_date_to: date | None = None,
-                     limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
+                     limit: int = Query(24, ge=1, le=100), offset: int = Query(0, ge=0),
                      session: Session = Depends(get_session)):
         _check_range(calculation_date_from, calculation_date_to, "calculation_date")
-        return calculations_impl(session, limit, cursor, spec_id=spec_id, brand_id=brand_id,
+        return calculations_impl(session, limit, offset, spec_id=spec_id, brand_id=brand_id,
             series_id=series_id, importer_type=importer_type, status=status,
             calculation_date_from=calculation_date_from, calculation_date_to=calculation_date_to)
 
@@ -1023,10 +1010,10 @@ def create_app(
     )
     async def spec_calculations(spec_id: int, importer_type: str | None = None,
                           calculation_date: date | None = None,
-                          limit: int = Query(24, ge=1, le=100), cursor: str | None = None,
+                          limit: int = Query(24, ge=1, le=100), offset: int = Query(0, ge=0),
                           session: Session = Depends(get_session)):
         if session.get(Spec, spec_id) is None: raise _not_found("Spec")
-        return calculations_impl(session, limit, cursor, spec_id=spec_id,
+        return calculations_impl(session, limit, offset, spec_id=spec_id,
                                  importer_type=importer_type, calculation_date=calculation_date)
 
     application.include_router(protected_router)
