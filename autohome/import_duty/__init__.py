@@ -22,6 +22,10 @@ from .recycling_fee_section_ii import (
     SectionIIVehicleSubtype,
     calculate_section_ii_recycling_fee,
 )
+from .recycling_fee_section_iii import (
+    SectionIIIRecyclingFeeContext,
+    calculate_section_iii_recycling_fee,
+)
 from .recycling_fee_section_iv import (
     SectionIVRecyclingFeeContext,
     calculate_section_iv_recycling_fee,
@@ -40,6 +44,7 @@ __all__ = (
     "RecyclingFeeRegulatorySection",
     "RecyclingFeeRoutingStatus",
     "RecyclingFeeVehicleKind",
+    "SectionIIIRecyclingFeeContext",
     "SectionIIRecyclingFeeContext",
     "SectionIIVehicleSubtype",
     "SectionIVRecyclingFeeContext",
@@ -49,6 +54,7 @@ __all__ = (
     "calculate_import_duty",
     "calculate_recycling_fee",
     "calculate_section_ii_recycling_fee",
+    "calculate_section_iii_recycling_fee",
     "calculate_section_iv_recycling_fee",
     "classify_vehicle",
     "route_recycling_fee_regulation",
