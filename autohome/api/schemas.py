@@ -61,7 +61,13 @@ class Pagination(ApiSchema):
 
     limit: int = Field(description="Максимальное число элементов на странице.", ge=1)
     offset: int = Field(description="Смещение текущей страницы от начала выборки.", ge=0)
-    total: int = Field(description="Общее число элементов с учётом фильтров.", ge=0)
+    total: int | None = Field(
+        description=(
+            "Общее число элементов с учётом фильтров; рассчитывается только "
+            "при include_total=true."
+        ),
+        ge=0,
+    )
     has_more: bool = Field(description="Есть ли после текущей страницы другие элементы.")
 
 

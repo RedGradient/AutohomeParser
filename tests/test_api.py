@@ -430,10 +430,11 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item["id"] for item in body["items"]], [1000])
         self.assertFalse(body["pagination"]["has_more"])
         self.assertEqual(body["pagination"]["offset"], 0)
-        self.assertEqual(body["pagination"]["total"], 1)
+        self.assertIsNone(body["pagination"]["total"])
 
         next_page = await self.client.get(
-            "/api/v1/specs", params={"limit": 1, "offset": 1}
+            "/api/v1/specs",
+            params={"limit": 1, "offset": 1, "include_total": True},
         )
         self.assertEqual(next_page.status_code, 200)
         self.assertEqual([item["id"] for item in next_page.json()["items"]], [1000])
@@ -447,6 +448,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
             for item in schema["paths"]["/api/v1/specs"]["get"]["parameters"]
         }
         self.assertIn("offset", parameters)
+        self.assertIn("include_total", parameters)
         self.assertNotIn("cursor", parameters)
 
     async def test_invalid_price_range_returns_domain_error(self):
