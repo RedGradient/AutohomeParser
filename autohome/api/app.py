@@ -102,6 +102,11 @@ PRICE_TYPE_DESCRIPTION = (
     "Записи без выбранной цены не проходят ценовые фильтры и при сортировке "
     "имеют значение NULL."
 )
+EXPECTED_CUSTOMS_PAYMENT_TYPES = {
+    "IMPORT_DUTY",
+    "CUSTOMS_FEE",
+    "RECYCLING_FEE",
+}
 
 
 def _money(value: Decimal | None) -> str | None:
@@ -948,8 +953,14 @@ def create_app(
 
     def calculation_payload(session: Session, calculation: CustomsCalculation):
         payments = list(session.execute(select(CustomsPaymentResult).where(CustomsPaymentResult.calculation_id == calculation.id).order_by(CustomsPaymentResult.payment_type)).scalars())
-        amounts = [item.amount_rub for item in payments if item.status == "CALCULATED" and item.amount_rub is not None]
-        complete = bool(payments) and all(item.status == "CALCULATED" for item in payments)
+        complete = (
+            {item.payment_type for item in payments} == EXPECTED_CUSTOMS_PAYMENT_TYPES
+            and all(
+                item.status == "CALCULATED" and item.amount_rub is not None
+                for item in payments
+            )
+        )
+        amounts = [item.amount_rub for item in payments] if complete else []
         return {"id": calculation.id, "spec_id": calculation.spec_id, "importer_type": calculation.importer_type,
             "calculation_date": calculation.calculation_date, "rules_version": calculation.rules_version,
             "price_source": calculation.price_source, "vehicle_price_cny": _money(calculation.vehicle_price_cny),

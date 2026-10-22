@@ -84,8 +84,9 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
                     ),
                 ]
             )
-            session.add(
-                CustomsCalculation(
+            session.add_all(
+                [
+                    CustomsCalculation(
                     id=900,
                     spec_id=1000,
                     importer_type="INDIVIDUAL",
@@ -96,20 +97,59 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
                     status="CALCULATED",
                     input_snapshot_json={},
                     warnings_json=[],
-                )
+                    ),
+                    CustomsCalculation(
+                        id=901,
+                        spec_id=1001,
+                        importer_type="INDIVIDUAL",
+                        calculation_date=date(2026, 10, 1),
+                        rules_version="test-v1",
+                        price_source="GUIDE",
+                        classification_status="CLASSIFIED",
+                        status="PARTIAL",
+                        input_snapshot_json={},
+                        warnings_json=[],
+                    ),
+                ]
             )
-            session.add(
-                CustomsPaymentResult(
-                    calculation_id=900,
-                    payment_type="CUSTOMS_FEE",
-                    amount_rub=Decimal("4924.00"),
-                    status="CALCULATED",
-                    rule_code="TEST_RULE",
-                    details_json={
-                        "source": "https://example.test/rule",
-                        "field_labels": {"source": "Нормативный источник"},
-                    },
-                )
+            session.add_all(
+                [
+                    CustomsPaymentResult(
+                        calculation_id=900,
+                        payment_type="CUSTOMS_FEE",
+                        amount_rub=Decimal("4924.00"),
+                        status="CALCULATED",
+                        rule_code="TEST_RULE",
+                        details_json={
+                            "source": "https://example.test/rule",
+                            "field_labels": {"source": "Нормативный источник"},
+                        },
+                    ),
+                    CustomsPaymentResult(
+                        calculation_id=900,
+                        payment_type="IMPORT_DUTY",
+                        amount_rub=Decimal("100000.00"),
+                        status="CALCULATED",
+                        rule_code="TEST_RULE",
+                        details_json={},
+                    ),
+                    CustomsPaymentResult(
+                        calculation_id=900,
+                        payment_type="RECYCLING_FEE",
+                        amount_rub=Decimal("3400.00"),
+                        status="CALCULATED",
+                        rule_code="TEST_RULE",
+                        details_json={},
+                    ),
+                    CustomsPaymentResult(
+                        calculation_id=901,
+                        payment_type="CUSTOMS_FEE",
+                        amount_rub=Decimal("4924.00"),
+                        status="CALCULATED",
+                        rule_code="TEST_RULE",
+                        details_json={},
+                    ),
+                ]
             )
             session.add_all(
                 [
@@ -297,6 +337,15 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         details = response.json()["payments"][0]["details"]
         self.assertNotIn("field_labels", details)
         self.assertEqual(details["source"], "https://example.test/rule")
+        self.assertEqual(response.json()["total_rub"], "108324.00")
+        self.assertTrue(response.json()["is_total_complete"])
+
+    async def test_customs_response_has_no_total_for_incomplete_payments(self):
+        response = await self.client.get("/api/v1/customs-calculations/901")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["total_rub"])
+        self.assertFalse(response.json()["is_total_complete"])
 
     async def test_token_endpoint_rejects_invalid_credentials(self):
         response = await self.client.post(
