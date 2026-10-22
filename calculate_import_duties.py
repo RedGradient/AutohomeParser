@@ -250,6 +250,7 @@ def make_rows(
             power_kw=getattr(row, "recycling_fee_power_kw", None),
             power_source=getattr(row, "recycling_fee_power_source", None),
             engine_displacement_cc=row.engine_displacement_ml,
+            engine_summary=getattr(row, "engine_summary", None),
         )
     )
     calculation_id = stable_calculation_id(
@@ -283,6 +284,20 @@ def make_rows(
                 "code": INFERRED_INPUTS_USED,
                 "message": "В расчёте использованы косвенно определённые признаки.",
                 "fields": applied_fields,
+            }
+        )
+    if (
+        recycling_fee_result.details.get("engine_volume_source")
+        == "ENGINE_SUMMARY_NOMINAL_VOLUME"
+    ):
+        calculation_warnings.append(
+            {
+                "code": INFERRED_INPUTS_USED,
+                "message": (
+                    "Диапазон объёма двигателя для утильсбора определён "
+                    "по обозначению двигателя."
+                ),
+                "fields": ["recycling_fee_engine_volume_band"],
             }
         )
     calculation = {
@@ -323,6 +338,7 @@ def make_rows(
             "energy_type": row.energy_type,
             "body_type": row.body_type,
             "engine_displacement_cc": row.engine_displacement_ml,
+            "engine_summary": getattr(row, "engine_summary", None),
             "engine_power_hp": str(row.engine_power_hp)
             if row.engine_power_hp is not None
             else None,
@@ -493,6 +509,7 @@ def main() -> int:
             Spec.year,
             SpecPowertrain.energy_type,
             SpecPowertrain.engine_displacement_ml,
+            SpecPowertrain.engine_summary,
             SpecPowertrain.engine_power_hp,
             SpecPowertrain.motor_total_power_kw,
             SpecPowertrain.recycling_fee_powertrain_type,

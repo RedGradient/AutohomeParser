@@ -21,6 +21,7 @@ class RecyclingFeePowerSource(StrEnum):
     """Источник мощности, допустимый нормативными правилами."""
 
     ENGINE_POWER_KW = "ENGINE_POWER_KW"
+    ENGINE_POWER_HP_CONVERTED = "ENGINE_POWER_HP_CONVERTED"
     VEHICLE_MAXIMUM_POWER_KW = "VEHICLE_MAXIMUM_POWER_KW"
     MAX_30_MIN_ELECTRIC_POWER_KW = "MAX_30_MIN_ELECTRIC_POWER_KW"
     ENGINE_PLUS_MAX_30_MIN_ELECTRIC_POWER = "ENGINE_PLUS_MAX_30_MIN_ELECTRIC_POWER"
@@ -87,6 +88,7 @@ def select_recycling_fee_power(
     energy_type: str | None,
     *,
     engine_power_kw: Decimal | None = None,
+    engine_power_hp: Decimal | None = None,
     maximum_power_kw: Decimal | None = None,
     electric_30_min_power_kw: Decimal | None = None,
     phev_is_series: bool | None = None,
@@ -105,6 +107,12 @@ def select_recycling_fee_power(
                 powertrain_type,
                 engine_power_kw,
                 RecyclingFeePowerSource.ENGINE_POWER_KW,
+            )
+        if engine_power_hp is not None:
+            return RecyclingFeePowerSelection(
+                powertrain_type,
+                (engine_power_hp * Decimal("0.73549875")).quantize(Decimal("0.001")),
+                RecyclingFeePowerSource.ENGINE_POWER_HP_CONVERTED,
             )
         if maximum_power_kw is not None:
             return RecyclingFeePowerSelection(
