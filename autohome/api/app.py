@@ -805,7 +805,7 @@ def create_app(
             .where(SeriesPhotoColor.photo_id.in_(ids))).all() if ids else []
         by_photo: dict[int, list] = {}
         for link, color in color_rows:
-            by_photo.setdefault(link.photo_id, []).append({"series_id": color.series_id, "color_scope": color.color_scope.upper(),
+            by_photo.setdefault(link.photo_id, []).append({"color_scope": color.color_scope.upper(),
                 "color_id": color.color_id, "name": color.name, "color_values": color.color_values,
                 "picture_count": color.picture_count, "gallery_url": color.gallery_url})
         items = [{"id": photo.id, "series_id": photo.series_id, "spec_id": photo.spec_id,

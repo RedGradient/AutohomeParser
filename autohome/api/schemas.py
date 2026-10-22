@@ -256,16 +256,21 @@ class ParameterGroupsResponse(ApiSchema):
     items: list[ParameterGroupResponse] = Field(description="Группы характеристик.")
 
 
-class GalleryColorResponse(ApiSchema):
-    """Цвет кузова или салона в галерее серии."""
+class PhotoColorResponse(ApiSchema):
+    """Цвет кузова или салона, связанный с фотографией."""
 
-    series_id: int = Field(description="Идентификатор серии.")
     color_scope: ColorScope = Field(description="Область цвета: кузов или салон.")
     color_id: int = Field(description="Идентификатор цвета Autohome.")
     name: str = Field(description="Название цвета.")
     color_values: list[str] = Field(description="HEX-значения составляющих оттенков.")
     picture_count: int | None = Field(description="Заявленное число фотографий этого цвета.")
     gallery_url: str = Field(description="Страница галереи соответствующего цвета.")
+
+
+class GalleryColorResponse(PhotoColorResponse):
+    """Цвет кузова или салона в галерее серии."""
+
+    series_id: int = Field(description="Идентификатор серии.")
 
 
 class GalleryColorsResponse(ApiSchema):
@@ -286,7 +291,7 @@ class PhotoResponse(ApiSchema):
     image_url: str = Field(description="Прямая ссылка на полноразмерное изображение.")
     thumbnail_url: str | None = Field(description="Ссылка на миниатюру.")
     page_url: str = Field(description="Исходная страница фотографии.")
-    colors: list[GalleryColorResponse] = Field(description="Связанные цвета кузова или салона.")
+    colors: list[PhotoColorResponse] = Field(description="Связанные цвета кузова или салона.")
 
 
 class CustomsPaymentResponse(ApiSchema):

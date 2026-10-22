@@ -302,6 +302,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             response.json()["items"][0]["colors"][0]["color_scope"], "EXTERIOR"
         )
+        self.assertNotIn("series_id", response.json()["items"][0]["colors"][0])
 
         response = await self.client.get(
             "/api/v1/series/10/photos", params={"color_scope": "exterior"}
