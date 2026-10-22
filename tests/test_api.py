@@ -159,6 +159,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
                         modification_id=100,
                         name="Premium",
                         year=2026,
+                        state=20,
                         guide_price_yuan=Decimal("200000"),
                         raw_json={},
                     ),
@@ -168,6 +169,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
                         modification_id=101,
                         name="Comfort",
                         year=2025,
+                        state=40,
                         guide_price_yuan=Decimal("120000"),
                         raw_json={},
                     ),
@@ -330,6 +332,20 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
             [10],
         )
 
+    async def test_specs_use_normalized_state(self):
+        detail_response = await self.client.get("/api/v1/specs/1000")
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_response.json()["state"], "CURRENT")
+
+        filtered_response = await self.client.get(
+            "/api/v1/specs", params={"state": "DISCONTINUED"}
+        )
+        self.assertEqual(filtered_response.status_code, 200)
+        self.assertEqual(
+            [item["id"] for item in filtered_response.json()["items"]],
+            [1001],
+        )
+
     async def test_customs_response_hides_legacy_field_labels(self):
         response = await self.client.get("/api/v1/customs-calculations/900")
 
@@ -388,7 +404,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("description", spec_schema)
         self.assertEqual(
             spec_schema["properties"]["state"]["description"],
-            "Код состояния комплектации.",
+            "Стадия продаж комплектации.",
         )
         operation = schema["paths"]["/api/v1/specs"]["get"]
         self.assertEqual(

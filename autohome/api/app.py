@@ -75,6 +75,14 @@ SERIES_STATE_CODES = {
 KNOWN_SERIES_STATE_CODES = tuple(
     code for codes in SERIES_STATE_CODES.values() for code in codes
 )
+SPEC_STATE_CODES = {
+    SeriesState.UPCOMING: (0, 10),
+    SeriesState.CURRENT: (20, 30),
+    SeriesState.DISCONTINUED: (40,),
+}
+KNOWN_SPEC_STATE_CODES = tuple(
+    code for codes in SPEC_STATE_CODES.values() for code in codes
+)
 PRICE_FROM_DESCRIPTION = (
     "Минимальная цена в CNY. Тип цены задаётся параметром price_type. "
     "Записи без цены выбранного типа не возвращаются."
@@ -109,6 +117,14 @@ def _decimal(value: Decimal | None) -> str | None:
 def _series_state(value: int | None) -> SeriesState:
     """Преобразовать исходный код Autohome в публичную стадию продаж."""
     for state, codes in SERIES_STATE_CODES.items():
+        if value in codes:
+            return state
+    return SeriesState.UNKNOWN
+
+
+def _spec_state(value: int | None) -> SeriesState:
+    """Преобразовать исходный код комплектации в публичную стадию продаж."""
+    for state, codes in SPEC_STATE_CODES.items():
         if value in codes:
             return state
     return SeriesState.UNKNOWN
@@ -235,7 +251,7 @@ def _spec_payload(row, *, detail: bool = False):
         "id": spec.id,
         "name": spec.name,
         "year": spec.year,
-        "state": spec.state,
+        "state": _spec_state(spec.state),
         "brand": _brand_ref(brand),
         "series": _series_ref(series),
         "modification": (
@@ -279,13 +295,19 @@ def _apply_spec_filters(
     mappings = (
         (Series.brand_id, brand_id), (Spec.series_id, series_id),
         (Spec.modification_id, modification_id), (Series.manufacturer_id, manufacturer_id),
-        (Spec.state, state), (Spec.config_available, config_available),
+        (Spec.config_available, config_available),
         (SpecPowertrain.energy_type, energy_type), (SpecPowertrain.body_type, body_type),
         (SpecPowertrain.drive_type, drive_type),
         (SpecPowertrain.transmission_type, transmission_type),
         (SpecVehicleAttributes.is_four_wheel_drive, four_wheel_drive),
     )
     filters.extend(column == value for column, value in mappings if value is not None)
+    if state == SeriesState.UNKNOWN:
+        filters.append(
+            or_(Spec.state.is_(None), Spec.state.not_in(KNOWN_SPEC_STATE_CODES))
+        )
+    elif state is not None:
+        filters.append(Spec.state.in_(SPEC_STATE_CODES[state]))
     ranges = (
         (Spec.year, year_from, year_to),
         (SpecPowertrain.engine_displacement_ml, engine_displacement_from, engine_displacement_to),
@@ -822,7 +844,7 @@ def create_app(
         manufacturer_id: int | None = Query(None, description="Идентификатор производителя."),
         year_from: int | None = Query(None, description="Минимальный модельный год."),
         year_to: int | None = Query(None, description="Максимальный модельный год."),
-        state: int | None = Query(None, description="Код состояния комплектации."),
+        state: SeriesState | None = Query(None, description="Стадия продаж комплектации."),
         config_available: bool | None = Query(None, description="Фильтр по наличию полной конфигурации."),
         energy_type: str | None = Query(None, description="Нормализованный код типа энергии."),
         body_type: str | None = Query(None, description="Нормализованный код типа кузова."),

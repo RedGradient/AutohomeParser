@@ -218,7 +218,7 @@ class SpecResponse(ApiSchema):
     id: int = Field(description="Идентификатор комплектации.")
     name: str = Field(description="Название комплектации.")
     year: int | None = Field(description="Модельный год.")
-    state: int | None = Field(description="Код состояния комплектации.")
+    state: SeriesState = Field(description="Стадия продаж комплектации.")
     brand: BrandRef | None = Field(description="Бренд автомобиля.")
     series: SeriesRef | None = Field(description="Серия автомобиля.")
     modification: ModificationRef | None = Field(description="Нормализованная техническая модификация.")
