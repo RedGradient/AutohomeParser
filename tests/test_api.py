@@ -404,6 +404,10 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         }
         self.assertNotIn("price_from", brand_parameters)
         self.assertNotIn("price_to", brand_parameters)
+        self.assertEqual(
+            brand_parameters["sort"]["schema"]["enum"],
+            ["name", "series_count"],
+        )
         for path, methods in schema["paths"].items():
             operation = methods.get("get")
             if operation is None:
