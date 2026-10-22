@@ -105,14 +105,7 @@ class ImportDutyClassificationIntegrationTests(unittest.TestCase):
         self.assertEqual(classification.tnved_heading, "8702")
         self.assertEqual(payment["status"], "CALCULATED")
         self.assertEqual(payment["amount_rub"], Decimal("1797000.00"))
-        self.assertEqual(
-            payment["details_json"]["field_labels"]["duty_rub"],
-            "Ввозная пошлина, RUB",
-        )
-        self.assertEqual(
-            payment["details_json"]["field_labels"]["engine_displacement_cc"],
-            "Рабочий объём двигателя, см³",
-        )
+        self.assertNotIn("field_labels", payment["details_json"])
         self.assertEqual(calculation["tnved_code"], "8702901994")
         self.assertEqual(calculation["rules_version"], RULES_VERSION)
         self.assertEqual(
@@ -165,10 +158,7 @@ class ImportDutyClassificationIntegrationTests(unittest.TestCase):
         self.assertEqual(fee["status"], "CALCULATED")
         self.assertEqual(fee["amount_rub"], Decimal("13541.00"))
         self.assertEqual(fee["rule_code"], "CUSTOMS_FEE_2026_1200K_2700K")
-        self.assertEqual(
-            fee["details_json"]["field_labels"]["fee_rub"],
-            "Таможенный сбор, RUB",
-        )
+        self.assertNotIn("field_labels", fee["details_json"])
         self.assertIn(
             "INCOMPLETE_CUSTOMS_VALUE",
             {warning["code"] for warning in calculation["warnings_json"]},
@@ -185,10 +175,7 @@ class ImportDutyClassificationIntegrationTests(unittest.TestCase):
         fee = next(p for p in payments if p["payment_type"] == "RECYCLING_FEE")
         self.assertEqual(fee["status"], "CALCULATED")
         self.assertEqual(fee["amount_rub"], Decimal("3400.00"))
-        self.assertEqual(
-            fee["details_json"]["field_labels"]["recycling_fee_rub"],
-            "Утилизационный сбор, RUB",
-        )
+        self.assertNotIn("field_labels", fee["details_json"])
 
     def test_customs_fee_reports_missing_value_without_vehicle_price(self):
         _, payments = make_rows(

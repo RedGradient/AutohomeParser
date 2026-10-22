@@ -120,6 +120,11 @@ def _series_state(value: int | None) -> SeriesState:
     return SeriesState.UNKNOWN
 
 
+def _public_payment_details(details: dict[str, Any]) -> dict[str, Any]:
+    """Исключить устаревшие интерфейсные подписи из деталей платежа."""
+    return {key: value for key, value in details.items() if key != "field_labels"}
+
+
 def _effective_price():
     return case(
         (Spec.guide_price_yuan > 0, Spec.guide_price_yuan),
@@ -953,7 +958,8 @@ def create_app(
             "tnved_code": calculation.tnved_code, "classification_status": calculation.classification_status,
             "status": calculation.status, "warnings": calculation.warnings_json,
             "payments": [{"payment_type": item.payment_type, "amount_rub": _money(item.amount_rub),
-                "status": item.status, "rule_code": item.rule_code, "details": item.details_json} for item in payments],
+                "status": item.status, "rule_code": item.rule_code,
+                "details": _public_payment_details(item.details_json)} for item in payments],
             "total_rub": _money(sum(amounts, Decimal(0))) if complete else None, "is_total_complete": complete}
 
     def calculations_impl(session: Session, limit: int, cursor: str | None, spec_id=None, brand_id=None,

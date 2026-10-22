@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
@@ -14,6 +15,8 @@ from autohome.models import (
     Base,
     Brand,
     BrandManufacturer,
+    CustomsCalculation,
+    CustomsPaymentResult,
     Manufacturer,
     Modification,
     Series,
@@ -80,6 +83,33 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
                         normalization_version=1,
                     ),
                 ]
+            )
+            session.add(
+                CustomsCalculation(
+                    id=900,
+                    spec_id=1000,
+                    importer_type="INDIVIDUAL",
+                    calculation_date=date(2026, 10, 1),
+                    rules_version="test-v1",
+                    price_source="GUIDE",
+                    classification_status="CLASSIFIED",
+                    status="CALCULATED",
+                    input_snapshot_json={},
+                    warnings_json=[],
+                )
+            )
+            session.add(
+                CustomsPaymentResult(
+                    calculation_id=900,
+                    payment_type="CUSTOMS_FEE",
+                    amount_rub=Decimal("4924.00"),
+                    status="CALCULATED",
+                    rule_code="TEST_RULE",
+                    details_json={
+                        "source": "https://example.test/rule",
+                        "field_labels": {"source": "Нормативный источник"},
+                    },
+                )
             )
             session.add_all(
                 [
@@ -259,6 +289,14 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
             [item["id"] for item in filtered_response.json()["items"]],
             [10],
         )
+
+    async def test_customs_response_hides_legacy_field_labels(self):
+        response = await self.client.get("/api/v1/customs-calculations/900")
+
+        self.assertEqual(response.status_code, 200)
+        details = response.json()["payments"][0]["details"]
+        self.assertNotIn("field_labels", details)
+        self.assertEqual(details["source"], "https://example.test/rule")
 
     async def test_token_endpoint_rejects_invalid_credentials(self):
         response = await self.client.post(
