@@ -24,6 +24,7 @@ def database_row(**overrides):
         "year": 2026,
         "energy_type": "GASOLINE",
         "engine_displacement_ml": 2000,
+        "engine_summary": "2.0T 150 л.с. I4",
         "engine_power_hp": Decimal("150"),
         "motor_total_power_kw": None,
         "recycling_fee_powertrain_type": "ICE",

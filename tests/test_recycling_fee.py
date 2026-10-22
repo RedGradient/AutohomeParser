@@ -85,7 +85,7 @@ class RecyclingFeeTests(unittest.TestCase):
 
         self.assertEqual(result.status, CalculationStatus.UNSUPPORTED)
 
-    def test_powerful_personal_vehicle_requires_remaining_rate_table(self):
+    def test_powerful_personal_vehicle_uses_general_rate_table(self):
         result = calculate_recycling_fee(
             context(
                 importer_type=ImporterType.INDIVIDUAL,
@@ -94,7 +94,77 @@ class RecyclingFeeTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(result.status, CalculationStatus.MANUAL_REVIEW)
+        self.assertEqual(result.status, CalculationStatus.CALCULATED)
+        self.assertEqual(result.amount_rub, Decimal("900000.00"))
+        self.assertEqual(
+            result.rule_code,
+            "RECYCLING_FEE_M1_PERSONAL_NON_PREFERENTIAL_2026",
+        )
+
+    def test_nominal_engine_summary_selects_volume_band_without_exact_cc(self):
+        result = calculate_recycling_fee(
+            context(
+                importer_type=ImporterType.INDIVIDUAL,
+                personal_use=True,
+                power_kw=Decimal("130"),
+                engine_displacement_cc=None,
+                engine_summary="2.0T 205 л.с. I4",
+            )
+        )
+
+        self.assertEqual(result.status, CalculationStatus.CALCULATED)
+        self.assertEqual(result.amount_rub, Decimal("900000.00"))
+        self.assertEqual(result.details["engine_volume_band_cc"], "UP_TO_2000")
+        self.assertEqual(
+            result.details["engine_volume_source"],
+            "ENGINE_SUMMARY_NOMINAL_VOLUME",
+        )
+
+    def test_unstructured_engine_summary_does_not_guess_volume_band(self):
+        result = calculate_recycling_fee(
+            context(
+                engine_displacement_cc=None,
+                engine_summary="V8",
+            )
+        )
+
+        self.assertEqual(result.status, CalculationStatus.MISSING_DATA)
+
+    def test_electric_personal_vehicle_switches_after_preferential_limit(self):
+        preferential = calculate_recycling_fee(
+            context(
+                importer_type=ImporterType.INDIVIDUAL,
+                personal_use=True,
+                powertrain_type="EV",
+                power_kw=Decimal("58.84"),
+                engine_displacement_cc=None,
+            )
+        )
+        general = calculate_recycling_fee(
+            context(
+                importer_type=ImporterType.INDIVIDUAL,
+                personal_use=True,
+                powertrain_type="EV",
+                power_kw=Decimal("58.85"),
+                engine_displacement_cc=None,
+            )
+        )
+
+        self.assertEqual(preferential.amount_rub, Decimal("3400.00"))
+        self.assertEqual(general.amount_rub, Decimal("991200.00"))
+
+    def test_commercial_electric_vehicle_uses_general_rate_table(self):
+        result = calculate_recycling_fee(
+            context(
+                powertrain_type="EV",
+                power_kw=Decimal("100"),
+                engine_displacement_cc=None,
+            )
+        )
+
+        self.assertEqual(result.status, CalculationStatus.CALCULATED)
+        self.assertEqual(result.amount_rub, Decimal("1560000.00"))
+        self.assertEqual(result.details["coefficient"], "78")
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ from typing import Any
 from autohome.recycling_fee_power import select_recycling_fee_power
 
 
-NORMALIZATION_VERSION = 4
+NORMALIZATION_VERSION = 5
 EMPTY_VALUES = {None, "", "-", "Нет", "Неизвестно"}
 NUMBER_RE = re.compile(r"[-+]?\d+(?:[.,]\d+)?")
 
@@ -136,6 +136,7 @@ def normalize_powertrain(
     recycling_fee_power = select_recycling_fee_power(
         row.get("energy_type"),
         engine_power_kw=row.get("engine_power_kw"),
+        engine_power_hp=row.get("engine_power_hp"),
         maximum_power_kw=row.get("maximum_power_kw"),
     )
     row.update(

@@ -27,6 +27,15 @@ class RecyclingFeePowerTests(unittest.TestCase):
         self.assertEqual(result.power_kw, Decimal("117.5"))
         self.assertEqual(result.source, RecyclingFeePowerSource.ENGINE_POWER_KW)
 
+    def test_ice_converts_metric_horsepower_when_kw_is_missing(self):
+        result = select_recycling_fee_power(
+            "GASOLINE",
+            engine_power_hp=Decimal("345"),
+        )
+
+        self.assertEqual(result.power_kw, Decimal("253.747"))
+        self.assertEqual(result.source.value, "ENGINE_POWER_HP_CONVERTED")
+
     def test_ev_rejects_peak_motor_power_as_substitute(self):
         result = select_recycling_fee_power("BEV", maximum_power_kw=Decimal("250"))
 

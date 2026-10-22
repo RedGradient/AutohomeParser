@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
+import re
 from typing import Any
 
 from .types import CalculationStatus, ImporterType
@@ -26,6 +27,7 @@ class RecyclingFeeContext:
     power_kw: Decimal | None
     power_source: str | None
     engine_displacement_cc: int | None
+    engine_summary: str | None = None
 
 
 @dataclass(frozen=True)
@@ -127,6 +129,20 @@ COMMERCIAL_ICE_COEFFICIENTS_2026 = {
     ),
 }
 
+# Общие коэффициенты 2026 года для электромобилей и последовательных гибридов.
+# После 205,94 кВт ставка одинакова для всех последующих диапазонов мощности.
+GENERAL_ELECTRIC_COEFFICIENTS_2026 = (
+    (Decimal("40.04"), Decimal("70.44")),
+    (Decimal("49.56"), Decimal("82.08")),
+    (Decimal("65.88"), Decimal("95.64")),
+    (Decimal("78"), Decimal("111.36")),
+    (Decimal("92.4"), Decimal("129.72")),
+    (Decimal("109.68"), Decimal("151.2")),
+    (Decimal("129.96"), Decimal("176.16")),
+    (Decimal("153.96"), Decimal("205.2")),
+    *((Decimal("182.4"), Decimal("239.04")),) * 8,
+)
+
 
 def _power_band_index(power_kw: Decimal) -> int:
     for index, upper_bound in enumerate(POWER_BAND_MAX_KW):
@@ -140,6 +156,25 @@ def _volume_band(engine_displacement_cc: int) -> int | None:
         if engine_displacement_cc <= upper_bound:
             return upper_bound
     return None
+
+
+def _volume_band_from_engine_summary(engine_summary: str | None) -> int | None:
+    """Определить только нормативный диапазон по записи вида 2.0T/3.5L."""
+    if not engine_summary:
+        return None
+    match = re.match(r"^\s*(\d+(?:[.,]\d+)?)\s*[LT]\b", engine_summary)
+    if match is None:
+        return None
+    nominal_liters = Decimal(match.group(1).replace(",", "."))
+    if nominal_liters <= Decimal("1"):
+        return 1000
+    if nominal_liters <= Decimal("2"):
+        return 2000
+    if nominal_liters <= Decimal("3"):
+        return 3000
+    if nominal_liters <= Decimal("3.5"):
+        return 3500
+    return 0
 
 
 def _result(
@@ -218,33 +253,48 @@ def calculate_recycling_fee(context: RecyclingFeeContext) -> RecyclingFeeResult:
         coefficient = Decimal("0.26") if is_older else Decimal("0.17")
         return _result(context, coefficient, "RECYCLING_FEE_M1_PERSONAL_PREFERENTIAL")
 
-    if context.importer_type == ImporterType.INDIVIDUAL and context.personal_use:
-        return RecyclingFeeResult(
-            status=CalculationStatus.MANUAL_REVIEW,
-            details={
-                **common,
-                "reason": "PERSONAL_NON_PREFERENTIAL_RATE_NOT_IMPLEMENTED",
-            },
-        )
     if electric_branch:
-        return RecyclingFeeResult(
-            status=CalculationStatus.UNSUPPORTED,
-            details={
-                **common,
-                "reason": "COMMERCIAL_ELECTRIC_RATE_NOT_IMPLEMENTED",
-            },
+        coefficient = GENERAL_ELECTRIC_COEFFICIENTS_2026[
+            _power_band_index(context.power_kw)
+        ][age_index]
+        rule_code = (
+            "RECYCLING_FEE_M1_PERSONAL_NON_PREFERENTIAL_2026"
+            if context.importer_type == ImporterType.INDIVIDUAL and context.personal_use
+            else "RECYCLING_FEE_M1_GENERAL_ELECTRIC_2026"
         )
+        return _result(context, coefficient, rule_code)
     if context.powertrain_type not in {"ICE", "HEV", "PHEV"}:
         return RecyclingFeeResult(
             status=CalculationStatus.UNSUPPORTED,
             details={**common, "reason": "UNSUPPORTED_POWERTRAIN_TYPE"},
         )
-    if context.engine_displacement_cc is None:
-        return RecyclingFeeResult(
-            status=CalculationStatus.MISSING_DATA,
-            details={**common, "missing_fields": ["engine_displacement_cc"]},
-        )
-    coefficient = COMMERCIAL_ICE_COEFFICIENTS_2026[
-        _volume_band(context.engine_displacement_cc)
-    ][_power_band_index(context.power_kw)][age_index]
-    return _result(context, coefficient, "RECYCLING_FEE_M1_COMMERCIAL_2026")
+    if context.engine_displacement_cc is not None:
+        volume_band = _volume_band(context.engine_displacement_cc)
+        volume_source = "ENGINE_DISPLACEMENT_CC"
+    else:
+        inferred_band = _volume_band_from_engine_summary(context.engine_summary)
+        if inferred_band is None:
+            return RecyclingFeeResult(
+                status=CalculationStatus.MISSING_DATA,
+                details={**common, "missing_fields": ["engine_displacement_cc"]},
+            )
+        volume_band = inferred_band or None
+        volume_source = "ENGINE_SUMMARY_NOMINAL_VOLUME"
+    coefficient = COMMERCIAL_ICE_COEFFICIENTS_2026[volume_band][
+        _power_band_index(context.power_kw)
+    ][age_index]
+    rule_code = (
+        "RECYCLING_FEE_M1_PERSONAL_NON_PREFERENTIAL_2026"
+        if context.importer_type == ImporterType.INDIVIDUAL and context.personal_use
+        else "RECYCLING_FEE_M1_COMMERCIAL_2026"
+    )
+    result = _result(context, coefficient, rule_code)
+    result.details.update(
+        {
+            "engine_volume_band_cc": (
+                f"UP_TO_{volume_band}" if volume_band is not None else "OVER_3500"
+            ),
+            "engine_volume_source": volume_source,
+        }
+    )
+    return result
