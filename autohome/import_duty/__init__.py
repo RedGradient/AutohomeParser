@@ -11,6 +11,11 @@ from .recycling_fee_regulation import (
     RecyclingFeeVehicleKind,
     route_recycling_fee_regulation,
 )
+from .recycling_fee_section_ii import (
+    SectionIIRecyclingFeeContext,
+    SectionIIVehicleSubtype,
+    calculate_section_ii_recycling_fee,
+)
 from .classifier import (
     CLASSIFICATION_RULES_VERSION,
     VehicleClassificationInput,
@@ -31,11 +36,14 @@ __all__ = (
     "RecyclingFeeRegulatorySection",
     "RecyclingFeeRoutingStatus",
     "RecyclingFeeVehicleKind",
+    "SectionIIRecyclingFeeContext",
+    "SectionIIVehicleSubtype",
     "VehicleClassificationInput",
     "VehicleClassificationResult",
     "calculate_import_duty",
     "calculate_customs_fee",
     "classify_vehicle",
     "calculate_recycling_fee",
+    "calculate_section_ii_recycling_fee",
     "route_recycling_fee_regulation",
 )
