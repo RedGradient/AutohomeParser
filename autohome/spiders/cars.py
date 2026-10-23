@@ -1067,7 +1067,7 @@ class CarsSpider(scrapy.Spider):
                     series_id,
                     discovered_category,
                     gallery_url,
-                    discovered_type,
+                    discovered_scope,
                     discovered_id,
                 )
 
