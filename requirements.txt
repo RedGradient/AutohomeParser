@@ -6,3 +6,5 @@ fastapi
 uvicorn[standard]
 httpx
 celery[redis]
+ruff
+pre-commit

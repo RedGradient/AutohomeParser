@@ -36,10 +36,13 @@ ETH_TABLE := 10102
 WIFI_PRIORITY := 10101
 ETH_PRIORITY := 10102
 
-.PHONY: help network-up network-down network-status network-test postgres-up database-migrate api-up api-logs celery-logs parser-run parser-resume parser-logs api-run database-reset parameters-reset build-modifications normalize-vehicle-attributes audit-vehicle-classifications audit-indirect-vehicle-attributes audit-recycling-fee-commercial-categories backfill-vehicle-attribute-inferences translate-db calculate-import-duties docker-down
+.PHONY: help lint lint-fix pre-commit-install network-up network-down network-status network-test postgres-up database-migrate api-up api-logs celery-logs parser-run parser-resume parser-logs api-run database-reset parameters-reset build-modifications normalize-vehicle-attributes audit-vehicle-classifications audit-indirect-vehicle-attributes audit-recycling-fee-commercial-categories backfill-vehicle-attribute-inferences translate-db calculate-import-duties docker-down
 
 help:
 	@echo "Доступные команды:"
+	@echo "  make lint            — проверить Python-код с помощью Ruff"
+	@echo "  make lint-fix        — исправить и отформатировать Python-код"
+	@echo "  make pre-commit-install — установить проверку Ruff перед коммитом"
 	@echo "  make network-up      — включить временную маршрутизацию"
 	@echo "  make network-down    — удалить временные правила"
 	@echo "  make network-status  — показать интерфейсы и правила"
@@ -66,6 +69,18 @@ help:
 	@echo
 	@echo "Интерфейсы можно переопределить:"
 	@echo "  make WIFI_IF=wlan0 ETH_IF=eth0 network-up"
+
+lint:
+	@.venv/bin/ruff check .
+	.venv/bin/ruff format --check .
+
+lint-fix:
+	@.venv/bin/ruff format .
+	.venv/bin/ruff check --fix .
+	.venv/bin/ruff format .
+
+pre-commit-install:
+	@.venv/bin/pre-commit install
 
 network-up:
 	@wifi_cidr="$$(ip -o -4 addr show dev "$(WIFI_IF)" scope global | awk 'NR == 1 {print $$4}')"
