@@ -1,17 +1,17 @@
 from __future__ import annotations
 
+import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
-import re
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from autohome.import_duty.classifier import (
     VehicleClassificationInput,
     classify_vehicle,
 )
 from autohome.import_duty.types import ClassificationStatus
-
 
 VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION = "RU-EAEU-VEHICLE-INFERENCE-2026-10-21-v12"
 INFERRED_INPUTS_USED = "INFERRED_INPUTS_USED"
@@ -431,8 +431,7 @@ def _parameter_evidence(
     raw_value: Any = parameter.raw_value.get("itemname")
     if subitems:
         raw_value = [
-            {"name": item.get("name"), "value": item.get("value")}
-            for item in subitems
+            {"name": item.get("name"), "value": item.get("value")} for item in subitems
         ]
     return InferenceEvidence(
         source="spec_parameters.raw_json",
@@ -468,7 +467,9 @@ def infer_parameter_attributes(
         primary_rule = field_matches[0][0]
         confidence = (
             InferenceConfidence.HIGH
-            if any(rule.confidence == InferenceConfidence.HIGH for rule, _ in field_matches)
+            if any(
+                rule.confidence == InferenceConfidence.HIGH for rule, _ in field_matches
+            )
             else InferenceConfidence.MEDIUM
         )
         decisions[field_name] = InferenceDecision(
@@ -493,7 +494,9 @@ def infer_vehicle_purpose(
     matches: list[tuple[PurposeMarkerRule, InferenceEvidence]] = []
     for rule in PURPOSE_MARKER_RULES:
         for source, raw_name in sources:
-            if not raw_name or any(marker in raw_name for marker in rule.excluded_markers):
+            if not raw_name or any(
+                marker in raw_name for marker in rule.excluded_markers
+            ):
                 continue
             marker = next((item for item in rule.markers if item in raw_name), None)
             if marker is not None:
@@ -835,10 +838,7 @@ def infer_ordinary_transport(
                     _normalized_evidence("seat_count_max", seat_count_max),
                 ),
             )
-        if (
-            has_permanent_rear_seats is True
-            and has_rear_side_windows is True
-        ):
+        if has_permanent_rear_seats is True and has_rear_side_windows is True:
             return InferenceDecision(
                 value=False,
                 rule_code="ORDINARY_PASSENGER_VAN_BY_CONSTRUCTION",
@@ -901,8 +901,7 @@ def infer_ordinary_transport(
         )
     )
     payload_present = any(
-        value is not None and value > 0
-        for value in (payload_kg_min, payload_kg_max)
+        value is not None and value > 0 for value in (payload_kg_min, payload_kg_max)
     )
     if (
         cargo_dimensions_present
@@ -1034,9 +1033,7 @@ def infer_commercial_gross_mass(
     assert payload_kg_max is not None
     assert seat_count_max is not None
     inferred_mass = (
-        curb_mass_kg
-        + payload_kg_max
-        + seat_count_max * TRUCK_OCCUPANT_MASS_KG
+        curb_mass_kg + payload_kg_max + seat_count_max * TRUCK_OCCUPANT_MASS_KG
     )
     return InferenceDecision(
         value=inferred_mass,
@@ -1154,6 +1151,7 @@ def infer_vehicle_attributes(
                 evidence=purpose.evidence,
             )
     else:
+
         def stored_or_inferred(
             field_name: str,
             stored_value: bool | None,
@@ -1334,9 +1332,7 @@ def infer_vehicle_attributes(
             )
         ]
         if technical_category != VehicleTechnicalCategory.M1:
-            evidence.append(
-                _normalized_evidence("gross_mass_kg", effective_gross_mass)
-            )
+            evidence.append(_normalized_evidence("gross_mass_kg", effective_gross_mass))
         decisions["vehicle_technical_category"] = InferenceDecision(
             value=technical_category,
             rule_code=f"TECHNICAL_CATEGORY_{technical_category.value}",
@@ -1447,8 +1443,7 @@ def apply_vehicle_attribute_inference(
         warning
         for warning in (updated.get("warnings_json") or [])
         if not (
-            isinstance(warning, Mapping)
-            and warning.get("code") == "INFERENCE_CONFLICT"
+            isinstance(warning, Mapping) and warning.get("code") == "INFERENCE_CONFLICT"
         )
     ]
     serialized_decisions: dict[str, dict[str, Any]] = {}
@@ -1500,9 +1495,7 @@ def apply_vehicle_attribute_inference(
         "warnings": list(result.warnings),
         **result.details,
     }
-    updated["inference_flags_json"] = (
-        [INFERRED_INPUTS_USED] if applied_fields else []
-    )
+    updated["inference_flags_json"] = [INFERRED_INPUTS_USED] if applied_fields else []
     updated["inference_rules_version"] = result.rules_version
     if "missing_fields_json" in updated or "is_complete" in updated:
         missing_fields = set(updated.get("missing_fields_json") or [])

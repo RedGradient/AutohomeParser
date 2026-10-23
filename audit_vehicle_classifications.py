@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 import os
+from collections import Counter
 
 from sqlalchemy import create_engine, select
 
@@ -12,7 +12,6 @@ from autohome.import_duty import (
     classify_vehicle,
 )
 from autohome.models import SpecVehicleAttributes
-
 
 INPUT_FIELDS = tuple(
     name

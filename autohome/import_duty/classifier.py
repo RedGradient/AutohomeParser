@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from .types import ClassificationStatus
-
 
 CLASSIFICATION_RULES_VERSION = "RU-EAEU-VEHICLE-CLASSIFICATION-2026-10-21-v4"
 PICKUP_CLASSIFICATION_SOURCE = "https://adilet.zan.kz/rus/docs/H11T0000751"
@@ -74,12 +74,7 @@ class VehicleClassificationInput:
     @classmethod
     def from_mapping(cls, values: Mapping[str, Any]) -> VehicleClassificationInput:
         """Создать вход из SQLAlchemy RowMapping или обычного словаря."""
-        return cls(
-            **{
-                name: values.get(name)
-                for name in cls.__dataclass_fields__
-            }
-        )
+        return cls(**{name: values.get(name) for name in cls.__dataclass_fields__})
 
 
 @dataclass(frozen=True)
@@ -347,8 +342,7 @@ def _classify_pickup(
                 passenger_mass = passengers * PICKUP_PASSENGER_MASS_KG
                 decision_curb_mass = curb_mass + PICKUP_DRIVER_MASS_KG
                 return (
-                    gross_mass - (decision_curb_mass + passenger_mass)
-                    > passenger_mass
+                    gross_mass - (decision_curb_mass + passenger_mass) > passenger_mass
                 )
 
             outcomes = {
@@ -367,12 +361,8 @@ def _classify_pickup(
                     gross_mass_kg=gross_mass,
                     source_curb_mass_kg_min=curb_mass_min,
                     source_curb_mass_kg_max=curb_mass_max,
-                    decision_curb_mass_kg_min=(
-                        curb_mass_min + PICKUP_DRIVER_MASS_KG
-                    ),
-                    decision_curb_mass_kg_max=(
-                        curb_mass_max + PICKUP_DRIVER_MASS_KG
-                    ),
+                    decision_curb_mass_kg_min=(curb_mass_min + PICKUP_DRIVER_MASS_KG),
+                    decision_curb_mass_kg_max=(curb_mass_max + PICKUP_DRIVER_MASS_KG),
                     **(
                         {
                             "source_curb_mass_kg": curb_mass_min,
@@ -464,9 +454,7 @@ def classify_vehicle(
             reason="SPECIAL_PURPOSE_VEHICLE_NOT_SUPPORTED",
         )
     missing = [
-        name
-        for name in ("body_type", "vehicle_class")
-        if getattr(values, name) is None
+        name for name in ("body_type", "vehicle_class") if getattr(values, name) is None
     ]
     if missing:
         return _result(
@@ -526,17 +514,12 @@ def classify_vehicle(
         elif (
             body_family == "TRUCK"
             and class_family == "PASSENGER"
-            and (
-                values.vehicle_class == "MPV"
-                or values.vehicle_class.endswith("_MPV")
-            )
+            and (values.vehicle_class == "MPV" or values.vehicle_class.endswith("_MPV"))
             and values.seat_count_min is not None
             and values.seat_count_max is not None
             and values.seat_count_max <= 2
         ):
-            conflict_resolution = (
-                "TWO_SEAT_COMMERCIAL_TRUCK_BODY_OVERRIDES_MPV_CLASS"
-            )
+            conflict_resolution = "TWO_SEAT_COMMERCIAL_TRUCK_BODY_OVERRIDES_MPV_CLASS"
         elif body_family == "TRUCK" and class_family == "PICKUP":
             body_family = "PICKUP"
             conflict_resolution = "SPECIFIC_PICKUP_CLASS_OVERRIDES_TRUCK_BODY"

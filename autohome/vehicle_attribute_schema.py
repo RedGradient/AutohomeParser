@@ -4,7 +4,6 @@ from sqlalchemy import inspect, text
 
 from autohome.models import Base
 
-
 INFERENCE_COLUMNS = {
     "curb_mass_kg_min": "INTEGER",
     "curb_mass_kg_max": "INTEGER",
@@ -24,9 +23,7 @@ def ensure_vehicle_attribute_schema(engine) -> None:
         Base.metadata.create_all(connection)
         existing = {
             column["name"]
-            for column in inspect(connection).get_columns(
-                "spec_vehicle_attributes"
-            )
+            for column in inspect(connection).get_columns("spec_vehicle_attributes")
         }
         for name, declared_type in INFERENCE_COLUMNS.items():
             if name in existing:
@@ -38,10 +35,7 @@ def ensure_vehicle_attribute_schema(engine) -> None:
                 sql_type = declared_type
                 clause = "ADD COLUMN"
             connection.execute(
-                text(
-                    "ALTER TABLE spec_vehicle_attributes "
-                    f"{clause} {name} {sql_type}"
-                )
+                text(f"ALTER TABLE spec_vehicle_attributes {clause} {name} {sql_type}")
             )
         connection.execute(
             text(

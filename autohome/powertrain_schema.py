@@ -4,7 +4,6 @@ from sqlalchemy import inspect, text
 
 from autohome.models import Base
 
-
 POWERTRAIN_COLUMNS = {
     "recycling_fee_powertrain_type": "VARCHAR(30)",
     "recycling_fee_power_kw": "NUMERIC(12, 3)",

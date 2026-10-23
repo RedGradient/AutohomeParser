@@ -5,12 +5,11 @@ from __future__ import annotations
 import os
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import create_engine
 from sqlalchemy.pool import NullPool
 
+from alembic import context
 from autohome.models import Base
-
 
 config = context.config
 if config.config_file_name is not None:

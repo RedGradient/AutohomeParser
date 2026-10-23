@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from collections import defaultdict
-from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
 import logging
-from pathlib import Path
 import random
 import re
 import time
+from collections import defaultdict
+from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
 from scrapy.exceptions import DropItem
 from sqlalchemy import bindparam, create_engine, event, func, select, update
@@ -18,14 +18,15 @@ from sqlalchemy.orm import Session
 
 from autohome.items import (
     AttentionRankingItem,
-    BrandMonthlySaleItem,
     BrandItem,
-    ConfigCrawlTaskItem,
     BrandManufacturerItem,
+    BrandMonthlySaleItem,
+    ConfigCrawlTaskItem,
     DiscountRankingItem,
     GalleryCrawlTaskItem,
     ManufacturerItem,
     MeasuredTestRankingItem,
+    ModificationItem,
     NewEnergyRankingItem,
     ParameterColorItem,
     ParameterColorSetItem,
@@ -33,26 +34,25 @@ from autohome.items import (
     ParameterGroupItem,
     ParameterSectionItem,
     ParameterSubitemItem,
-    SeriesItem,
+    ResaleValueRankingItem,
     SeriesGalleryColorItem,
+    SeriesItem,
     SeriesMonthlySaleItem,
     SeriesPhotoColorItem,
     SeriesPhotoItem,
     SmartTestRankingItem,
     SpecItem,
-    ModificationItem,
     SpecModificationItem,
     SpecParameterItem,
     SpecPowertrainItem,
     SpecVehicleAttributesItem,
-    ResaleValueRankingItem,
     TechnologyRankingItem,
 )
 from autohome.models import (
     AttentionRanking,
     Brand,
-    BrandMonthlySale,
     BrandManufacturer,
+    BrandMonthlySale,
     ConfigCrawlTask,
     DiscountRanking,
     GalleryCrawlTask,
@@ -66,6 +66,7 @@ from autohome.models import (
     ParameterGroup,
     ParameterSection,
     ParameterSubitem,
+    ResaleValueRanking,
     Series,
     SeriesGalleryColor,
     SeriesMonthlySale,
@@ -73,14 +74,12 @@ from autohome.models import (
     SeriesPhotoColor,
     SmartTestRanking,
     Spec,
+    SpecParameter,
     SpecPowertrain,
     SpecVehicleAttributes,
-    SpecParameter,
-    ResaleValueRanking,
     TechnologyRanking,
 )
 from autohome.powertrain_schema import ensure_powertrain_schema
-from autohome.vehicle_attribute_schema import ensure_vehicle_attribute_schema
 from autohome.translator import (
     translate_brand_name,
     translate_color_name,
@@ -93,7 +92,7 @@ from autohome.translator import (
     translate_taxonomy_name,
     translate_technology_name,
 )
-
+from autohome.vehicle_attribute_schema import ensure_vehicle_attribute_schema
 
 PRICE_RE = re.compile(r"(?P<number>\d+(?:\.\d+)?)\s*(?P<unit>万元|万|元|юаней)?")
 PRICE_RANGE_RE = re.compile(
@@ -136,7 +135,7 @@ def parse_yuan(value) -> Decimal | None:
     except InvalidOperation:
         return None
     if match.group("unit") in {"万", "万元"} or "万" in text:
-        amount *= Decimal("10000")
+        amount *= Decimal(10000)
     return amount
 
 
@@ -144,7 +143,7 @@ def _full_yuan_amount(number: str, unit: str | None) -> Decimal:
     """Развернуть сокращённую сумму в полное количество юаней."""
     amount = Decimal(number.replace(",", "."))
     if unit in {"万", "万元"}:
-        amount *= Decimal("10000")
+        amount *= Decimal(10000)
     return amount
 
 
@@ -359,9 +358,7 @@ class SqlAlchemyPipeline:
 
             links = self.buffers.get(SpecModificationItem)
             if links:
-                latest_links = {
-                    row["spec_id"]: row for row in links
-                }
+                latest_links = {row["spec_id"]: row for row in links}
                 link_rows = [latest_links[key] for key in sorted(latest_links)]
                 session.execute(
                     update(Spec.__table__)
@@ -375,9 +372,7 @@ class SqlAlchemyPipeline:
                         for row in link_rows
                     ],
                 )
-                modification_ids = sorted(
-                    {row["modification_id"] for row in link_rows}
-                )
+                modification_ids = sorted({row["modification_id"] for row in link_rows})
                 spec_count = (
                     select(func.count())
                     .where(Spec.modification_id == Modification.id)
@@ -419,13 +414,13 @@ class SqlAlchemyPipeline:
 
         if isinstance(item, BrandItem):
             data["name"] = translate_brand_name(data.get("name"))
-            data["fetched_at"] = datetime.now(timezone.utc)
+            data["fetched_at"] = datetime.now(UTC)
         elif isinstance(item, SeriesItem):
             data["name"] = translate_series_name(data.get("name"))
-            data["fetched_at"] = datetime.now(timezone.utc)
+            data["fetched_at"] = datetime.now(UTC)
         elif isinstance(item, SpecItem):
             data["name"] = translate_spec_name(data.get("name"))
-            data["fetched_at"] = datetime.now(timezone.utc)
+            data["fetched_at"] = datetime.now(UTC)
         elif isinstance(item, ManufacturerItem):
             data["name"] = translate_taxonomy_name(data.get("name"))
 
@@ -455,13 +450,13 @@ class SqlAlchemyPipeline:
             data["name"] = translate_color_name(data.get("name"))
         elif isinstance(item, SeriesPhotoItem):
             data["title"] = translate_spec_name(data.get("title"))
-            data["fetched_at"] = datetime.now(timezone.utc)
+            data["fetched_at"] = datetime.now(UTC)
         elif isinstance(item, (SeriesMonthlySaleItem, BrandMonthlySaleItem)):
             if isinstance(item, SeriesMonthlySaleItem):
                 data["series_name"] = translate_series_name(data.get("series_name"))
             else:
                 data["brand_name"] = translate_brand_name(data.get("brand_name"))
-            data["fetched_at"] = datetime.now(timezone.utc)
+            data["fetched_at"] = datetime.now(UTC)
         elif isinstance(
             item,
             (
@@ -480,10 +475,10 @@ class SqlAlchemyPipeline:
                 data["tested_spec_name"] = translate_spec_name(
                     data.get("tested_spec_name")
                 )
-            data["fetched_at"] = datetime.now(timezone.utc)
+            data["fetched_at"] = datetime.now(UTC)
         elif isinstance(item, TechnologyRankingItem):
             data["name"] = translate_technology_name(data.get("name"))
-            data["fetched_at"] = datetime.now(timezone.utc)
+            data["fetched_at"] = datetime.now(UTC)
         elif isinstance(item, (GalleryCrawlTaskItem, ConfigCrawlTaskItem)):
-            data["updated_at"] = datetime.now(timezone.utc)
+            data["updated_at"] = datetime.now(UTC)
         return data

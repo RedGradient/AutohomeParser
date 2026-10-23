@@ -19,7 +19,6 @@ from autohome.models import (
     SpecPowertrain,
 )
 
-
 DEFAULT_DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql+psycopg://autohome:autohome@127.0.0.1:5432/autohome",
@@ -136,9 +135,9 @@ def collect_catalog_metrics(
                     Series.id.label("series_id"),
                     Series.name.label("series_name"),
                     func.coalesce(spec_counts.c.spec_count, 0).label("spec_count"),
-                    func.coalesce(
-                        modification_counts.c.modification_count, 0
-                    ).label("modification_count"),
+                    func.coalesce(modification_counts.c.modification_count, 0).label(
+                        "modification_count"
+                    ),
                 )
                 .select_from(Series)
                 .outerjoin(Brand, Brand.id == Series.brand_id)
@@ -149,9 +148,9 @@ def collect_catalog_metrics(
                 )
                 .order_by(Brand.name, Series.name, Series.id)
             )
-            by_brand_and_series = [dict(row) for row in connection.execute(
-                grouped_statement
-            ).mappings()]
+            by_brand_and_series = [
+                dict(row) for row in connection.execute(grouped_statement).mappings()
+            ]
 
             status_counts = {
                 name: int(
@@ -183,7 +182,9 @@ def collect_catalog_metrics(
                         .filter(Spec.guide_price_yuan.is_(None))
                         .label("without_guide_price"),
                     )
-                ).one()._mapping
+                )
+                .one()
+                ._mapping
             )
             price_counts = {
                 "with_guide_price": int(price_counts["with_guide_price"]),
@@ -191,19 +192,21 @@ def collect_catalog_metrics(
             }
 
             has_gallery_photo = (
-                select(SeriesPhoto.id)
-                .where(SeriesPhoto.spec_id == Spec.id)
-                .exists()
+                select(SeriesPhoto.id).where(SeriesPhoto.spec_id == Spec.id).exists()
             )
             has_photo = (
                 Spec.image_url.is_not(None) & (func.length(Spec.image_url) > 0)
             ) | has_gallery_photo
-            photo_counts_row = connection.execute(
-                select(
-                    func.count().filter(has_photo).label("with_photo"),
-                    func.count().filter(~has_photo).label("without_photo"),
+            photo_counts_row = (
+                connection.execute(
+                    select(
+                        func.count().filter(has_photo).label("with_photo"),
+                        func.count().filter(~has_photo).label("without_photo"),
+                    )
                 )
-            ).one()._mapping
+                .one()
+                ._mapping
+            )
             photo_counts = {
                 "with_photo": int(photo_counts_row["with_photo"]),
                 "without_photo": int(photo_counts_row["without_photo"]),
@@ -235,8 +238,7 @@ def collect_catalog_metrics(
                     "series_name": series_name,
                     "parameter_count": int(parameter_count),
                 }
-                for spec_id, spec_name, series_id, series_name, parameter_count
-                in connection.execute(
+                for spec_id, spec_name, series_id, series_name, parameter_count in connection.execute(
                     select(
                         Spec.id,
                         Spec.name,
@@ -248,8 +250,7 @@ def collect_catalog_metrics(
                     .outerjoin(Series, Series.id == Spec.series_id)
                     .where(
                         parameter_counts.c.parameter_count > 0,
-                        parameter_counts.c.parameter_count
-                        < small_parameter_threshold,
+                        parameter_counts.c.parameter_count < small_parameter_threshold,
                     )
                     .order_by(parameter_counts.c.parameter_count, Spec.id)
                 )
@@ -258,9 +259,7 @@ def collect_catalog_metrics(
             return {
                 "catalog_size": totals,
                 "series_by_brand": series_by_brand,
-                "specs_and_modifications_by_brand_and_series": (
-                    by_brand_and_series
-                ),
+                "specs_and_modifications_by_brand_and_series": (by_brand_and_series),
                 "series_status": {
                     **status_counts,
                     "state_codes": SERIES_STATUS_GROUPS,

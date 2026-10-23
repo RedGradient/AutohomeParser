@@ -87,16 +87,16 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
             session.add_all(
                 [
                     CustomsCalculation(
-                    id=900,
-                    spec_id=1000,
-                    importer_type="INDIVIDUAL",
-                    calculation_date=date(2026, 10, 1),
-                    rules_version="test-v1",
-                    price_source="GUIDE",
-                    classification_status="CLASSIFIED",
-                    status="CALCULATED",
-                    input_snapshot_json={},
-                    warnings_json=[],
+                        id=900,
+                        spec_id=1000,
+                        importer_type="INDIVIDUAL",
+                        calculation_date=date(2026, 10, 1),
+                        rules_version="test-v1",
+                        price_source="GUIDE",
+                        classification_status="CLASSIFIED",
+                        status="CALCULATED",
+                        input_snapshot_json={},
+                        warnings_json=[],
                     ),
                     CustomsCalculation(
                         id=901,
@@ -160,7 +160,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
                         name="Premium",
                         year=2026,
                         state=20,
-                        guide_price_yuan=Decimal("200000"),
+                        guide_price_yuan=Decimal(200000),
                         raw_json={},
                     ),
                     Spec(
@@ -170,7 +170,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
                         name="Comfort",
                         year=2025,
                         state=40,
-                        guide_price_yuan=Decimal("120000"),
+                        guide_price_yuan=Decimal(120000),
                         raw_json={},
                     ),
                 ]
@@ -397,9 +397,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
             schema["paths"]["/api/v1/specs"]["get"]["security"],
             [{"JWT Bearer": []}],
         )
-        self.assertNotIn(
-            "security", schema["paths"]["/api/v1/auth/token"]["post"]
-        )
+        self.assertNotIn("security", schema["paths"]["/api/v1/auth/token"]["post"])
         self.assertEqual(
             schema["components"]["securitySchemes"]["JWT Bearer"]["scheme"],
             "bearer",
@@ -413,7 +411,9 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         )
         operation = schema["paths"]["/api/v1/specs"]["get"]
         self.assertEqual(
-            operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+            operation["responses"]["200"]["content"]["application/json"]["schema"][
+                "$ref"
+            ],
             "#/components/schemas/SpecPage",
         )
         parameters = {item["name"]: item for item in operation["parameters"]}

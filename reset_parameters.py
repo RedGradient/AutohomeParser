@@ -6,19 +6,18 @@ import os
 from sqlalchemy import create_engine, delete, update
 
 from autohome.models import (
+    Modification,
     ParameterColor,
     ParameterColorSet,
     ParameterDefinition,
     ParameterGroup,
     ParameterSection,
     ParameterSubitem,
-    Modification,
     Spec,
     SpecParameter,
     SpecPowertrain,
     SpecVehicleAttributes,
 )
-
 
 PARAMETER_MODELS = (
     ParameterColor,

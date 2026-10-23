@@ -107,15 +107,11 @@ class IndirectVehicleAttributesAuditTests(unittest.TestCase):
         counters = audit_inferences(self.engine)
 
         self.assertEqual(counters["summary"]["specs"], 2)
-        self.assertEqual(
-            counters["value"][("has_rear_side_windows", "true")], 1
-        )
+        self.assertEqual(counters["value"][("has_rear_side_windows", "true")], 1)
         self.assertEqual(
             counters["value"][("vehicle_purpose_type", "FIRE_FIGHTING")], 1
         )
-        self.assertEqual(
-            counters["value"][("vehicle_purpose_type", "MOTORHOME")], 1
-        )
+        self.assertEqual(counters["value"][("vehicle_purpose_type", "MOTORHOME")], 1)
         self.assertEqual(counters["value"][("is_special_purpose", "true")], 1)
         self.assertEqual(counters["value"][("is_special_purpose", "false")], 1)
         self.assertEqual(counters["special_purpose"]["true"], 1)

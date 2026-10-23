@@ -1,24 +1,23 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
-from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
-from hashlib import blake2b
 import json
 import os
 import re
+from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
+from hashlib import blake2b
 from typing import Any
 
 from sqlalchemy import (
+    String,
     bindparam,
     cast,
     create_engine,
     delete,
-    inspect,
     insert,
+    inspect,
     select,
-    String,
     text,
     update,
 )
@@ -37,7 +36,6 @@ from autohome.translator import (
     translate_powertrain_code,
     translate_powertrain_field,
 )
-
 
 NORMALIZATION_VERSION = 5
 EMPTY_VALUES = {None, "", "-", "Нет", "Неизвестно"}
@@ -354,7 +352,7 @@ def rebuild(engine, batch_size: int) -> tuple[int, int, int]:
         parameter_ids = load_parameter_ids(connection)
         powertrains = load_powertrains(connection, parameter_ids)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     modifications: dict[int, dict] = {}
     spec_links: list[dict] = []
     powertrain_rows: list[dict] = []

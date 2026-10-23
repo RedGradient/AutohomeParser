@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     Date,
@@ -12,7 +13,6 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Integer,
-    JSON,
     Numeric,
     PrimaryKeyConstraint,
     String,
@@ -22,7 +22,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-
 
 JSON_TYPE = JSON().with_variant(JSONB(), "postgresql")
 PRICE_TYPE = Numeric(16, 2)
@@ -160,9 +159,7 @@ class SpecParameter(Base):
     """Значение параметра для конкретной комплектации."""
 
     __tablename__ = "spec_parameters"
-    __table_args__ = (
-        PrimaryKeyConstraint("spec_id", "parameter_id"),
-    )
+    __table_args__ = (PrimaryKeyConstraint("spec_id", "parameter_id"),)
 
     spec_id: Mapped[int] = mapped_column(ForeignKey("specs.id"), index=True)
     parameter_id: Mapped[int] = mapped_column(
@@ -501,9 +498,7 @@ class NewEnergyRanking(Base):
     """Месячная позиция серии в рейтинге автомобилей новой энергии."""
 
     __tablename__ = "new_energy_rankings"
-    __table_args__ = (
-        PrimaryKeyConstraint("month", "subrank_type", "series_id"),
-    )
+    __table_args__ = (PrimaryKeyConstraint("month", "subrank_type", "series_id"),)
 
     month: Mapped[date] = mapped_column(Date)
     subrank_type: Mapped[int] = mapped_column(Integer)
@@ -595,9 +590,7 @@ class DiscountRanking(Base):
     """Снимок максимальных дилерских скидок по сериям и комплектациям."""
 
     __tablename__ = "discount_rankings"
-    __table_args__ = (
-        PrimaryKeyConstraint("snapshot_date", "city_id", "series_id"),
-    )
+    __table_args__ = (PrimaryKeyConstraint("snapshot_date", "city_id", "series_id"),)
 
     snapshot_date: Mapped[date] = mapped_column(Date)
     city_id: Mapped[int] = mapped_column(Integer)

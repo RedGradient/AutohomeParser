@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 from autohome.import_duty.currency import fetch_cbr_rates
 from autohome.import_duty.types import ExchangeRate
 from autohome.models import CbrExchangeRate
-
 
 RateFetcher = Callable[[date], dict[str, ExchangeRate]]
 Recalculator = Callable[[str, date, dict[str, ExchangeRate]], None]
@@ -96,7 +95,7 @@ def synchronize_cbr_rates(
                     stored.nominal = rate.nominal
                     stored.rate_rub = rate.rate_rub
                     stored.rate_date = rate.rate_date
-                    stored.fetched_at = datetime.now(timezone.utc)
+                    stored.fetched_at = datetime.now(UTC)
                 session.commit()
     finally:
         engine.dispose()

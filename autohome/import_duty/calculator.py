@@ -332,9 +332,7 @@ def calculate_legal_entity_duty(context: DutyContext) -> DutyResult:
         value_rub, value_eur = _price_values(context)
         percentage_rub = value_rub * rate.percent
         minimum_rub = (
-            Decimal(volume_cc)
-            * rate.minimum_eur_per_cc
-            * context.eur_rate.rub_per_unit
+            Decimal(volume_cc) * rate.minimum_eur_per_cc * context.eur_rate.rub_per_unit
         )
         amount_rub = money(max(percentage_rub, minimum_rub))
         details.update(
@@ -399,10 +397,12 @@ def _commercial_warnings(
             ]
         )
     if heading_only:
-        warnings.append(_warning(
-            "TNVED_HEADING_ONLY",
-            "Для ДВС сохранена тарифная ветка; окончательный десятизначный код требует подтверждения.",
-        ))
+        warnings.append(
+            _warning(
+                "TNVED_HEADING_ONLY",
+                "Для ДВС сохранена тарифная ветка; окончательный десятизначный код требует подтверждения.",
+            )
+        )
     return warnings
 
 
@@ -501,8 +501,7 @@ def _apply_commercial_vehicle_rate(
             amount_rub = max(amount_rub, minimum_rub)
             details.update(
                 formula=(
-                    "max(customs_value_rub * percent, "
-                    "engine_cc * eur_per_cc * eur_rub)"
+                    "max(customs_value_rub * percent, engine_cc * eur_per_cc * eur_rub)"
                 ),
                 engine_displacement_cc=context.engine_displacement_cc,
                 minimum_eur_per_cc=str(rate.minimum_eur_per_cc),
@@ -575,19 +574,14 @@ def calculate_8702_duty(context: DutyContext) -> DutyResult:
         "age_group": age_group,
     }
     if context.energy_type == "BEV":
-        return _apply_commercial_vehicle_rate(
-            context, BUS_8702_BEV_RATE, details
-        )
+        return _apply_commercial_vehicle_rate(context, BUS_8702_BEV_RATE, details)
     if context.energy_type not in {"DIESEL", "GASOLINE"}:
         return _manual_transport_review(
             "8702",
             "HYBRID_OR_RARE_POWERTRAIN_REQUIRES_POWER_RELATION",
             energy_type=context.energy_type,
         )
-    if (
-        context.engine_displacement_cc is None
-        or context.engine_displacement_cc <= 0
-    ):
+    if context.engine_displacement_cc is None or context.engine_displacement_cc <= 0:
         return _technical_missing("8702", ["engine_displacement_cc"])
     threshold = 2500 if context.energy_type == "DIESEL" else 2800
     volume_group = (
@@ -629,9 +623,7 @@ def calculate_8704_duty(context: DutyContext) -> DutyResult:
         "gross_mass_kg": context.gross_mass_kg,
     }
     if context.energy_type == "BEV":
-        return _apply_commercial_vehicle_rate(
-            context, TRUCK_8704_BEV_RATE, details
-        )
+        return _apply_commercial_vehicle_rate(context, TRUCK_8704_BEV_RATE, details)
     if context.energy_type not in {"DIESEL", "GASOLINE"}:
         return _manual_transport_review(
             "8704",
@@ -648,9 +640,7 @@ def calculate_8704_duty(context: DutyContext) -> DutyResult:
                 return _technical_missing("8704", ["engine_displacement_cc"])
             mass_group = "UP_TO_5T"
             volume_group = (
-                "OVER_2500"
-                if context.engine_displacement_cc > 2500
-                else "UP_TO_2500"
+                "OVER_2500" if context.engine_displacement_cc > 2500 else "UP_TO_2500"
             )
         elif context.gross_mass_kg <= 20000:
             mass_group, volume_group = "5T_TO_20T", "ANY"
@@ -665,16 +655,12 @@ def calculate_8704_duty(context: DutyContext) -> DutyResult:
                 return _technical_missing("8704", ["engine_displacement_cc"])
             mass_group = "UP_TO_5T"
             volume_group = (
-                "OVER_2800"
-                if context.engine_displacement_cc > 2800
-                else "UP_TO_2800"
+                "OVER_2800" if context.engine_displacement_cc > 2800 else "UP_TO_2800"
             )
         else:
             mass_group, volume_group = "OVER_5T", "ANY"
 
-    rate = TRUCK_8704_RATES[
-        (context.energy_type, mass_group, volume_group, age_group)
-    ]
+    rate = TRUCK_8704_RATES[(context.energy_type, mass_group, volume_group, age_group)]
     return _apply_commercial_vehicle_rate(context, rate, details)
 
 
@@ -686,9 +672,7 @@ def calculate_import_duty(context: DutyContext) -> DutyResult:
                 status=CalculationStatus.UNSUPPORTED,
                 classification_status=ClassificationStatus.CLASSIFIED,
                 tnved_code=context.tnved_heading,
-                details={
-                    "reason": "HEADING_SUPPORTED_FOR_LEGAL_ENTITY_ONLY"
-                },
+                details={"reason": "HEADING_SUPPORTED_FOR_LEGAL_ENTITY_ONLY"},
             )
         if context.tnved_heading == "8702":
             return calculate_8702_duty(context)

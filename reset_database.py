@@ -8,7 +8,6 @@ from sqlalchemy.engine import make_url
 
 from autohome.models import Base
 
-
 PROTECTED_DATABASES = {"postgres", "template0", "template1"}
 
 

@@ -4,7 +4,7 @@ import argparse
 import os
 import re
 from collections import Counter
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from hashlib import blake2b
 
@@ -75,7 +75,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--date",
         type=date.fromisoformat,
-        default=date.today(),  # noqa: DTZ011 - CLI использует локальную календарную дату
+        default=date.today(),
         dest="calculation_date",
         help="Дата расчёта YYYY-MM-DD; по умолчанию сегодня.",
     )
@@ -393,7 +393,7 @@ def make_rows(
     calculation_id = stable_calculation_id(
         row.id, importer, calculation_date, price_source
     )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     inference_flags = getattr(row, "inference_flags_json", None) or []
     inference_details = getattr(row, "inference_details_json", None) or {}
     calculation_warnings = list(result.warnings)

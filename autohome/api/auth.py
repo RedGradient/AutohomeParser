@@ -15,7 +15,6 @@ from typing import Any
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 
-
 JWT_ALGORITHM = "HS256"
 JWT_ISSUER = "autohome-catalog-api"
 JWT_AUDIENCE = "autohome-api"
@@ -75,7 +74,9 @@ def _base64url_decode(value: str) -> bytes:
 
 def _json_segment(value: dict[str, Any]) -> str:
     """Сериализовать объект в канонический JWT-сегмент."""
-    payload = json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    payload = json.dumps(
+        value, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    )
     return _base64url_encode(payload.encode("utf-8"))
 
 
@@ -93,7 +94,9 @@ def create_access_token(username: str, settings: AuthSettings) -> str:
         }
     )
     signing_input = f"{header}.{payload}".encode("ascii")
-    signature = hmac.new(settings.secret.encode(), signing_input, hashlib.sha256).digest()
+    signature = hmac.new(
+        settings.secret.encode(), signing_input, hashlib.sha256
+    ).digest()
     return f"{header}.{payload}.{_base64url_encode(signature)}"
 
 
@@ -118,20 +121,31 @@ def decode_access_token(token: str, settings: AuthSettings) -> dict[str, Any]:
             raise ValueError("Неверный издатель или получатель JWT")
         if not isinstance(payload.get("sub"), str) or not payload["sub"]:
             raise ValueError("Отсутствует subject JWT")
-        if not isinstance(payload.get("exp"), int) or payload["exp"] <= int(time.time()):
+        if not isinstance(payload.get("exp"), int) or payload["exp"] <= int(
+            time.time()
+        ):
             raise ValueError("JWT истёк")
-        if not isinstance(payload.get("iat"), int) or payload["iat"] > int(time.time()) + 30:
+        if (
+            not isinstance(payload.get("iat"), int)
+            or payload["iat"] > int(time.time()) + 30
+        ):
             raise ValueError("Некорректное время выдачи JWT")
-    except (ValueError, TypeError, KeyError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+    except (
+        ValueError,
+        TypeError,
+        KeyError,
+        json.JSONDecodeError,
+        UnicodeDecodeError,
+    ) as exc:
         raise invalid_token_error() from exc
     return payload
 
 
 def credentials_are_valid(username: str, password: str, settings: AuthSettings) -> bool:
     """Сравнить логин и пароль без раннего выхода по несовпавшему байту."""
-    return secrets.compare_digest(username.encode(), settings.username.encode()) and secrets.compare_digest(
-        password.encode(), settings.password.encode()
-    )
+    return secrets.compare_digest(
+        username.encode(), settings.username.encode()
+    ) and secrets.compare_digest(password.encode(), settings.password.encode())
 
 
 def invalid_token_error() -> HTTPException:

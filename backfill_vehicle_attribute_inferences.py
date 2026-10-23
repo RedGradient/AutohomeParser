@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter, defaultdict
 import os
+from collections import Counter, defaultdict
 from typing import Any
 
 from sqlalchemy import bindparam, create_engine, func, inspect, select, update
@@ -21,7 +21,6 @@ from autohome.vehicle_attribute_inference import (
     apply_vehicle_attribute_inference,
 )
 from autohome.vehicle_attribute_schema import ensure_vehicle_attribute_schema
-
 
 NORMALIZED_INPUT_FIELDS = (
     "body_type",
@@ -190,12 +189,10 @@ def select_batch(
         )
     if only_outdated and "inference_rules_version" in existing_columns:
         statement = statement.where(
-            (
-                SpecVehicleAttributes.inference_rules_version.is_(None)
-                | (
-                    SpecVehicleAttributes.inference_rules_version
-                    != VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION
-                )
+            SpecVehicleAttributes.inference_rules_version.is_(None)
+            | (
+                SpecVehicleAttributes.inference_rules_version
+                != VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION
             )
         )
     return list(connection.execute(statement).mappings())
@@ -254,12 +251,7 @@ def write_batch(connection, updates: list[dict[str, Any]]) -> None:
     connection.execute(
         update(SpecVehicleAttributes)
         .where(SpecVehicleAttributes.spec_id == bindparam("_spec_id"))
-        .values(
-            **{
-                name: bindparam(name)
-                for name in INFERENCE_STORAGE_FIELDS
-            }
-        ),
+        .values(**{name: bindparam(name) for name in INFERENCE_STORAGE_FIELDS}),
         updates,
     )
 
@@ -277,9 +269,7 @@ def _record_counts(counts: Counter, updates: list[dict[str, Any]]) -> None:
         if row.get("vehicle_purpose_type"):
             counts[f"purpose_{row['vehicle_purpose_type']}"] += 1
         if row.get("vehicle_technical_category"):
-            counts[
-                f"technical_category_{row['vehicle_technical_category']}"
-            ] += 1
+            counts[f"technical_category_{row['vehicle_technical_category']}"] += 1
 
 
 def backfill(engine, args: argparse.Namespace) -> Counter:

@@ -1,29 +1,26 @@
 from __future__ import annotations
 
-from decimal import Decimal
-from functools import lru_cache
 import json
-from pathlib import Path
 import re
+from decimal import Decimal
+from functools import cache, lru_cache
+from pathlib import Path
 from typing import Any
-
 
 DICTIONARY_PATH = Path(__file__).parent / "data" / "translations_ru.json"
 BRAND_NAMES_PATH = Path(__file__).parent / "data" / "brand_names.json"
 SERIES_NAMES_PATH = Path(__file__).parent / "data" / "series_names.json"
-VEHICLE_SUFFIXES_PATH = (
-    Path(__file__).parent / "data" / "vehicle_name_suffixes.json"
-)
-SPEC_NAME_FRAGMENTS_PATH = (
-    Path(__file__).parent / "data" / "spec_name_fragments.json"
-)
+VEHICLE_SUFFIXES_PATH = Path(__file__).parent / "data" / "vehicle_name_suffixes.json"
+SPEC_NAME_FRAGMENTS_PATH = Path(__file__).parent / "data" / "spec_name_fragments.json"
 BATTERY_TYPES_PATH = Path(__file__).parent / "data" / "battery_types.json"
 MOTOR_LAYOUTS_PATH = Path(__file__).parent / "data" / "motor_layouts.json"
 POWERTRAIN_CODES_PATH = Path(__file__).parent / "data" / "powertrain_codes.json"
 VEHICLE_ATTRIBUTE_CODES_PATH = (
     Path(__file__).parent / "data" / "vehicle_attribute_codes.json"
 )
-CHINESE_NUMBER_RE = re.compile(r"(?P<number>\d+(?:\.\d+)?)\s*(?P<unit>万元|万公里|万|亿)")
+CHINESE_NUMBER_RE = re.compile(
+    r"(?P<number>\d+(?:\.\d+)?)\s*(?P<unit>万元|万公里|万|亿)"
+)
 YUAN_RE = re.compile(r"(?P<number>\d+(?:\.\d+)?)\s*元")
 
 
@@ -33,7 +30,7 @@ def translation_dictionary() -> dict[str, dict[str, str]]:
     return json.loads(DICTIONARY_PATH.read_text(encoding="utf-8"))
 
 
-@lru_cache(maxsize=None)
+@cache
 def _name_dictionary(path: Path) -> dict[str, str]:
     """Загрузить отдельный словарь автомобильных наименований."""
     return json.loads(path.read_text(encoding="utf-8"))
@@ -90,10 +87,10 @@ def _decimal_text(value: Decimal) -> str:
 def normalize_chinese_numbers(text: str) -> str:
     """Преобразовать китайские единицы 万 и 亿 в обычные числа."""
     multipliers = {
-        "万": (Decimal("10000"), ""),
-        "万元": (Decimal("10000"), " юаней"),
-        "万公里": (Decimal("10000"), " км"),
-        "亿": (Decimal("100000000"), ""),
+        "万": (Decimal(10000), ""),
+        "万元": (Decimal(10000), " юаней"),
+        "万公里": (Decimal(10000), " км"),
+        "亿": (Decimal(100000000), ""),
     }
 
     def replace(match: re.Match[str]) -> str:

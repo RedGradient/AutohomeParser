@@ -132,8 +132,6 @@ class ScheduledCbrRatesTests(unittest.TestCase):
         engine = create_engine(self.database_url)
         try:
             with Session(engine) as session:
-                self.assertEqual(
-                    session.scalars(select(CbrExchangeRate)).all(), []
-                )
+                self.assertEqual(session.scalars(select(CbrExchangeRate)).all(), [])
         finally:
             engine.dispose()

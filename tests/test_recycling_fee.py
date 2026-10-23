@@ -19,7 +19,7 @@ def context(**overrides) -> RecyclingFeeContext:
         "vehicle_technical_category": "M1",
         "age_months": 12,
         "powertrain_type": "ICE",
-        "power_kw": Decimal("100"),
+        "power_kw": Decimal(100),
         "power_source": "ENGINE_POWER_KW",
         "engine_displacement_cc": 1500,
     }
@@ -59,14 +59,14 @@ class RecyclingFeeTests(unittest.TestCase):
         self.assertEqual(result.details["coefficient"], "40.04")
 
     def test_commercial_power_band_above_personal_limit(self):
-        result = calculate_recycling_fee(context(power_kw=Decimal("130")))
+        result = calculate_recycling_fee(context(power_kw=Decimal(130)))
 
         self.assertEqual(result.amount_rub, Decimal("900000.00"))
         self.assertEqual(result.details["coefficient"], "45")
 
     def test_commercial_volume_and_power_boundaries(self):
         result = calculate_recycling_fee(
-            context(engine_displacement_cc=2500, power_kw=Decimal("300"))
+            context(engine_displacement_cc=2500, power_kw=Decimal(300))
         )
 
         self.assertEqual(result.amount_rub, Decimal("3067200.00"))
@@ -90,7 +90,7 @@ class RecyclingFeeTests(unittest.TestCase):
             context(
                 importer_type=ImporterType.INDIVIDUAL,
                 personal_use=True,
-                power_kw=Decimal("130"),
+                power_kw=Decimal(130),
             )
         )
 
@@ -106,7 +106,7 @@ class RecyclingFeeTests(unittest.TestCase):
             context(
                 importer_type=ImporterType.INDIVIDUAL,
                 personal_use=True,
-                power_kw=Decimal("130"),
+                power_kw=Decimal(130),
                 engine_displacement_cc=None,
                 engine_summary="2.0T 205 л.с. I4",
             )
@@ -157,7 +157,7 @@ class RecyclingFeeTests(unittest.TestCase):
         result = calculate_recycling_fee(
             context(
                 powertrain_type="EV",
-                power_kw=Decimal("100"),
+                power_kw=Decimal(100),
                 engine_displacement_cc=None,
             )
         )

@@ -23,9 +23,7 @@ class VehicleAttributeSchemaTests(unittest.TestCase):
 
             columns = {
                 column["name"]
-                for column in inspect(engine).get_columns(
-                    "spec_vehicle_attributes"
-                )
+                for column in inspect(engine).get_columns("spec_vehicle_attributes")
             }
             self.assertTrue(
                 {

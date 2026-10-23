@@ -1,17 +1,16 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
-import re
 from typing import Any
 
 from .types import CalculationStatus, ImporterType
 
-
 RECYCLING_FEE_RULES_VERSION = "RU-RECYCLING-FEE-M1-2026-v1"
 RECYCLING_FEE_RULES_SOURCE = "https://www.consultant.ru/document/cons_doc_LAW_517977/"
-RECYCLING_FEE_BASE_RUB = Decimal("20000")
+RECYCLING_FEE_BASE_RUB = Decimal(20000)
 PERSONAL_ICE_MAX_POWER_KW = Decimal("117.68")
 PERSONAL_ELECTRIC_MAX_POWER_KW = Decimal("58.84")
 
@@ -47,7 +46,7 @@ POWER_BAND_MAX_KW = (
     Decimal("161.81"),
     Decimal("183.88"),
     Decimal("205.94"),
-    Decimal("228"),
+    Decimal(228),
     Decimal("250.07"),
     Decimal("272.13"),
     Decimal("294.20"),
@@ -69,15 +68,15 @@ COMMERCIAL_ICE_COEFFICIENTS_2026 = {
     ),
     2000: (
         *((Decimal("40.04"), Decimal("70.44")),) * 4,
-        (Decimal("45"), Decimal("74.64")),
+        (Decimal(45), Decimal("74.64")),
         (Decimal("47.64"), Decimal("79.2")),
         (Decimal("50.52"), Decimal("83.88")),
         (Decimal("57.12"), Decimal("91.92")),
         (Decimal("64.56"), Decimal("100.56")),
         (Decimal("72.96"), Decimal("110.16")),
         (Decimal("83.16"), Decimal("120.6")),
-        (Decimal("94.8"), Decimal("132")),
-        (Decimal("108"), Decimal("144.6")),
+        (Decimal("94.8"), Decimal(132)),
+        (Decimal(108), Decimal("144.6")),
         (Decimal("123.24"), Decimal("158.4")),
         (Decimal("140.4"), Decimal("173.4")),
         (Decimal("160.08"), Decimal("189.84")),
@@ -87,7 +86,7 @@ COMMERCIAL_ICE_COEFFICIENTS_2026 = {
         (Decimal("115.34"), Decimal("172.8")),
         (Decimal("118.2"), Decimal("175.08")),
         (Decimal("120.12"), Decimal("177.6")),
-        (Decimal("126"), Decimal("183")),
+        (Decimal(126), Decimal(183)),
         (Decimal("131.04"), Decimal("188.52")),
         (Decimal("136.32"), Decimal("193.68")),
         (Decimal("141.72"), Decimal("199.08")),
@@ -103,10 +102,10 @@ COMMERCIAL_ICE_COEFFICIENTS_2026 = {
         (Decimal("134.4"), Decimal("202.2")),
         (Decimal("137.16"), Decimal("204.36")),
         (Decimal("140.52"), Decimal("207.24")),
-        (Decimal("144"), Decimal("212.4")),
+        (Decimal(144), Decimal("212.4")),
         (Decimal("151.92"), Decimal("217.8")),
         (Decimal("160.32"), Decimal("224.28")),
-        (Decimal("169.2"), Decimal("231")),
+        (Decimal("169.2"), Decimal(231)),
         (Decimal("178.44"), Decimal("237.96")),
         (Decimal("188.28"), Decimal("245.04")),
         (Decimal("198.6"), Decimal("252.48")),
@@ -118,7 +117,7 @@ COMMERCIAL_ICE_COEFFICIENTS_2026 = {
         (Decimal("170.16"), Decimal("222.84")),
         (Decimal("173.04"), Decimal("226.2")),
         (Decimal("176.52"), Decimal("231.36")),
-        (Decimal("180"), Decimal("236.64")),
+        (Decimal(180), Decimal("236.64")),
         (Decimal("186.36"), Decimal("249.6")),
         (Decimal("192.88"), Decimal("263.4")),
         (Decimal("199.68"), Decimal("277.92")),
@@ -135,7 +134,7 @@ GENERAL_ELECTRIC_COEFFICIENTS_2026 = (
     (Decimal("40.04"), Decimal("70.44")),
     (Decimal("49.56"), Decimal("82.08")),
     (Decimal("65.88"), Decimal("95.64")),
-    (Decimal("78"), Decimal("111.36")),
+    (Decimal(78), Decimal("111.36")),
     (Decimal("92.4"), Decimal("129.72")),
     (Decimal("109.68"), Decimal("151.2")),
     (Decimal("129.96"), Decimal("176.16")),
@@ -166,11 +165,11 @@ def _volume_band_from_engine_summary(engine_summary: str | None) -> int | None:
     if match is None:
         return None
     nominal_liters = Decimal(match.group(1).replace(",", "."))
-    if nominal_liters <= Decimal("1"):
+    if nominal_liters <= Decimal(1):
         return 1000
-    if nominal_liters <= Decimal("2"):
+    if nominal_liters <= Decimal(2):
         return 2000
-    if nominal_liters <= Decimal("3"):
+    if nominal_liters <= Decimal(3):
         return 3000
     if nominal_liters <= Decimal("3.5"):
         return 3500

@@ -5,9 +5,7 @@ Revises: None
 """
 
 from alembic import op
-
 from autohome.models import Base
-
 
 revision = "0001_existing_schema"
 down_revision = None
@@ -22,4 +20,3 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Не удалять существующую пользовательскую базу при откате baseline."""
-    pass

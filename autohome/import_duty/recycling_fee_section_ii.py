@@ -9,8 +9,7 @@ from .recycling_fee import RecyclingFeeResult
 from .recycling_fee_regulation import RECYCLING_FEE_REGULATION_SOURCE
 from .types import CalculationStatus
 
-
-SECTION_II_BASE_RATE_RUB = Decimal("150000")
+SECTION_II_BASE_RATE_RUB = Decimal(150000)
 SECTION_II_RULES_VERSION = "RU-RECYCLING-FEE-SECTION-II-2026-v1"
 
 

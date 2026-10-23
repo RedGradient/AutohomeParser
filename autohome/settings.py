@@ -18,7 +18,7 @@ TELNETCONSOLE_ENABLED = False
 # Максимальное общее количество одновременно выполняемых запросов.
 CONCURRENT_REQUESTS = 100
 # Максимальное количество одновременных запросов к одному домену.
-CONCURRENT_REQUESTS_PER_DOMAIN = 24 # 24 - оптимальное значение
+CONCURRENT_REQUESTS_PER_DOMAIN = 24  # 24 - оптимальное значение
 # Минимальная задержка между запросами к одному домену в секундах.
 DOWNLOAD_DELAY = 0
 # Величина случайного отклонения задержки между запросами.
@@ -68,9 +68,7 @@ DATABASE_BATCH_SIZE = int(os.getenv("DATABASE_BATCH_SIZE", "1000"))
 # Максимальное число повторов пакетной транзакции после deadlock PostgreSQL.
 DATABASE_DEADLOCK_RETRIES = int(os.getenv("DATABASE_DEADLOCK_RETRIES", "6"))
 # Начальная задержка между повторами транзакции в секундах.
-DATABASE_DEADLOCK_RETRY_DELAY = float(
-    os.getenv("DATABASE_DEADLOCK_RETRY_DELAY", "0.1")
-)
+DATABASE_DEADLOCK_RETRY_DELAY = float(os.getenv("DATABASE_DEADLOCK_RETRY_DELAY", "0.1"))
 
 # Минимальный уровень сообщений, выводимых в журнал Scrapy.
 LOG_LEVEL = "INFO"

@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import json
 import multiprocessing
 import os
-from pathlib import Path
 import re
 import socket
 import subprocess
 import sys
 import time
-
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 LOG_COLORS = (
     "\033[96m",  # Ярко-голубой.
@@ -27,10 +26,7 @@ AUTOHOME_HOSTS = (
     "car.app.autohome.com.cn",
     "car.autohome.com.cn",
 )
-TREE_URL = (
-    "https://www.autohome.com.cn/web-main/car/web/price/"
-    "treeMenu?extendseries=1"
-)
+TREE_URL = "https://www.autohome.com.cn/web-main/car/web/price/treeMenu?extendseries=1"
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -190,7 +186,9 @@ def check_autohome_dns(interface: str, source_ip: str) -> None:
                 addresses,
             )
             available = [
-                address for address, is_available in zip(addresses, checks) if is_available
+                address
+                for address, is_available in zip(addresses, checks)
+                if is_available
             ]
         unavailable = [address for address in addresses if address not in available]
         if not available:
@@ -199,8 +197,7 @@ def check_autohome_dns(interface: str, source_ip: str) -> None:
                 f"DNS вернул {', '.join(addresses)}"
             )
         print(
-            f"Проверка DNS {interface}: {hostname} — доступны "
-            f"{', '.join(available)}",
+            f"Проверка DNS {interface}: {hostname} — доступны {', '.join(available)}",
             flush=True,
         )
         if unavailable:
@@ -263,7 +260,9 @@ def download_catalog(
 
     errors: list[str] = []
     for source_address in source_addresses:
-        temporary_path = catalog_path.with_name(f".{catalog_path.name}.{os.getpid()}.tmp")
+        temporary_path = catalog_path.with_name(
+            f".{catalog_path.name}.{os.getpid()}.tmp"
+        )
         command = [
             "curl",
             "-fsS",
@@ -420,7 +419,9 @@ def main() -> int:
             try:
                 check_autohome_dns(interface, address)
             except (OSError, RuntimeError) as error:
-                raise SystemExit(f"Проверка DNS завершилась ошибкой: {error}") from error
+                raise SystemExit(
+                    f"Проверка DNS завершилась ошибкой: {error}"
+                ) from error
         database_url = database_url_for_worker(
             args.database_url,
             args.database_dir,
@@ -434,7 +435,9 @@ def main() -> int:
             initialize_database(database_url)
         except Exception as error:
             safe_url = database_display_name(database_url)
-            raise SystemExit(f"Не удалось подготовить базу {safe_url}: {error}") from error
+            raise SystemExit(
+                f"Не удалось подготовить базу {safe_url}: {error}"
+            ) from error
 
     catalog_path = args.catalog_path.resolve()
     try:

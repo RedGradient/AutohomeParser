@@ -626,9 +626,7 @@ class TechnicalCategoryInferenceTests(unittest.TestCase):
                     gross_mass_kg=gross_mass,
                     is_special_purpose=False,
                 )
-                self.assertEqual(
-                    result.value("vehicle_technical_category"), expected
-                )
+                self.assertEqual(result.value("vehicle_technical_category"), expected)
 
     def test_goods_categories_use_3500_and_12000_kg_boundaries(self):
         cases = (
@@ -646,9 +644,7 @@ class TechnicalCategoryInferenceTests(unittest.TestCase):
                     gross_mass_kg=gross_mass,
                     is_special_purpose=False,
                 )
-                self.assertEqual(
-                    result.value("vehicle_technical_category"), expected
-                )
+                self.assertEqual(result.value("vehicle_technical_category"), expected)
 
     def test_bus_without_gross_mass_remains_unknown(self):
         result = infer_vehicle_attributes(
@@ -758,9 +754,7 @@ class InferencePersistenceTests(unittest.TestCase):
 
         self.assertIs(row["is_special_purpose"], False)
         self.assertEqual(row["inference_flags_json"], [INFERRED_INPUTS_USED])
-        details = row["inference_details_json"]["decisions"][
-            "is_special_purpose"
-        ]
+        details = row["inference_details_json"]["decisions"]["is_special_purpose"]
         self.assertEqual(details["outcome"], "APPLIED")
         self.assertEqual(
             details["rule_code"],
@@ -776,9 +770,7 @@ class InferencePersistenceTests(unittest.TestCase):
         self.assertIs(row["is_special_purpose"], True)
         self.assertEqual(row["inference_flags_json"], [])
         self.assertEqual(
-            row["inference_details_json"]["decisions"]["is_special_purpose"][
-                "outcome"
-            ],
+            row["inference_details_json"]["decisions"]["is_special_purpose"]["outcome"],
             "CONFLICT_EXPLICIT",
         )
         self.assertEqual(row["warnings_json"][0]["code"], "INFERENCE_CONFLICT")
@@ -935,9 +927,7 @@ class InferencePersistenceTests(unittest.TestCase):
 
         self.assertEqual(row["gross_mass_kg"], 4200)
         self.assertEqual(
-            row["inference_details_json"]["decisions"]["gross_mass_kg"][
-                "rule_code"
-            ],
+            row["inference_details_json"]["decisions"]["gross_mass_kg"]["rule_code"],
             "TRUCK_GROSS_MASS_FROM_SERIES_NAME",
         )
 

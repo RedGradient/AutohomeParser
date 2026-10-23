@@ -8,7 +8,6 @@ from xml.etree import ElementTree
 
 from .types import ExchangeRate
 
-
 CBR_DAILY_URL = "https://www.cbr.ru/scripts/XML_daily.asp"
 
 

@@ -7,7 +7,6 @@ import os
 from celery import Celery
 from celery.schedules import crontab
 
-
 app = Celery("autohome")
 app.conf.update(
     broker_url=os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0"),
