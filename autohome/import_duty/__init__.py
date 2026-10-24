@@ -8,6 +8,7 @@ from .classifier import (
     classify_vehicle,
 )
 from .customs_fee import calculate_customs_fee
+from .excise import ExciseContext, ExciseResult, calculate_excise
 from .recycling_fee import RecyclingFeeContext, calculate_recycling_fee
 from .recycling_fee_regulation import (
     RecyclingFeeRegulatoryInput,
@@ -41,6 +42,8 @@ __all__ = (
     "DutyContext",
     "DutyResult",
     "ExchangeRate",
+    "ExciseContext",
+    "ExciseResult",
     "ImporterType",
     "RecyclingFeeContext",
     "RecyclingFeeRegulatoryInput",
@@ -56,6 +59,7 @@ __all__ = (
     "VehicleClassificationInput",
     "VehicleClassificationResult",
     "calculate_customs_fee",
+    "calculate_excise",
     "calculate_import_duty",
     "calculate_recycling_fee",
     "calculate_section_ii_recycling_fee",

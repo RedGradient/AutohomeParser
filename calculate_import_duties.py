@@ -16,6 +16,7 @@ from autohome.import_duty import (
     CLASSIFICATION_RULES_VERSION,
     DutyContext,
     ExchangeRate,
+    ExciseContext,
     ImporterType,
     RecyclingFeeContext,
     RecyclingFeeRegulatoryInput,
@@ -28,6 +29,7 @@ from autohome.import_duty import (
     SectionVRecyclingFeeContext,
     VehicleClassificationInput,
     calculate_customs_fee,
+    calculate_excise,
     calculate_import_duty,
     calculate_recycling_fee,
     calculate_section_ii_recycling_fee,
@@ -328,6 +330,28 @@ def calculate_row_recycling_fee(
     return result, vehicle_kind, vehicle_kind_source
 
 
+def calculate_row_excise(row, importer: ImporterType, calculation_date: date):
+    """Рассчитать акциз для коммерческого ввоза легкового автомобиля."""
+    if importer != ImporterType.LEGAL_ENTITY:
+        return None
+    if getattr(row, "vehicle_technical_category", None) != "M1":
+        return None
+    return calculate_excise(
+        ExciseContext(
+            calculation_date=calculation_date,
+            energy_type=row.energy_type,
+            engine_power_kw=getattr(row, "engine_power_kw", None),
+            engine_power_hp=row.engine_power_hp,
+            normative_power_kw=getattr(row, "recycling_fee_power_kw", None),
+            normative_power_source=getattr(
+                row,
+                "recycling_fee_power_source",
+                None,
+            ),
+        )
+    )
+
+
 def make_rows(
     row,
     importer: ImporterType,
@@ -390,6 +414,7 @@ def make_rows(
             personal_use,
         )
     )
+    excise_result = calculate_row_excise(row, importer, calculation_date)
     calculation_id = stable_calculation_id(
         row.id, importer, calculation_date, price_source
     )
@@ -490,6 +515,9 @@ def make_rows(
             "body_type": row.body_type,
             "engine_displacement_cc": row.engine_displacement_ml,
             "engine_summary": getattr(row, "engine_summary", None),
+            "engine_power_kw": str(row.engine_power_kw)
+            if getattr(row, "engine_power_kw", None) is not None
+            else None,
             "engine_power_hp": str(row.engine_power_hp)
             if row.engine_power_hp is not None
             else None,
@@ -581,6 +609,17 @@ def make_rows(
             "details_json": dict(recycling_fee_result.details),
         },
     ]
+    if excise_result is not None:
+        payments.append(
+            {
+                "calculation_id": calculation_id,
+                "payment_type": "EXCISE",
+                "amount_rub": excise_result.amount_rub,
+                "status": excise_result.status.value,
+                "rule_code": excise_result.rule_code,
+                "details_json": dict(excise_result.details),
+            }
+        )
     return calculation, payments
 
 
@@ -668,6 +707,7 @@ def main() -> int:
             SpecPowertrain.energy_type,
             SpecPowertrain.engine_displacement_ml,
             SpecPowertrain.engine_summary,
+            SpecPowertrain.engine_power_kw,
             SpecPowertrain.engine_power_hp,
             SpecPowertrain.motor_total_power_kw,
             SpecPowertrain.recycling_fee_powertrain_type,
