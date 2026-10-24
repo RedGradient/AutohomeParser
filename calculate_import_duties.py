@@ -16,6 +16,7 @@ from autohome.import_duty import (
     CLASSIFICATION_RULES_VERSION,
     DutyContext,
     ExchangeRate,
+    ExciseContext,
     ImporterType,
     RecyclingFeeContext,
     RecyclingFeeRegulatoryInput,
@@ -28,6 +29,7 @@ from autohome.import_duty import (
     SectionVRecyclingFeeContext,
     VehicleClassificationInput,
     calculate_customs_fee,
+    calculate_excise,
     calculate_import_duty,
     calculate_recycling_fee,
     calculate_section_ii_recycling_fee,
@@ -39,6 +41,8 @@ from autohome.import_duty import (
 )
 from autohome.import_duty.calculator import assumed_production_date, completed_months
 from autohome.import_duty.currency import fetch_cbr_rates
+from autohome.import_duty.excise import ExciseResult
+from autohome.import_duty.excise_rates import EXCISE_RULES_SOURCE, EXCISE_RULES_VERSION
 from autohome.import_duty.rates import RULES_VERSION
 from autohome.import_duty.recycling_fee import RecyclingFeeResult
 from autohome.import_duty.types import (
@@ -328,6 +332,60 @@ def calculate_row_recycling_fee(
     return result, vehicle_kind, vehicle_kind_source
 
 
+def calculate_row_excise(
+    row,
+    importer: ImporterType,
+    calculation_date: date,
+) -> ExciseResult:
+    """Определить применимость и рассчитать акциз одного автомобиля."""
+    common_details = {
+        "source": EXCISE_RULES_SOURCE,
+        "rules_version": EXCISE_RULES_VERSION,
+    }
+    if importer == ImporterType.INDIVIDUAL:
+        return ExciseResult(
+            status=CalculationStatus.NOT_APPLICABLE,
+            rule_code="EXCISE_NOT_APPLICABLE_PERSONAL_USE",
+            details={**common_details, "reason": "PERSONAL_USE"},
+        )
+
+    category = getattr(row, "vehicle_technical_category", None)
+    if category in {"M2", "M3", "N1", "N2", "N3"}:
+        return ExciseResult(
+            status=CalculationStatus.NOT_APPLICABLE,
+            rule_code="EXCISE_NOT_APPLICABLE_VEHICLE_CATEGORY",
+            details={
+                **common_details,
+                "reason": "VEHICLE_CATEGORY",
+                "vehicle_technical_category": category,
+            },
+        )
+    if category != "M1":
+        return ExciseResult(
+            status=CalculationStatus.MANUAL_REVIEW,
+            rule_code="EXCISE_VEHICLE_CATEGORY_REQUIRES_REVIEW",
+            details={
+                **common_details,
+                "reason": "UNKNOWN_VEHICLE_CATEGORY",
+                "vehicle_technical_category": category,
+            },
+        )
+    return calculate_excise(
+        ExciseContext(
+            calculation_date=calculation_date,
+            energy_type=row.energy_type,
+            engine_power_kw=getattr(row, "engine_power_kw", None),
+            engine_power_hp=row.engine_power_hp,
+            normative_power_kw=getattr(row, "recycling_fee_power_kw", None),
+            normative_power_source=getattr(
+                row,
+                "recycling_fee_power_source",
+                None,
+            ),
+        )
+    )
+
+
 def make_rows(
     row,
     importer: ImporterType,
@@ -390,6 +448,7 @@ def make_rows(
             personal_use,
         )
     )
+    excise_result = calculate_row_excise(row, importer, calculation_date)
     calculation_id = stable_calculation_id(
         row.id, importer, calculation_date, price_source
     )
@@ -490,6 +549,9 @@ def make_rows(
             "body_type": row.body_type,
             "engine_displacement_cc": row.engine_displacement_ml,
             "engine_summary": getattr(row, "engine_summary", None),
+            "engine_power_kw": str(row.engine_power_kw)
+            if getattr(row, "engine_power_kw", None) is not None
+            else None,
             "engine_power_hp": str(row.engine_power_hp)
             if row.engine_power_hp is not None
             else None,
@@ -581,6 +643,16 @@ def make_rows(
             "details_json": dict(recycling_fee_result.details),
         },
     ]
+    payments.append(
+        {
+            "calculation_id": calculation_id,
+            "payment_type": "EXCISE",
+            "amount_rub": excise_result.amount_rub,
+            "status": excise_result.status.value,
+            "rule_code": excise_result.rule_code,
+            "details_json": dict(excise_result.details),
+        }
+    )
     return calculation, payments
 
 
@@ -668,6 +740,7 @@ def main() -> int:
             SpecPowertrain.energy_type,
             SpecPowertrain.engine_displacement_ml,
             SpecPowertrain.engine_summary,
+            SpecPowertrain.engine_power_kw,
             SpecPowertrain.engine_power_hp,
             SpecPowertrain.motor_total_power_kw,
             SpecPowertrain.recycling_fee_powertrain_type,

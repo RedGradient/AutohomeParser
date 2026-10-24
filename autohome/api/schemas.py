@@ -381,9 +381,19 @@ class PhotoResponse(ApiSchema):
 class CustomsPaymentResponse(ApiSchema):
     """Один компонент таможенных платежей."""
 
-    payment_type: str = Field(description="Тип платежа.", examples=["IMPORT_DUTY"])
+    payment_type: str = Field(
+        description=(
+            "Тип платежа: IMPORT_DUTY, CUSTOMS_FEE, RECYCLING_FEE или EXCISE."
+        ),
+        examples=["IMPORT_DUTY"],
+    )
     amount_rub: Money | None = Field(description="Сумма платежа в рублях.")
-    status: str = Field(description="Статус расчёта компонента.")
+    status: str = Field(
+        description=(
+            "Статус компонента: CALCULATED, NOT_APPLICABLE, MISSING_DATA, "
+            "UNSUPPORTED или MANUAL_REVIEW."
+        )
+    )
     rule_code: str | None = Field(description="Код применённого правила.")
     details: dict[str, Any] = Field(
         description="Промежуточные значения и пояснения расчёта."
@@ -420,10 +430,13 @@ class CustomsCalculationResponse(ApiSchema):
         description="Отдельные компоненты платежей."
     )
     total_rub: Money | None = Field(
-        description="Итоговая сумма в RUB, если рассчитаны все компоненты."
+        description=(
+            "Сумма применимых платежей в RUB, если каждый компонент рассчитан "
+            "или неприменим."
+        )
     )
     is_total_complete: bool = Field(
-        description="Полностью ли рассчитана итоговая сумма."
+        description=("Рассчитаны ли все применимые компоненты таможенных платежей.")
     )
 
 
