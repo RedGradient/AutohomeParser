@@ -18,6 +18,7 @@ class CalculationStatus(StrEnum):
     """Состояние результата расчёта."""
 
     CALCULATED = "CALCULATED"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
     MISSING_DATA = "MISSING_DATA"
     UNSUPPORTED = "UNSUPPORTED"
     MANUAL_REVIEW = "MANUAL_REVIEW"

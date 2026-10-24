@@ -102,7 +102,9 @@ EXPECTED_CUSTOMS_PAYMENT_TYPES = {
     "IMPORT_DUTY",
     "CUSTOMS_FEE",
     "RECYCLING_FEE",
+    "EXCISE",
 }
+LEGACY_CUSTOMS_PAYMENT_TYPES = EXPECTED_CUSTOMS_PAYMENT_TYPES - {"EXCISE"}
 INCLUDE_TOTAL_DESCRIPTION = (
     "Если true, возвращает общее количество найденных записей. "
     "Может увеличить время ответа."
@@ -1584,13 +1586,25 @@ def create_app(
                 .order_by(CustomsPaymentResult.payment_type)
             ).scalars()
         )
-        complete = {
-            item.payment_type for item in payments
-        } == EXPECTED_CUSTOMS_PAYMENT_TYPES and all(
-            item.status == "CALCULATED" and item.amount_rub is not None
+        payment_types = {item.payment_type for item in payments}
+        expected_types_present = payment_types in {
+            frozenset(EXPECTED_CUSTOMS_PAYMENT_TYPES),
+            frozenset(LEGACY_CUSTOMS_PAYMENT_TYPES),
+        }
+        complete = expected_types_present and all(
+            (item.status == "CALCULATED" and item.amount_rub is not None)
+            or (item.status == "NOT_APPLICABLE" and item.amount_rub is None)
             for item in payments
         )
-        amounts = [item.amount_rub for item in payments] if complete else []
+        amounts = (
+            [
+                item.amount_rub
+                for item in payments
+                if item.status == "CALCULATED" and item.amount_rub is not None
+            ]
+            if complete
+            else []
+        )
         return {
             "id": calculation.id,
             "spec_id": calculation.spec_id,
