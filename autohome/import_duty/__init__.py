@@ -36,6 +36,7 @@ from .recycling_fee_section_v import (
     calculate_section_v_recycling_fee,
 )
 from .types import DutyContext, DutyResult, ExchangeRate, ImporterType
+from .vat import VatContext, VatResult, calculate_vat
 
 __all__ = (
     "CLASSIFICATION_RULES_VERSION",
@@ -58,6 +59,8 @@ __all__ = (
     "SectionVRecyclingFeeContext",
     "VehicleClassificationInput",
     "VehicleClassificationResult",
+    "VatContext",
+    "VatResult",
     "calculate_customs_fee",
     "calculate_excise",
     "calculate_import_duty",
@@ -66,6 +69,7 @@ __all__ = (
     "calculate_section_iii_recycling_fee",
     "calculate_section_iv_recycling_fee",
     "calculate_section_v_recycling_fee",
+    "calculate_vat",
     "classify_vehicle",
     "route_recycling_fee_regulation",
 )

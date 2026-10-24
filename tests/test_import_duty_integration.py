@@ -64,6 +64,54 @@ def database_row(**overrides):
 
 
 class ImportDutyClassificationIntegrationTests(unittest.TestCase):
+    def test_personal_use_marks_vat_not_applicable(self):
+        _, payments = make_rows(
+            database_row(),
+            ImporterType.INDIVIDUAL,
+            CALCULATION_DATE,
+            RATES,
+        )
+
+        vat = next(item for item in payments if item["payment_type"] == "VAT")
+        self.assertEqual(vat["status"], "NOT_APPLICABLE")
+        self.assertIsNone(vat["amount_rub"])
+
+    def test_commercial_m1_has_calculated_vat(self):
+        _, payments = make_rows(
+            database_row(),
+            ImporterType.LEGAL_ENTITY,
+            CALCULATION_DATE,
+            RATES,
+        )
+
+        vat = next(item for item in payments if item["payment_type"] == "VAT")
+        self.assertEqual(vat["status"], "CALCULATED")
+        self.assertEqual(vat["amount_rub"], Decimal("280371.17"))
+
+    def test_vat_is_blocked_when_excise_is_not_applicable(self):
+        _, payments = make_rows(
+            database_row(vehicle_technical_category="N1"),
+            ImporterType.LEGAL_ENTITY,
+            CALCULATION_DATE,
+            RATES,
+        )
+
+        vat = next(item for item in payments if item["payment_type"] == "VAT")
+        self.assertEqual(vat["status"], "UNSUPPORTED")
+        self.assertEqual(vat["details_json"]["dependency_status"], "NOT_APPLICABLE")
+
+    def test_vat_inherits_blocking_import_duty_status(self):
+        _, payments = make_rows(
+            database_row(seat_count_min=None, seat_count_max=None),
+            ImporterType.LEGAL_ENTITY,
+            CALCULATION_DATE,
+            RATES,
+        )
+
+        vat = next(item for item in payments if item["payment_type"] == "VAT")
+        self.assertEqual(vat["status"], "MISSING_DATA")
+        self.assertEqual(vat["details_json"]["dependency_status"], "MISSING_DATA")
+
     def test_personal_use_marks_excise_not_applicable(self):
         _, payments = make_rows(
             database_row(),

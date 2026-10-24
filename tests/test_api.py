@@ -150,6 +150,14 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
                         details_json={"reason": "PERSONAL_USE"},
                     ),
                     CustomsPaymentResult(
+                        calculation_id=900,
+                        payment_type="VAT",
+                        amount_rub=None,
+                        status="NOT_APPLICABLE",
+                        rule_code="VAT_NOT_APPLICABLE_PERSONAL_USE",
+                        details_json={"reason": "PERSONAL_USE"},
+                    ),
+                    CustomsPaymentResult(
                         calculation_id=901,
                         payment_type="CUSTOMS_FEE",
                         amount_rub=Decimal("4924.00"),
@@ -370,6 +378,13 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(excise["status"], "NOT_APPLICABLE")
         self.assertIsNone(excise["amount_rub"])
+        vat = next(
+            item
+            for item in response.json()["payments"]
+            if item["payment_type"] == "VAT"
+        )
+        self.assertEqual(vat["status"], "NOT_APPLICABLE")
+        self.assertIsNone(vat["amount_rub"])
 
     async def test_customs_response_has_no_total_for_incomplete_payments(self):
         response = await self.client.get("/api/v1/customs-calculations/901")
