@@ -22,7 +22,6 @@ from .excise_rates import (
 from .types import CalculationStatus
 
 KW_PER_TAX_HP = Decimal("0.75")
-KW_PER_METRIC_HP = Decimal("0.73549875")
 MONEY = Decimal("0.01")
 
 
@@ -32,6 +31,7 @@ class ExcisePowerSelection:
 
     powertrain_type: str
     power_kw: Decimal | None
+    power_hp: Decimal | None
     source: str | None
     missing_fields: tuple[str, ...] = ()
 
@@ -74,16 +74,19 @@ def select_excise_power(
             return ExcisePowerSelection(
                 powertrain_type.value,
                 engine_power_kw,
+                engine_power_kw / KW_PER_TAX_HP,
                 RecyclingFeePowerSource.ENGINE_POWER_KW.value,
             )
         if engine_power_hp is not None and engine_power_hp > 0:
             return ExcisePowerSelection(
                 powertrain_type.value,
-                (engine_power_hp * KW_PER_METRIC_HP).quantize(Decimal("0.001")),
+                (engine_power_hp * KW_PER_TAX_HP).quantize(Decimal("0.001")),
+                engine_power_hp,
                 RecyclingFeePowerSource.ENGINE_POWER_HP_CONVERTED.value,
             )
         return ExcisePowerSelection(
             powertrain_type.value,
+            None,
             None,
             None,
             ("engine_power_kw",),
@@ -114,6 +117,7 @@ def select_excise_power(
         return ExcisePowerSelection(
             powertrain_type.value,
             normative_power_kw,
+            normative_power_kw / KW_PER_TAX_HP,
             normative_power_source,
         )
 
@@ -122,10 +126,12 @@ def select_excise_power(
             powertrain_type.value,
             None,
             None,
+            None,
             ("energy_type",),
         )
     return ExcisePowerSelection(
         powertrain_type.value,
+        None,
         None,
         None,
         ("normative_power_kw", "normative_power_source"),
@@ -151,7 +157,7 @@ def calculate_excise(context: ExciseContext) -> ExciseResult:
         normative_power_kw=context.normative_power_kw,
         normative_power_source=context.normative_power_source,
     )
-    if selection.power_kw is None:
+    if selection.power_kw is None or selection.power_hp is None:
         return ExciseResult(
             status=CalculationStatus.MISSING_DATA,
             details={
@@ -163,8 +169,7 @@ def calculate_excise(context: ExciseContext) -> ExciseResult:
 
     rate = excise_rate_for_power(context.calculation_date.year, selection.power_kw)
     assert rate is not None
-    taxable_power_units = selection.power_kw / KW_PER_TAX_HP
-    amount = (taxable_power_units * rate.rate_rub_per_power_unit).quantize(
+    amount = (selection.power_hp * rate.rate_rub_per_power_unit).quantize(
         MONEY,
         rounding=ROUND_HALF_UP,
     )
@@ -174,10 +179,10 @@ def calculate_excise(context: ExciseContext) -> ExciseResult:
         rule_code=rate.rule_code,
         details={
             **common_details,
-            "formula": "power_kw / 0.75 * rate_rub_per_power_unit",
+            "formula": "power_hp * rate_rub_per_power_unit",
             "powertrain_type": selection.powertrain_type,
             "power_kw": str(selection.power_kw),
-            "power_hp": str(taxable_power_units.quantize(Decimal("0.001"))),
+            "power_hp": str(selection.power_hp.quantize(Decimal("0.001"))),
             "power_source": selection.source,
             "rate_rub_per_power_unit": str(rate.rate_rub_per_power_unit),
             "amount_rub": str(amount),

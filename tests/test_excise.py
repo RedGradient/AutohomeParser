@@ -48,7 +48,7 @@ class ExciseCalculationTests(unittest.TestCase):
         self.assertEqual(result.amount_rub, Decimal("9600.00"))
         self.assertEqual(result.details["power_source"], "ENGINE_POWER_KW")
 
-    def test_ice_converts_metric_horsepower(self):
+    def test_ice_uses_horsepower_when_kw_is_missing(self):
         result = calculate_excise(
             ExciseContext(
                 calculation_date=date(2026, 1, 1),
@@ -58,11 +58,25 @@ class ExciseCalculationTests(unittest.TestCase):
         )
 
         self.assertEqual(result.status.value, "CALCULATED")
-        self.assertEqual(result.amount_rub, Decimal("9414.40"))
+        self.assertEqual(result.amount_rub, Decimal("9600.00"))
         self.assertEqual(
             result.details["power_source"],
             "ENGINE_POWER_HP_CONVERTED",
         )
+
+    def test_ice_prefers_kw_when_both_power_values_are_available(self):
+        result = calculate_excise(
+            ExciseContext(
+                calculation_date=date(2026, 1, 1),
+                energy_type="GASOLINE",
+                engine_power_kw=Decimal(588),
+                engine_power_hp=Decimal(800),
+            )
+        )
+
+        self.assertEqual(result.status.value, "CALCULATED")
+        self.assertEqual(result.amount_rub, Decimal("1433936.00"))
+        self.assertEqual(result.details["power_source"], "ENGINE_POWER_KW")
 
     def test_electric_vehicle_rejects_peak_power_as_normative(self):
         result = calculate_excise(

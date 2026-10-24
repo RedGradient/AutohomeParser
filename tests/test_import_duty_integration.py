@@ -86,7 +86,7 @@ class ImportDutyClassificationIntegrationTests(unittest.TestCase):
 
         vat = next(item for item in payments if item["payment_type"] == "VAT")
         self.assertEqual(vat["status"], "CALCULATED")
-        self.assertEqual(vat["amount_rub"], Decimal("280371.17"))
+        self.assertEqual(vat["amount_rub"], Decimal("280412.00"))
 
     def test_vat_is_blocked_when_excise_is_not_applicable(self):
         _, payments = make_rows(
@@ -134,7 +134,7 @@ class ImportDutyClassificationIntegrationTests(unittest.TestCase):
 
         excise = next(item for item in payments if item["payment_type"] == "EXCISE")
         self.assertEqual(excise["status"], "CALCULATED")
-        self.assertEqual(excise["amount_rub"], Decimal("9414.40"))
+        self.assertEqual(excise["amount_rub"], Decimal("9600.00"))
 
     def test_commercial_non_m1_marks_excise_not_applicable(self):
         _, payments = make_rows(
