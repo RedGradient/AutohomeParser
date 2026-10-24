@@ -103,8 +103,12 @@ EXPECTED_CUSTOMS_PAYMENT_TYPES = {
     "CUSTOMS_FEE",
     "RECYCLING_FEE",
     "EXCISE",
+    "VAT",
 }
-LEGACY_CUSTOMS_PAYMENT_TYPES = EXPECTED_CUSTOMS_PAYMENT_TYPES - {"EXCISE"}
+LEGACY_CUSTOMS_PAYMENT_TYPE_SETS = {
+    frozenset(EXPECTED_CUSTOMS_PAYMENT_TYPES - {"VAT"}),
+    frozenset(EXPECTED_CUSTOMS_PAYMENT_TYPES - {"VAT", "EXCISE"}),
+}
 INCLUDE_TOTAL_DESCRIPTION = (
     "Если true, возвращает общее количество найденных записей. "
     "Может увеличить время ответа."
@@ -1589,7 +1593,7 @@ def create_app(
         payment_types = {item.payment_type for item in payments}
         expected_types_present = payment_types in {
             frozenset(EXPECTED_CUSTOMS_PAYMENT_TYPES),
-            frozenset(LEGACY_CUSTOMS_PAYMENT_TYPES),
+            *LEGACY_CUSTOMS_PAYMENT_TYPE_SETS,
         }
         complete = expected_types_present and all(
             (item.status == "CALCULATED" and item.amount_rub is not None)

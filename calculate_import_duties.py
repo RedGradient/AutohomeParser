@@ -27,6 +27,7 @@ from autohome.import_duty import (
     SectionIIRecyclingFeeContext,
     SectionIVRecyclingFeeContext,
     SectionVRecyclingFeeContext,
+    VatContext,
     VehicleClassificationInput,
     calculate_customs_fee,
     calculate_excise,
@@ -36,6 +37,7 @@ from autohome.import_duty import (
     calculate_section_iii_recycling_fee,
     calculate_section_iv_recycling_fee,
     calculate_section_v_recycling_fee,
+    calculate_vat,
     classify_vehicle,
     route_recycling_fee_regulation,
 )
@@ -49,6 +51,12 @@ from autohome.import_duty.types import (
     CalculationStatus,
     ClassificationStatus,
     DutyResult,
+)
+from autohome.import_duty.vat import VatResult
+from autohome.import_duty.vat_rates import (
+    VAT_BASE_RULES_SOURCE,
+    VAT_RATE_RULES_SOURCE,
+    VAT_RULES_VERSION,
 )
 from autohome.models import (
     CustomsCalculation,
@@ -386,6 +394,61 @@ def calculate_row_excise(
     )
 
 
+def calculate_row_vat(
+    importer: ImporterType,
+    calculation_date: date,
+    customs_value_rub: Decimal | None,
+    import_duty_result: DutyResult,
+    excise_result: ExciseResult,
+) -> VatResult:
+    """Определить применимость и рассчитать НДС одного автомобиля."""
+    common_details = {
+        "rate_source": VAT_RATE_RULES_SOURCE,
+        "tax_base_source": VAT_BASE_RULES_SOURCE,
+        "rules_version": VAT_RULES_VERSION,
+    }
+    if importer == ImporterType.INDIVIDUAL:
+        return VatResult(
+            status=CalculationStatus.NOT_APPLICABLE,
+            rule_code="VAT_NOT_APPLICABLE_PERSONAL_USE",
+            details={**common_details, "reason": "PERSONAL_USE"},
+        )
+
+    if import_duty_result.status != CalculationStatus.CALCULATED:
+        return VatResult(
+            status=import_duty_result.status,
+            rule_code="VAT_BLOCKED_BY_IMPORT_DUTY",
+            details={
+                **common_details,
+                "reason": "IMPORT_DUTY_NOT_CALCULATED",
+                "dependency_status": import_duty_result.status.value,
+            },
+        )
+
+    if excise_result.status != CalculationStatus.CALCULATED:
+        status = excise_result.status
+        if status == CalculationStatus.NOT_APPLICABLE:
+            status = CalculationStatus.UNSUPPORTED
+        return VatResult(
+            status=status,
+            rule_code="VAT_BLOCKED_BY_EXCISE",
+            details={
+                **common_details,
+                "reason": "EXCISE_NOT_CALCULATED",
+                "dependency_status": excise_result.status.value,
+            },
+        )
+
+    return calculate_vat(
+        VatContext(
+            calculation_date=calculation_date,
+            customs_value_rub=customs_value_rub,
+            import_duty_rub=import_duty_result.amount_rub,
+            excise_rub=excise_result.amount_rub,
+        )
+    )
+
+
 def make_rows(
     row,
     importer: ImporterType,
@@ -449,6 +512,13 @@ def make_rows(
         )
     )
     excise_result = calculate_row_excise(row, importer, calculation_date)
+    vat_result = calculate_row_vat(
+        importer,
+        calculation_date,
+        customs_value_rub,
+        result,
+        excise_result,
+    )
     calculation_id = stable_calculation_id(
         row.id, importer, calculation_date, price_source
     )
@@ -651,6 +721,16 @@ def make_rows(
             "status": excise_result.status.value,
             "rule_code": excise_result.rule_code,
             "details_json": dict(excise_result.details),
+        }
+    )
+    payments.append(
+        {
+            "calculation_id": calculation_id,
+            "payment_type": "VAT",
+            "amount_rub": vat_result.amount_rub,
+            "status": vat_result.status.value,
+            "rule_code": vat_result.rule_code,
+            "details_json": dict(vat_result.details),
         }
     )
     return calculation, payments

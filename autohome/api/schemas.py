@@ -383,7 +383,7 @@ class CustomsPaymentResponse(ApiSchema):
 
     payment_type: str = Field(
         description=(
-            "Тип платежа: IMPORT_DUTY, CUSTOMS_FEE, RECYCLING_FEE или EXCISE."
+            "Тип платежа: IMPORT_DUTY, CUSTOMS_FEE, RECYCLING_FEE, EXCISE или VAT."
         ),
         examples=["IMPORT_DUTY"],
     )
