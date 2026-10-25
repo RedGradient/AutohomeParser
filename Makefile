@@ -9,7 +9,6 @@ POSTGRES_DB ?= autohome
 POSTGRES_USER ?= autohome
 POSTGRES_PASSWORD ?= autohome
 POSTGRES_PORT ?= 5432
-AUTOHOME_INTERFACES ?= wlp0s20f3,enp0s20f0u1c4i2
 DATABASE_BATCH_SIZE ?= 1000
 SHUTDOWN_TIMEOUT ?= 120
 NORMALIZE_VEHICLE_ATTRIBUTES_ARGS ?=
@@ -25,10 +24,6 @@ API_PASSWORD ?= autohome
 API_JWT_SECRET ?= development-only-autohome-jwt-secret-change-me
 API_JWT_TTL_SECONDS ?= 3600
 DATABASE_URL ?= postgresql+psycopg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@127.0.0.1:$(POSTGRES_PORT)/$(POSTGRES_DB)
-
-# Используемые по умолчанию сетевые интерфейсы.
-WIFI_IF ?= wlp0s20f3
-ETH_IF ?= enp0s20f0u1c4i2
 
 # Отдельные таблицы и приоритеты выбраны из редко используемого диапазона.
 WIFI_TABLE := 10101
@@ -83,6 +78,8 @@ pre-commit-install:
 	@.venv/bin/pre-commit install
 
 network-up:
+	@[ -n "$(WIFI_IF)" ] || { echo "Не задан WIFI_IF" >&2; exit 1; }
+	[ -n "$(ETH_IF)" ] || { echo "Не задан ETH_IF" >&2; exit 1; }
 	@wifi_cidr="$$(ip -o -4 addr show dev "$(WIFI_IF)" scope global | awk 'NR == 1 {print $$4}')"
 	eth_cidr="$$(ip -o -4 addr show dev "$(ETH_IF)" scope global | awk 'NR == 1 {print $$4}')"
 	[[ -n "$$wifi_cidr" ]] || { echo "Нет IPv4-адреса на $(WIFI_IF)" >&2; exit 1; }
@@ -117,6 +114,8 @@ network-down:
 	echo "Временные правила маршрутизации удалены."
 
 network-status:
+	@[ -n "$(WIFI_IF)" ] || { echo "Не задан WIFI_IF" >&2; exit 1; }
+	[ -n "$(ETH_IF)" ] || { echo "Не задан ETH_IF" >&2; exit 1; }
 	@ip -br -4 addr show dev "$(WIFI_IF)"
 	ip -br -4 addr show dev "$(ETH_IF)"
 	echo
@@ -129,6 +128,8 @@ network-status:
 	ip -4 route show table $(ETH_TABLE)
 
 network-test:
+	@[ -n "$(WIFI_IF)" ] || { echo "Не задан WIFI_IF" >&2; exit 1; }
+	[ -n "$(ETH_IF)" ] || { echo "Не задан ETH_IF" >&2; exit 1; }
 	@wifi_ip="$$(ip -o -4 addr show dev "$(WIFI_IF)" scope global | awk 'NR == 1 {sub(/\/.*/, "", $$4); print $$4}')"
 	eth_ip="$$(ip -o -4 addr show dev "$(ETH_IF)" scope global | awk 'NR == 1 {sub(/\/.*/, "", $$4); print $$4}')"
 	[[ -n "$$wifi_ip" && -n "$$eth_ip" ]] || { echo "Не найдены IPv4-адреса интерфейсов" >&2; exit 1; }
@@ -159,11 +160,13 @@ celery-logs:
 	@docker compose -f '$(COMPOSE_FILE)' logs -f celery-worker celery-beat
 
 parser-run: postgres-up
+	@[ -n "$(AUTOHOME_INTERFACES)" ] || { echo "Не задан AUTOHOME_INTERFACES" >&2; exit 1; }
 	@docker compose -f '$(COMPOSE_FILE)' run --rm parser \
 		--interfaces '$(AUTOHOME_INTERFACES)' \
 		--shutdown-timeout '$(SHUTDOWN_TIMEOUT)'
 
 parser-resume: postgres-up
+	@[ -n "$(AUTOHOME_INTERFACES)" ] || { echo "Не задан AUTOHOME_INTERFACES" >&2; exit 1; }
 	@docker compose -f '$(COMPOSE_FILE)' run --rm parser \
 		--interfaces '$(AUTOHOME_INTERFACES)' \
 		--shutdown-timeout '$(SHUTDOWN_TIMEOUT)' \

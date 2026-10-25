@@ -84,6 +84,22 @@ make COMPOSE_FILE=compose.prod.yaml api-up
 `make network-up`. Каталог `data/` подключается в контейнер и сохраняет кеш
 каталога и состояние загрузки:
 
+Имена интерфейсов зависят от компьютера. Посмотрите их командой:
+
+```bash
+ip -br link
+```
+
+Затем задайте их в `.env`. Например, имена `wlp0s20f3` и
+`enp0s20f0u1c4i2` относятся только к одному из возможных вариантов
+конфигурации ноутбука:
+
+```dotenv
+AUTOHOME_INTERFACES=wlp0s20f3,enp0s20f0u1c4i2
+WIFI_IF=wlp0s20f3
+ETH_IF=enp0s20f0u1c4i2
+```
+
 ```bash
 make network-up
 make parser-run
