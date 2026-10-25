@@ -27,6 +27,11 @@ class ScheduledCbrRatesTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         database_path = Path(self.temp_dir.name) / "rates.sqlite3"
         self.database_url = f"sqlite:///{database_path}"
+        engine = create_engine(self.database_url)
+        try:
+            CbrExchangeRate.__table__.create(engine)
+        finally:
+            engine.dispose()
         self.today = date(2026, 10, 22)
         self.yesterday = date(2026, 10, 21)
         self.calls: list[tuple[date, dict[str, ExchangeRate]]] = []

@@ -135,3 +135,32 @@ class AlembicMigrationTests(unittest.TestCase):
                 self.assertTrue(removed_names.isdisjoint(remaining_names))
         finally:
             engine.dispose()
+
+    def test_upgrade_existing_database_preserves_data(self):
+        command.upgrade(self.config, "0003_sync_powertrain_columns")
+        engine = create_engine(self.database_url)
+        try:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "INSERT INTO brands (id, name, raw_json) "
+                        "VALUES (101, 'Existing brand', '{}')"
+                    )
+                )
+        finally:
+            engine.dispose()
+
+        command.upgrade(self.config, "head")
+
+        engine = create_engine(self.database_url)
+        try:
+            with engine.connect() as connection:
+                name = connection.scalar(text("SELECT name FROM brands WHERE id = 101"))
+            self.assertEqual(name, "Existing brand")
+        finally:
+            engine.dispose()
+
+    def test_alembic_check_has_no_schema_differences(self):
+        command.upgrade(self.config, "head")
+
+        command.check(self.config)

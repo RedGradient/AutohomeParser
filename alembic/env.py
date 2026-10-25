@@ -16,6 +16,17 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+MANAGED_EXPRESSION_INDEXES = {
+    "ix_brands_name_lower_trgm",
+    "ix_manufacturers_name_lower_trgm",
+    "ix_series_name_lower_trgm",
+    "ix_specs_name_lower_trgm",
+}
+
+
+def include_object(_, name, type_, __, ___) -> bool:
+    """Не сравнивать индексы выражений, которыми управляет отдельная миграция."""
+    return not (type_ == "index" and name in MANAGED_EXPRESSION_INDEXES)
 
 
 def database_url() -> str:
@@ -35,6 +46,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_object=include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -48,6 +60,7 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             compare_type=True,
+            include_object=include_object,
         )
         with context.begin_transaction():
             context.run_migrations()

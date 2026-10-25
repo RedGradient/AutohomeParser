@@ -256,7 +256,11 @@ class SqlAlchemyPipeline:
         self.engine = create_engine(self.database_url, pool_pre_ping=True)
         if self.engine.dialect.name == "sqlite":
             event.listen(self.engine, "connect", self._configure_sqlite)
-        require_current_schema(self.engine)
+        try:
+            require_current_schema(self.engine)
+        except Exception:
+            self.engine.dispose()
+            raise
 
     @staticmethod
     def _configure_sqlite(dbapi_connection, _):

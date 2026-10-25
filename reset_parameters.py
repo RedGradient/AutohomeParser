@@ -33,9 +33,7 @@ PARAMETER_MODELS = (
 def parse_arguments() -> argparse.Namespace:
     """Разобрать адрес базы и обязательное подтверждение удаления."""
     parser = argparse.ArgumentParser(
-        description=(
-            "Удалить и заново создать только таблицы технических характеристик."
-        )
+        description="Очистить данные технических характеристик."
     )
     parser.add_argument(
         "--database-url",
@@ -51,7 +49,7 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def main() -> int:
-    """Пересоздать таблицы параметров, не затрагивая каталог и медиа."""
+    """Очистить параметры, не затрагивая схему, каталог и медиа."""
     args = parse_arguments()
     if not args.database_url:
         raise SystemExit("Не задан DATABASE_URL или --database-url")
@@ -66,13 +64,11 @@ def main() -> int:
             connection.execute(delete(SpecVehicleAttributes))
             connection.execute(delete(Modification))
             for model in PARAMETER_MODELS:
-                model.__table__.drop(connection, checkfirst=True)
-            for model in reversed(PARAMETER_MODELS):
-                model.__table__.create(connection, checkfirst=True)
+                connection.execute(delete(model))
     finally:
         engine.dispose()
 
-    print("Таблицы технических характеристик пересозданы.")
+    print("Данные технических характеристик удалены.")
     return 0
 
 

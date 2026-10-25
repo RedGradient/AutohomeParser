@@ -37,7 +37,7 @@ def upgrade() -> None:
         sa.Column(
             "fetched_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint(
@@ -67,7 +67,7 @@ def upgrade() -> None:
         sa.Column(
             "fetched_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("month", "brand_id"),
@@ -92,7 +92,7 @@ def upgrade() -> None:
         sa.Column(
             "fetched_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("id"),
@@ -106,7 +106,7 @@ def upgrade() -> None:
         sa.Column(
             "fetched_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("currency"),
@@ -138,7 +138,7 @@ def upgrade() -> None:
         sa.Column(
             "fetched_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("snapshot_date", "city_id", "series_id"),
@@ -197,7 +197,7 @@ def upgrade() -> None:
         sa.Column(
             "fetched_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("id"),
@@ -241,7 +241,7 @@ def upgrade() -> None:
         sa.Column(
             "fetched_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("month", "subrank_type", "series_id"),
@@ -285,7 +285,7 @@ def upgrade() -> None:
         sa.Column(
             "fetched_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("snapshot_date", "series_id"),
@@ -316,7 +316,7 @@ def upgrade() -> None:
         sa.Column(
             "fetched_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("month", "series_id"),
@@ -358,7 +358,7 @@ def upgrade() -> None:
         sa.Column(
             "fetched_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("subrank_type", "subrank_code", "series_id"),
@@ -385,7 +385,7 @@ def upgrade() -> None:
         sa.Column(
             "fetched_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("snapshot_date", "technology_id"),
@@ -441,7 +441,7 @@ def upgrade() -> None:
         sa.Column(
             "fetched_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.ForeignKeyConstraint(
@@ -477,7 +477,7 @@ def upgrade() -> None:
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.ForeignKeyConstraint(
@@ -547,7 +547,7 @@ def upgrade() -> None:
         sa.Column(
             "generated_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.ForeignKeyConstraint(
@@ -705,7 +705,7 @@ def upgrade() -> None:
         sa.Column(
             "fetched_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.ForeignKeyConstraint(
@@ -782,7 +782,7 @@ def upgrade() -> None:
         sa.Column(
             "fetched_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.ForeignKeyConstraint(
@@ -815,7 +815,7 @@ def upgrade() -> None:
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.ForeignKeyConstraint(
@@ -882,7 +882,7 @@ def upgrade() -> None:
         sa.Column(
             "calculated_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.ForeignKeyConstraint(
@@ -1035,7 +1035,7 @@ def upgrade() -> None:
         sa.Column(
             "normalized_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.ForeignKeyConstraint(
@@ -1189,7 +1189,7 @@ def upgrade() -> None:
         sa.Column(
             "normalized_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.ForeignKeyConstraint(

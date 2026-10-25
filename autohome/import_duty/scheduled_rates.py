@@ -70,7 +70,6 @@ def synchronize_cbr_rates(
     previous = fetcher(calculation_date - timedelta(days=1))
     engine = create_engine(database_url, pool_pre_ping=True)
     try:
-        CbrExchangeRate.__table__.create(engine, checkfirst=True)
         with Session(engine) as session:
             stored_rates = {
                 item.currency: item
