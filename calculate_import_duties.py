@@ -499,7 +499,7 @@ def make_rows(
         customs_value_rub = (price_cny * rates["CNY"].rub_per_unit).quantize(
             Decimal("0.01")
         )
-    customs_fee_result = calculate_customs_fee(customs_value_rub)
+    customs_fee_result = calculate_customs_fee(customs_value_rub, calculation_date)
     if personal_use is None:
         personal_use = importer == ImporterType.INDIVIDUAL
     recycling_fee_result, recycling_vehicle_kind, recycling_vehicle_kind_source = (
