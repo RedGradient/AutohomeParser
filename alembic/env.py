@@ -20,7 +20,11 @@ target_metadata = Base.metadata
 
 def database_url() -> str:
     """Получить URL базы из окружения или конфигурации Alembic."""
-    return os.getenv("DATABASE_URL") or config.get_main_option("sqlalchemy.url")
+    return (
+        config.attributes.get("database_url")
+        or os.getenv("DATABASE_URL")
+        or config.get_main_option("sqlalchemy.url")
+    )
 
 
 def run_migrations_offline() -> None:

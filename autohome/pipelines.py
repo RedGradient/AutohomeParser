@@ -16,6 +16,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from autohome.database_migrations import require_current_schema
 from autohome.items import (
     AttentionRankingItem,
     BrandItem,
@@ -255,6 +256,7 @@ class SqlAlchemyPipeline:
         self.engine = create_engine(self.database_url, pool_pre_ping=True)
         if self.engine.dialect.name == "sqlite":
             event.listen(self.engine, "connect", self._configure_sqlite)
+        require_current_schema(self.engine)
 
     @staticmethod
     def _configure_sqlite(dbapi_connection, _):

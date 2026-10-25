@@ -230,17 +230,11 @@ def database_display_name(database_url: str) -> str:
     return make_url(database_url).render_as_string(hide_password=True)
 
 
-def initialize_database(database_url: str) -> None:
-    """Проверить подключение и создать схему до запуска worker-процессов."""
-    from sqlalchemy import create_engine
+def validate_database(database_url: str) -> None:
+    """Проверить подключение и актуальность миграций базы."""
+    from autohome.database_migrations import require_current_database
 
-    from autohome.models import Base
-
-    engine = create_engine(database_url, pool_pre_ping=True)
-    try:
-        Base.metadata.create_all(engine)
-    finally:
-        engine.dispose()
+    require_current_database(database_url)
 
 
 def download_catalog(
@@ -432,12 +426,10 @@ def main() -> int:
     unique_database_urls = {database_url for _, _, database_url in workers}
     for database_url in unique_database_urls:
         try:
-            initialize_database(database_url)
+            validate_database(database_url)
         except Exception as error:
             safe_url = database_display_name(database_url)
-            raise SystemExit(
-                f"Не удалось подготовить базу {safe_url}: {error}"
-            ) from error
+            raise SystemExit(f"База {safe_url} не готова к запуску: {error}") from error
 
     catalog_path = args.catalog_path.resolve()
     try:
