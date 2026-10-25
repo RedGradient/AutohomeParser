@@ -79,7 +79,6 @@ from autohome.models import (
     SpecVehicleAttributes,
     TechnologyRanking,
 )
-from autohome.powertrain_schema import ensure_powertrain_schema
 from autohome.translator import (
     translate_brand_name,
     translate_color_name,
@@ -92,7 +91,6 @@ from autohome.translator import (
     translate_taxonomy_name,
     translate_technology_name,
 )
-from autohome.vehicle_attribute_schema import ensure_vehicle_attribute_schema
 
 PRICE_RE = re.compile(r"(?P<number>\d+(?:\.\d+)?)\s*(?P<unit>万元|万|元|юаней)?")
 PRICE_RANGE_RE = re.compile(
@@ -249,7 +247,7 @@ class SqlAlchemyPipeline:
         )
 
     def open_spider(self):
-        """Подключиться к базе и создать отсутствующие таблицы."""
+        """Подключиться к базе с уже применёнными миграциями."""
         if self.database_url.startswith("sqlite:///"):
             db_path = Path(self.database_url.removeprefix("sqlite:///"))
             db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -257,8 +255,6 @@ class SqlAlchemyPipeline:
         self.engine = create_engine(self.database_url, pool_pre_ping=True)
         if self.engine.dialect.name == "sqlite":
             event.listen(self.engine, "connect", self._configure_sqlite)
-        ensure_vehicle_attribute_schema(self.engine)
-        ensure_powertrain_schema(self.engine)
 
     @staticmethod
     def _configure_sqlite(dbapi_connection, _):

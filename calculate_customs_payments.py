@@ -66,9 +66,7 @@ from autohome.models import (
     SpecPowertrain,
     SpecVehicleAttributes,
 )
-from autohome.powertrain_schema import ensure_powertrain_schema
 from autohome.vehicle_attribute_inference import INFERRED_INPUTS_USED
-from autohome.vehicle_attribute_schema import ensure_vehicle_attribute_schema
 
 MAX_UPSERT_ROWS = 2000
 CHASSIS_NAME_RE = re.compile(r"(?:底盘|\bшасси\b)", re.IGNORECASE)
@@ -791,10 +789,6 @@ def calculate_customs_payments() -> int:
     importers = parse_importers(args.importers)
     rates = resolve_rates(args)
     engine = create_engine(args.database_url, pool_pre_ping=True)
-    if not args.dry_run:
-        ensure_vehicle_attribute_schema(engine)
-        ensure_powertrain_schema(engine)
-
     existing_vehicle_attribute_columns = {
         column["name"]
         for column in inspect(engine).get_columns("spec_vehicle_attributes")

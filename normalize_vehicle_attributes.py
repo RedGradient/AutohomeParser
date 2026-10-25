@@ -16,7 +16,6 @@ from autohome.models import (
     SpecPowertrain,
     SpecVehicleAttributes,
 )
-from autohome.vehicle_attribute_schema import ensure_vehicle_attribute_schema
 from autohome.vehicle_attributes_normalizer import (
     NORMALIZATION_VERSION,
     REQUIRED_SOURCE_FIELDS,
@@ -291,8 +290,6 @@ def main() -> int:
     validate_arguments(args)
     engine = create_engine(args.database_url, pool_pre_ping=True)
     try:
-        if not args.dry_run:
-            ensure_vehicle_attribute_schema(engine)
         counts = backfill(engine, args)
     finally:
         engine.dispose()

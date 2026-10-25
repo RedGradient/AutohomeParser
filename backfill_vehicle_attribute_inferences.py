@@ -20,7 +20,6 @@ from autohome.vehicle_attribute_inference import (
     RawParameter,
     apply_vehicle_attribute_inference,
 )
-from autohome.vehicle_attribute_schema import ensure_vehicle_attribute_schema
 
 NORMALIZED_INPUT_FIELDS = (
     "body_type",
@@ -321,8 +320,6 @@ def main() -> int:
     validate_arguments(args)
     engine = create_engine(args.database_url, pool_pre_ping=True)
     try:
-        if args.write:
-            ensure_vehicle_attribute_schema(engine)
         counts = backfill(engine, args)
     finally:
         engine.dispose()

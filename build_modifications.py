@@ -16,9 +16,7 @@ from sqlalchemy import (
     create_engine,
     delete,
     insert,
-    inspect,
     select,
-    text,
     update,
 )
 
@@ -30,7 +28,6 @@ from autohome.models import (
     SpecParameter,
     SpecPowertrain,
 )
-from autohome.powertrain_schema import ensure_powertrain_schema
 from autohome.recycling_fee_power import select_recycling_fee_power
 from autohome.translator import (
     translate_powertrain_code,
@@ -156,27 +153,6 @@ def decimal_key(value: Decimal | None) -> str | None:
     if value is None:
         return None
     return format(value.normalize(), "f")
-
-
-def ensure_schema(engine) -> None:
-    """Создать производные таблицы и добавить ссылку из specs при миграции."""
-    ensure_powertrain_schema(engine)
-    columns = {column["name"] for column in inspect(engine).get_columns("specs")}
-    if "modification_id" in columns:
-        return
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                "ALTER TABLE specs ADD COLUMN modification_id BIGINT "
-                "REFERENCES modifications(id)"
-            )
-        )
-        connection.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS ix_specs_modification_id "
-                "ON specs (modification_id)"
-            )
-        )
 
 
 def load_parameter_ids(connection) -> dict[str, int]:
@@ -456,7 +432,7 @@ def rebuild(engine, batch_size: int) -> tuple[int, int, int]:
 
 
 def main() -> int:
-    """Создать схему и выполнить полный пересчёт производных данных."""
+    """Выполнить полный пересчёт производных данных в готовой схеме."""
     args = parse_arguments()
     if not args.database_url:
         raise SystemExit("Не задан DATABASE_URL или --database-url")
@@ -464,7 +440,6 @@ def main() -> int:
         raise SystemExit("batch-size должен быть положительным")
     engine = create_engine(args.database_url, pool_pre_ping=True)
     try:
-        ensure_schema(engine)
         specs, modifications, incomplete = rebuild(engine, args.batch_size)
     finally:
         engine.dispose()
