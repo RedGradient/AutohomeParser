@@ -4,11 +4,12 @@ import argparse
 import os
 import re
 from collections import Counter
+from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from hashlib import blake2b
 
-from sqlalchemy import create_engine, inspect, select
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -69,7 +70,18 @@ from autohome.models import (
 from autohome.vehicle_attribute_inference import INFERRED_INPUTS_USED
 
 MAX_UPSERT_ROWS = 2000
+CALCULATION_LOCK_ID = 751_902_411
 CHASSIS_NAME_RE = re.compile(r"(?:底盘|\bшасси\b)", re.IGNORECASE)
+CALCULATION_COMPARE_FIELDS = tuple(
+    column.name
+    for column in CustomsCalculation.__table__.columns
+    if column.name not in {"id", "calculation_date", "calculated_at"}
+)
+PAYMENT_COMPARE_FIELDS = tuple(
+    column.name
+    for column in CustomsPaymentResult.__table__.columns
+    if column.name != "calculation_id"
+)
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -97,6 +109,15 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=5000)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--mode",
+        choices=("full", "stale"),
+        default="full",
+        help=(
+            "full пересчитывает все сценарии; stale записывает только "
+            "отсутствующие или изменившиеся."
+        ),
+    )
     parser.add_argument(
         "--individual-personal-use",
         action=argparse.BooleanOptionalAction,
@@ -769,6 +790,126 @@ def upsert_batch(engine, calculations: list[dict], payments: list[dict]) -> None
             )
 
 
+def _same_fields(
+    candidate: dict,
+    stored,
+    fields: tuple[str, ...],
+) -> bool:
+    """Сравнить значимые поля рассчитанной и сохранённой строки."""
+    return all(candidate.get(field) == stored[field] for field in fields)
+
+
+def stale_batch(
+    engine,
+    calculations: list[dict],
+    payments: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    """Оставить отсутствующие и отличающиеся от базы сценарии."""
+    calculation_ids = [item["id"] for item in calculations]
+    with engine.connect() as connection:
+        stored_calculations = {
+            item["id"]: item
+            for item in connection.execute(
+                select(CustomsCalculation.__table__).where(
+                    CustomsCalculation.id.in_(calculation_ids)
+                )
+            ).mappings()
+        }
+        stored_payments: dict[int, dict[str, object]] = {}
+        for item in connection.execute(
+            select(CustomsPaymentResult.__table__).where(
+                CustomsPaymentResult.calculation_id.in_(calculation_ids)
+            )
+        ).mappings():
+            stored_payments.setdefault(item["calculation_id"], {})[
+                item["payment_type"]
+            ] = item
+
+    candidate_payments: dict[int, dict[str, dict]] = {}
+    for payment in payments:
+        candidate_payments.setdefault(payment["calculation_id"], {})[
+            payment["payment_type"]
+        ] = payment
+
+    stale_ids: set[int] = set()
+    for calculation in calculations:
+        calculation_id = calculation["id"]
+        stored_calculation = stored_calculations.get(calculation_id)
+        if stored_calculation is None or not _same_fields(
+            calculation,
+            stored_calculation,
+            CALCULATION_COMPARE_FIELDS,
+        ):
+            stale_ids.add(calculation_id)
+            continue
+
+        expected_payments = candidate_payments.get(calculation_id, {})
+        actual_payments = stored_payments.get(calculation_id, {})
+        if expected_payments.keys() != actual_payments.keys() or any(
+            not _same_fields(
+                payment,
+                actual_payments[payment_type],
+                PAYMENT_COMPARE_FIELDS,
+            )
+            for payment_type, payment in expected_payments.items()
+        ):
+            stale_ids.add(calculation_id)
+
+    return (
+        [item for item in calculations if item["id"] in stale_ids],
+        [item for item in payments if item["calculation_id"] in stale_ids],
+    )
+
+
+@contextmanager
+def calculation_run_connection(engine):
+    """Удерживать отдельное соединение и advisory lock на время расчёта."""
+    connection = engine.connect()
+    lock_acquired = False
+    try:
+        if engine.dialect.name == "postgresql":
+            lock_acquired = bool(
+                connection.scalar(
+                    text("SELECT pg_try_advisory_lock(:lock_id)"),
+                    {"lock_id": CALCULATION_LOCK_ID},
+                )
+            )
+            if not lock_acquired:
+                raise RuntimeError(
+                    "Другой процесс уже выполняет расчёт таможенных платежей"
+                )
+        yield connection
+    finally:
+        if lock_acquired:
+            connection.execute(
+                text("SELECT pg_advisory_unlock(:lock_id)"),
+                {"lock_id": CALCULATION_LOCK_ID},
+            )
+        connection.close()
+
+
+def process_batch(
+    engine,
+    calculations: list[dict],
+    payments: list[dict],
+    *,
+    mode: str,
+    dry_run: bool,
+) -> int:
+    """Отфильтровать пакет по режиму и при необходимости записать его."""
+    selected_calculations = calculations
+    selected_payments = payments
+    if mode == "stale":
+        selected_calculations, selected_payments = stale_batch(
+            engine,
+            calculations,
+            payments,
+        )
+    if selected_calculations and not dry_run:
+        upsert_batch(engine, selected_calculations, selected_payments)
+    return len(selected_calculations)
+
+
 def calculate_customs_payments() -> int:
     """Выполнить массовый расчёт всех поддерживаемых таможенных платежей."""
     args = parse_arguments()
@@ -855,8 +996,9 @@ def calculate_customs_payments() -> int:
     calculations: list[dict] = []
     payments: list[dict] = []
     processed_specs = 0
+    selected_scenarios = 0
     try:
-        with engine.connect() as connection:
+        with calculation_run_connection(engine) as connection:
             existing_calculation_ids = {
                 (spec_id, importer_type): calculation_id
                 for calculation_id, spec_id, importer_type in connection.execute(
@@ -901,13 +1043,24 @@ def calculate_customs_payments() -> int:
                             f"{importer.value}:{payment['payment_type']}:{payment['status']}"
                         ] += 1
                 if len(calculations) >= args.batch_size:
-                    if not args.dry_run:
-                        upsert_batch(engine, calculations, payments)
+                    selected_scenarios += process_batch(
+                        engine,
+                        calculations,
+                        payments,
+                        mode=args.mode,
+                        dry_run=args.dry_run,
+                    )
                     calculations.clear()
                     payments.clear()
                     print(f"Обработано комплектаций: {processed_specs}", flush=True)
-        if calculations and not args.dry_run:
-            upsert_batch(engine, calculations, payments)
+            if calculations:
+                selected_scenarios += process_batch(
+                    engine,
+                    calculations,
+                    payments,
+                    mode=args.mode,
+                    dry_run=args.dry_run,
+                )
     finally:
         engine.dispose()
 
@@ -923,6 +1076,7 @@ def calculate_customs_payments() -> int:
         f"({rates['EUR'].rate_date})"
     )
     print(f"Обработано комплектаций: {processed_specs}")
+    print(f"Выбрано сценариев для записи: {selected_scenarios}")
     for key in sorted(counts):
         print(f"{key}: {counts[key]}")
     if args.dry_run:
