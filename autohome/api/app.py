@@ -1778,6 +1778,3 @@ def create_app(
 
     application.include_router(protected_router)
     return application
-
-
-app = create_app()

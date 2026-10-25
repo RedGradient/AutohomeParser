@@ -150,8 +150,7 @@ database-migrate: postgres-up
 	@docker compose -f '$(COMPOSE_FILE)' run --rm --build migrate
 
 api-up:
-	@docker compose -f '$(COMPOSE_FILE)' up -d --build --wait \
-		api celery-worker celery-beat
+	@docker compose -f '$(COMPOSE_FILE)' up -d --build --wait
 
 api-logs:
 	@docker compose -f '$(COMPOSE_FILE)' logs -f api
@@ -174,7 +173,7 @@ api-run: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
 		API_USERNAME='$(API_USERNAME)' API_PASSWORD='$(API_PASSWORD)' \
 		API_JWT_SECRET='$(API_JWT_SECRET)' API_JWT_TTL_SECONDS='$(API_JWT_TTL_SECONDS)' \
-		.venv/bin/uvicorn autohome.api.app:app \
+		.venv/bin/uvicorn autohome.api.app:create_app --factory \
 		--host '$(API_HOST)' --port '$(API_PORT)'
 
 database-reset: postgres-up

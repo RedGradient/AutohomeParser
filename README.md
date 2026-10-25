@@ -27,7 +27,7 @@ export API_USERNAME=autohome
 export API_PASSWORD='сложный-пароль'
 export API_JWT_SECRET="$(openssl rand -hex 32)"
 export API_JWT_TTL_SECONDS=3600
-uvicorn autohome.api.app:app --host 0.0.0.0 --port 8000
+uvicorn autohome.api.app:create_app --factory --host 0.0.0.0 --port 8000
 ```
 
 Получение токена:
@@ -63,8 +63,9 @@ make api-up
 ```
 
 Команда собирает образ приложения, ожидает готовности PostgreSQL и запускает
-API на `http://127.0.0.1:8000`, Redis, Celery worker и Celery beat. Просмотр
-логов и остановка:
+API на `http://127.0.0.1:8000`, Redis, Celery worker и Celery beat. Production
+Compose публикует только nginx, а контейнер API доступен лишь во внутренней
+Docker-сети. Просмотр логов и остановка:
 
 ```bash
 make api-logs

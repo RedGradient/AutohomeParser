@@ -48,8 +48,8 @@ services:
       API_PASSWORD: ${API_PASSWORD:?API_PASSWORD is required}
       API_JWT_SECRET: ${API_JWT_SECRET:?API_JWT_SECRET is required}
       API_JWT_TTL_SECONDS: ${API_JWT_TTL_SECONDS:-432000}
-    ports:
-      - "${API_PORT:-8000}:8000"
+    expose:
+      - "8000"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -64,6 +64,17 @@ services:
       retries: 10
       start_period: 10s
     init: true
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
     restart: unless-stopped
 
   celery-worker:

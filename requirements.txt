@@ -4,6 +4,7 @@ alembic
 psycopg[binary]
 fastapi
 uvicorn[standard]
+PyJWT>=2.10,<3
 httpx
 celery[redis]
 ruff
