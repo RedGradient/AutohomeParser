@@ -27,11 +27,32 @@ class OpenApiSchemaTests(unittest.TestCase):
         ("GET", "/api/v1/customs-calculations/{calculation_id}"),
         ("GET", "/api/v1/specs/{spec_id}/customs-calculations"),
     }
+    EXPECTED_TAGS = {
+        "/api/v1/auth/token": "Auth",
+        "/api/v1/brands": "Brands",
+        "/api/v1/brands/{brand_id}": "Brands",
+        "/api/v1/manufacturers": "Manufacturers",
+        "/api/v1/manufacturers/{manufacturer_id}": "Manufacturers",
+        "/api/v1/series": "Series",
+        "/api/v1/series/{series_id}": "Series",
+        "/api/v1/modifications": "Modifications",
+        "/api/v1/series/{series_id}/modifications": "Modifications",
+        "/api/v1/modifications/{modification_id}": "Modifications",
+        "/api/v1/specs": "Specs",
+        "/api/v1/modifications/{modification_id}/specs": "Specs",
+        "/api/v1/specs/{spec_id}": "Specs",
+        "/api/v1/specs/{spec_id}/parameters": "Specs",
+        "/api/v1/series/{series_id}/photos": "Series",
+        "/api/v1/series/{series_id}/gallery-colors": "Series",
+        "/api/v1/customs-calculations": "Customs",
+        "/api/v1/customs-calculations/{calculation_id}": "Customs",
+        "/api/v1/specs/{spec_id}/customs-calculations": "Customs",
+    }
 
     @classmethod
     def setUpClass(cls):
         app = create_app(
-            "sqlite+aiosqlite:///:memory:",
+            "postgresql+psycopg://test:test@127.0.0.1:5432/test",
             api_username="test-user",
             api_password="test-password",
             jwt_secret="test-jwt-secret-longer-than-thirty-two-bytes",
@@ -179,6 +200,22 @@ class OpenApiSchemaTests(unittest.TestCase):
                     [{"JWT Bearer": []}],
                     f"{method} {path}: неверная схема авторизации",
                 )
+
+    def test_operations_keep_their_swagger_sections_and_unique_ids(self):
+        """Фиксирует разделы Swagger и уникальность идентификаторов операций."""
+        operations = [
+            (path, operation)
+            for path, methods in self.schema["paths"].items()
+            for method, operation in methods.items()
+            if method in {"get", "post", "put", "patch", "delete"}
+        ]
+
+        operation_ids = []
+        for path, operation in operations:
+            self.assertEqual(operation.get("tags"), [self.EXPECTED_TAGS[path]])
+            operation_ids.append(operation["operationId"])
+
+        self.assertEqual(len(operation_ids), len(set(operation_ids)))
 
 
 if __name__ == "__main__":
