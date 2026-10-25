@@ -4,21 +4,75 @@ from contextlib import asynccontextmanager
 from decimal import Decimal
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Security
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
 from fastapi import Path as ApiPath
-from fastapi.encoders import jsonable_encoder
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import and_, case, exists, func, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from autohome.api.auth import (
     AuthSettings,
-    authenticate_bearer,
     create_access_token,
     credentials_are_valid,
 )
+from autohome.api.common import (
+    EXPECTED_CUSTOMS_PAYMENT_TYPES,
+    KNOWN_SERIES_STATE_CODES,
+    LEGACY_CUSTOMS_PAYMENT_TYPE_SETS,
+    PRICE_FROM_DESCRIPTION,
+    PRICE_TO_DESCRIPTION,
+    PRICE_TYPE_DESCRIPTION,
+    SERIES_STATE_CODES,
+    PriceType,
+    SortOrder,
+)
+from autohome.api.common import (
+    apply_spec_filters as _apply_spec_filters,
+)
+from autohome.api.common import (
+    brand_ref as _brand_ref,
+)
+from autohome.api.common import (
+    contains_pattern as _contains_pattern,
+)
+from autohome.api.common import (
+    decimal_value as _decimal,
+)
+from autohome.api.common import (
+    effective_price as _effective_price,
+)
+from autohome.api.common import (
+    manufacturer_ref as _manufacturer_ref,
+)
+from autohome.api.common import (
+    money as _money,
+)
+from autohome.api.common import (
+    price_column as _price_column,
+)
+from autohome.api.common import (
+    public_payment_details as _public_payment_details,
+)
+from autohome.api.common import (
+    series_state as _series_state,
+)
+from autohome.api.common import (
+    spec_payload as _spec_payload,
+)
+from autohome.api.common import (
+    spec_select as _spec_select,
+)
+from autohome.api.dependencies import authenticated_user_dependency
+from autohome.api.errors import (
+    check_range as _check_range,
+)
+from autohome.api.errors import (
+    not_found as _not_found,
+)
+from autohome.api.errors import (
+    register_exception_handlers,
+)
+from autohome.api.pagination import INCLUDE_TOTAL_DESCRIPTION
+from autohome.api.pagination import page as _page
 from autohome.api.schemas import (
     BrandPage,
     BrandResponse,
@@ -62,313 +116,6 @@ from autohome.models import (
     SpecPowertrain,
     SpecVehicleAttributes,
 )
-
-PriceType = Literal["effective", "guide", "dealer"]
-SortOrder = Literal["asc", "desc"]
-SERIES_STATE_CODES = {
-    SeriesState.UPCOMING: (10,),
-    SeriesState.CURRENT: (20, 30),
-    SeriesState.DISCONTINUED: (0, 40),
-}
-KNOWN_SERIES_STATE_CODES = tuple(
-    code for codes in SERIES_STATE_CODES.values() for code in codes
-)
-SPEC_STATE_CODES = {
-    SeriesState.UPCOMING: (0, 10),
-    SeriesState.CURRENT: (20, 30),
-    SeriesState.DISCONTINUED: (40,),
-}
-KNOWN_SPEC_STATE_CODES = tuple(
-    code for codes in SPEC_STATE_CODES.values() for code in codes
-)
-PRICE_FROM_DESCRIPTION = (
-    "Минимальная цена в CNY. Тип цены задаётся параметром price_type. "
-    "Записи без цены выбранного типа не возвращаются."
-)
-PRICE_TO_DESCRIPTION = (
-    "Максимальная цена в CNY. Тип цены задаётся параметром price_type. "
-    "Записи без цены выбранного типа не возвращаются."
-)
-PRICE_TYPE_DESCRIPTION = (
-    "Тип цены: effective — рекомендованная или дилерская при её отсутствии; "
-    "guide — рекомендованная; dealer — дилерская."
-)
-EXPECTED_CUSTOMS_PAYMENT_TYPES = {
-    "IMPORT_DUTY",
-    "CUSTOMS_FEE",
-    "RECYCLING_FEE",
-    "EXCISE",
-    "VAT",
-}
-LEGACY_CUSTOMS_PAYMENT_TYPE_SETS = {
-    frozenset(EXPECTED_CUSTOMS_PAYMENT_TYPES - {"VAT"}),
-    frozenset(EXPECTED_CUSTOMS_PAYMENT_TYPES - {"VAT", "EXCISE"}),
-}
-INCLUDE_TOTAL_DESCRIPTION = (
-    "Если true, возвращает общее количество найденных записей. "
-    "Может увеличить время ответа."
-)
-
-
-def _money(value: Decimal | None) -> str | None:
-    return format(value, ".2f") if value is not None else None
-
-
-def _decimal(value: Decimal | None) -> str | None:
-    return format(value, "f") if value is not None else None
-
-
-def _series_state(value: int | None) -> SeriesState:
-    """Преобразовать исходный код Autohome в публичную стадию продаж."""
-    for state, codes in SERIES_STATE_CODES.items():
-        if value in codes:
-            return state
-    return SeriesState.UNKNOWN
-
-
-def _spec_state(value: int | None) -> SeriesState:
-    """Преобразовать исходный код комплектации в публичную стадию продаж."""
-    for state, codes in SPEC_STATE_CODES.items():
-        if value in codes:
-            return state
-    return SeriesState.UNKNOWN
-
-
-def _public_payment_details(details: dict[str, Any]) -> dict[str, Any]:
-    """Исключить устаревшие интерфейсные подписи из деталей платежа."""
-    return {key: value for key, value in details.items() if key != "field_labels"}
-
-
-def _effective_price():
-    return case(
-        (Spec.guide_price_yuan > 0, Spec.guide_price_yuan),
-        (Spec.dealer_price_yuan > 0, Spec.dealer_price_yuan),
-        else_=None,
-    )
-
-
-def _price_column(price_type: PriceType):
-    return {
-        "effective": _effective_price(),
-        "guide": Spec.guide_price_yuan,
-        "dealer": Spec.dealer_price_yuan,
-    }[price_type]
-
-
-def _contains_pattern(value: str) -> str:
-    """Экранировать пользовательский текст для поиска через SQL LIKE."""
-    escaped = value.lower().replace("\\", "\\\\")
-    escaped = escaped.replace("%", "\\%").replace("_", "\\_")
-    return f"%{escaped}%"
-
-
-async def _page(
-    session: AsyncSession,
-    statement,
-    limit: int,
-    offset: int,
-    include_total: bool,
-):
-    total = None
-    if include_total:
-        count_statement = select(func.count()).select_from(
-            statement.order_by(None).subquery()
-        )
-        total = int(await session.scalar(count_statement) or 0)
-    rows = (await session.execute(statement.offset(offset).limit(limit + 1))).all()
-    has_more = len(rows) > limit
-    return rows[:limit], {
-        "limit": limit,
-        "offset": offset,
-        "total": total,
-        "has_more": has_more,
-    }
-
-
-def _check_range(minimum, maximum, name: str) -> None:
-    if minimum is not None and maximum is not None and minimum > maximum:
-        raise HTTPException(
-            400,
-            detail={
-                "code": "INVALID_RANGE",
-                "message": f"{name}_from must not exceed {name}_to",
-            },
-        )
-
-
-def _not_found(resource: str) -> HTTPException:
-    return HTTPException(
-        404, detail={"code": "NOT_FOUND", "message": f"{resource} not found"}
-    )
-
-
-def _brand_ref(brand: Brand | None):
-    return {"id": brand.id, "name": brand.name} if brand else None
-
-
-def _series_ref(series: Series | None):
-    return {"id": series.id, "name": series.name} if series else None
-
-
-def _manufacturer_ref(manufacturer: Manufacturer | None):
-    return {"id": manufacturer.id, "name": manufacturer.name} if manufacturer else None
-
-
-def _price_payload(spec: Spec):
-    if spec.guide_price_yuan is not None and spec.guide_price_yuan > 0:
-        effective, source = spec.guide_price_yuan, "GUIDE"
-    elif spec.dealer_price_yuan is not None and spec.dealer_price_yuan > 0:
-        effective, source = spec.dealer_price_yuan, "DEALER"
-    else:
-        effective, source = None, "MISSING"
-    return {
-        "guide_cny": _money(spec.guide_price_yuan),
-        "dealer_cny": _money(spec.dealer_price_yuan),
-        "discount_cny": _money(spec.discount_yuan),
-        "effective_cny": _money(effective),
-        "source": source,
-    }
-
-
-def _powertrain_payload(item: SpecPowertrain | None):
-    if item is None:
-        return None
-    return {
-        "energy_type": item.energy_type,
-        "engine_summary": item.engine_summary,
-        "engine_displacement_ml": item.engine_displacement_ml,
-        "engine_power_kw": _decimal(item.engine_power_kw),
-        "engine_power_hp": _decimal(item.engine_power_hp),
-        "maximum_power_kw": _decimal(item.maximum_power_kw),
-        "transmission_summary": item.transmission_summary,
-        "transmission_type": item.transmission_type,
-        "drive_type": item.drive_type,
-        "motor_total_power_kw": _decimal(item.motor_total_power_kw),
-        "motor_total_power_hp": _decimal(item.motor_total_power_hp),
-        "battery_capacity_kwh": _decimal(item.battery_capacity_kwh),
-        "battery_type": item.battery_type,
-    }
-
-
-def _attributes_payload(item: SpecVehicleAttributes | None):
-    if item is None:
-        return None
-    fields = (
-        "vehicle_class",
-        "vehicle_technical_category",
-        "body_type",
-        "body_construction",
-        "seat_count_min",
-        "seat_count_max",
-        "door_count",
-        "curb_mass_kg",
-        "gross_mass_kg",
-        "length_mm",
-        "width_mm",
-        "height_mm",
-        "wheelbase_mm",
-        "is_four_wheel_drive",
-    )
-    return {field: getattr(item, field) for field in fields}
-
-
-def _spec_payload(row, *, detail: bool = False):
-    spec, series, brand, modification, powertrain, attributes = row
-    result = {
-        "id": spec.id,
-        "name": spec.name,
-        "year": spec.year,
-        "state": _spec_state(spec.state),
-        "brand": _brand_ref(brand),
-        "series": _series_ref(series),
-        "modification": (
-            {"id": modification.id, "name": modification.name} if modification else None
-        ),
-        "price": _price_payload(spec),
-        "description": spec.description,
-        "image_url": spec.image_url,
-        "powertrain": _powertrain_payload(powertrain),
-    }
-    if detail:
-        result["vehicle_attributes"] = _attributes_payload(attributes)
-    return result
-
-
-def _spec_select():
-    return (
-        select(Spec, Series, Brand, Modification, SpecPowertrain, SpecVehicleAttributes)
-        .outerjoin(Series, Series.id == Spec.series_id)
-        .outerjoin(Brand, Brand.id == Series.brand_id)
-        .outerjoin(Modification, Modification.id == Spec.modification_id)
-        .outerjoin(SpecPowertrain, SpecPowertrain.spec_id == Spec.id)
-        .outerjoin(SpecVehicleAttributes, SpecVehicleAttributes.spec_id == Spec.id)
-    )
-
-
-def _apply_spec_filters(
-    statement,
-    *,
-    q=None,
-    brand_id=None,
-    series_id=None,
-    modification_id=None,
-    manufacturer_id=None,
-    year_from=None,
-    year_to=None,
-    state=None,
-    energy_type=None,
-    body_type=None,
-    drive_type=None,
-    transmission_type=None,
-    engine_displacement_from=None,
-    engine_displacement_to=None,
-    power_hp_from=None,
-    power_hp_to=None,
-    seats_from=None,
-    seats_to=None,
-    four_wheel_drive=None,
-    price_from=None,
-    price_to=None,
-    price_type="effective",
-):
-    filters = []
-    if q:
-        filters.append(func.lower(Spec.name).like(_contains_pattern(q), escape="\\"))
-    mappings = (
-        (Series.brand_id, brand_id),
-        (Spec.series_id, series_id),
-        (Spec.modification_id, modification_id),
-        (Series.manufacturer_id, manufacturer_id),
-        (SpecPowertrain.energy_type, energy_type),
-        (SpecPowertrain.body_type, body_type),
-        (SpecPowertrain.drive_type, drive_type),
-        (SpecPowertrain.transmission_type, transmission_type),
-        (SpecVehicleAttributes.is_four_wheel_drive, four_wheel_drive),
-    )
-    filters.extend(column == value for column, value in mappings if value is not None)
-    if state == SeriesState.UNKNOWN:
-        filters.append(
-            or_(Spec.state.is_(None), Spec.state.not_in(KNOWN_SPEC_STATE_CODES))
-        )
-    elif state is not None:
-        filters.append(Spec.state.in_(SPEC_STATE_CODES[state]))
-    ranges = (
-        (Spec.year, year_from, year_to),
-        (
-            SpecPowertrain.engine_displacement_ml,
-            engine_displacement_from,
-            engine_displacement_to,
-        ),
-        (SpecPowertrain.engine_power_hp, power_hp_from, power_hp_to),
-        (SpecVehicleAttributes.seat_count_max, seats_from, seats_to),
-        (_price_column(price_type), price_from, price_to),
-    )
-    for column, minimum, maximum in ranges:
-        if minimum is not None:
-            filters.append(column >= minimum)
-        if maximum is not None:
-            filters.append(column <= maximum)
-    return statement.where(*filters)
 
 
 def create_app(
@@ -455,51 +202,9 @@ def create_app(
     application.state.auth_settings = auth_settings
     get_session = database.get_session
 
-    bearer_scheme = HTTPBearer(
-        bearerFormat="JWT",
-        scheme_name="JWT Bearer",
-        description="JWT, полученный через POST /api/v1/auth/token.",
-        auto_error=False,
-    )
-
-    async def require_authenticated_user(
-        credentials: HTTPAuthorizationCredentials | None = Security(bearer_scheme),
-    ) -> str:
-        """Проверить JWT перед выполнением защищённого эндпоинта."""
-        return authenticate_bearer(credentials, auth_settings)
-
+    require_authenticated_user = authenticated_user_dependency(auth_settings)
     protected_router = APIRouter(dependencies=[Depends(require_authenticated_user)])
-
-    @application.exception_handler(HTTPException)
-    async def http_exception_handler(_, exc: HTTPException):
-        if isinstance(exc.detail, dict) and {"code", "message"} <= exc.detail.keys():
-            payload = exc.detail
-        else:
-            payload = {"code": "HTTP_ERROR", "message": str(exc.detail)}
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=jsonable_encoder(payload),
-            headers=exc.headers,
-        )
-
-    @application.exception_handler(RequestValidationError)
-    async def validation_exception_handler(_, exc: RequestValidationError):
-        errors = [
-            {
-                "location": list(error["loc"]),
-                "message": error["msg"],
-                "type": error["type"],
-            }
-            for error in exc.errors()
-        ]
-        return JSONResponse(
-            status_code=422,
-            content={
-                "code": "VALIDATION_ERROR",
-                "message": "Request validation failed",
-                "details": {"errors": errors},
-            },
-        )
+    register_exception_handlers(application)
 
     @application.post(
         "/api/v1/auth/token",
