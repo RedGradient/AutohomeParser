@@ -45,7 +45,7 @@ class AlembicMigrationTests(unittest.TestCase):
                 revision = connection.scalar(
                     text("SELECT version_num FROM alembic_version")
                 )
-            self.assertEqual(revision, "0003_sync_powertrain_columns")
+            self.assertEqual(revision, "0004_api_filter_indexes")
         finally:
             engine.dispose()
 
