@@ -7,6 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import httpx
+from sqlalchemy import event
 
 from autohome.api.app import create_app
 from autohome.api.auth import create_access_token
@@ -393,6 +394,28 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["total_rub"])
         self.assertFalse(response.json()["is_total_complete"])
+
+    async def test_customs_page_loads_payments_in_one_query(self):
+        select_statements = []
+
+        def capture_selects(_, __, statement, *___):
+            if statement.lstrip().upper().startswith("SELECT"):
+                select_statements.append(statement)
+
+        engine = self.app.state.engine.sync_engine
+        event.listen(engine, "before_cursor_execute", capture_selects)
+        try:
+            response = await self.client.get("/api/v1/customs-calculations")
+        finally:
+            event.remove(engine, "before_cursor_execute", capture_selects)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(select_statements), 2)
+        for calculation in response.json()["items"]:
+            payment_types = [
+                payment["payment_type"] for payment in calculation["payments"]
+            ]
+            self.assertEqual(payment_types, sorted(payment_types))
 
     async def test_token_endpoint_rejects_invalid_credentials(self):
         response = await self.client.post(

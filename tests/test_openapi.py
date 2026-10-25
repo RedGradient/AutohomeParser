@@ -23,6 +23,8 @@ class OpenApiSchemaTests(unittest.TestCase):
         self.assertIn("- фотографии.", schema["info"]["description"])
         self.assertIn("ввозную таможенную пошлину", schema["info"]["description"])
         self.assertIn("утилизационный сбор", schema["info"]["description"])
+        self.assertIn("акциз", schema["info"]["description"])
+        self.assertIn("НДС", schema["info"]["description"])
         self.assertEqual(
             schema["paths"]["/api/v1/customs-calculations"]["get"]["summary"],
             "Получить актуальные таможенные расчёты",
@@ -38,6 +40,13 @@ class OpenApiSchemaTests(unittest.TestCase):
         self.assertNotIn("status", customs_parameters)
         self.assertNotIn("calculation_date_from", customs_parameters)
         self.assertNotIn("calculation_date_to", customs_parameters)
+        spec_customs_parameters = {
+            item["name"]: item
+            for item in schema["paths"]["/api/v1/specs/{spec_id}/customs-calculations"][
+                "get"
+            ]["parameters"]
+        }
+        self.assertNotIn("calculation_date", spec_customs_parameters)
         calculation_schema = schema["components"]["schemas"][
             "CustomsCalculationResponse"
         ]

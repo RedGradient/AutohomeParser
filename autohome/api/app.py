@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from datetime import date
 from decimal import Decimal
 from typing import Any, Literal
 
@@ -408,7 +407,8 @@ def create_app(
             "- характеристики;\n"
             "- фотографии.\n\n"
             "API также возвращает предварительно рассчитанные таможенные платежи: "
-            "ввозную таможенную пошлину, таможенный сбор и утилизационный сбор."
+            "ввозную таможенную пошлину, таможенный сбор, утилизационный сбор, "
+            "акциз и НДС."
         ),
         version="1.0.0",
         docs_url="/docs",
@@ -1630,18 +1630,32 @@ def create_app(
             ]
         }
 
-    async def calculation_payload(
-        session: AsyncSession, calculation: CustomsCalculation
-    ):
-        payments = list(
-            (
-                await session.execute(
-                    select(CustomsPaymentResult)
-                    .where(CustomsPaymentResult.calculation_id == calculation.id)
-                    .order_by(CustomsPaymentResult.payment_type)
+    async def calculation_payments(
+        session: AsyncSession, calculation_ids: list[int]
+    ) -> dict[int, list[CustomsPaymentResult]]:
+        """Загрузить платежи нескольких расчётов одним упорядоченным запросом."""
+        if not calculation_ids:
+            return {}
+        values = (
+            await session.execute(
+                select(CustomsPaymentResult)
+                .where(CustomsPaymentResult.calculation_id.in_(calculation_ids))
+                .order_by(
+                    CustomsPaymentResult.calculation_id,
+                    CustomsPaymentResult.payment_type,
                 )
-            ).scalars()
-        )
+            )
+        ).scalars()
+        grouped = {calculation_id: [] for calculation_id in calculation_ids}
+        for payment in values:
+            grouped[payment.calculation_id].append(payment)
+        return grouped
+
+    def calculation_payload(
+        calculation: CustomsCalculation,
+        payments: list[CustomsPaymentResult],
+    ):
+        """Сформировать публичный расчёт из заранее загруженных платежей."""
         payment_types = {item.payment_type for item in payments}
         expected_types_present = payment_types in {
             frozenset(EXPECTED_CUSTOMS_PAYMENT_TYPES),
@@ -1699,7 +1713,6 @@ def create_app(
         brand_id=None,
         series_id=None,
         importer_type=None,
-        calculation_date=None,
     ):
         statement = (
             select(CustomsCalculation)
@@ -1712,7 +1725,6 @@ def create_app(
             (Series.brand_id, brand_id),
             (Spec.series_id, series_id),
             (CustomsCalculation.importer_type, importer_type),
-            (CustomsCalculation.calculation_date, calculation_date),
         ):
             if value is not None:
                 filters.append(column == value)
@@ -1720,8 +1732,18 @@ def create_app(
             CustomsCalculation.calculation_date.desc(), CustomsCalculation.id.desc()
         )
         rows, pagination = await _page(session, statement, limit, offset, include_total)
+        calculations = [row[0] for row in rows]
+        payments = await calculation_payments(
+            session, [calculation.id for calculation in calculations]
+        )
         return {
-            "items": [await calculation_payload(session, row[0]) for row in rows],
+            "items": [
+                calculation_payload(
+                    calculation,
+                    payments.get(calculation.id, []),
+                )
+                for calculation in calculations
+            ],
             "pagination": pagination,
         }
 
@@ -1771,7 +1793,8 @@ def create_app(
         item = await session.get(CustomsCalculation, calculation_id)
         if item is None:
             raise _not_found("Customs calculation")
-        return await calculation_payload(session, item)
+        payments = await calculation_payments(session, [item.id])
+        return calculation_payload(item, payments.get(item.id, []))
 
     @protected_router.get(
         "/api/v1/specs/{spec_id}/customs-calculations",
@@ -1782,7 +1805,6 @@ def create_app(
     async def spec_calculations(
         spec_id: int = ApiPath(description="Идентификатор комплектации."),
         importer_type: ImporterType | None = Query(None, description="Тип импортёра."),
-        calculation_date: date | None = Query(None, description="Точная дата расчёта."),
         limit: int = Query(
             24, ge=1, le=100, description="Максимальное число элементов на странице."
         ),
@@ -1801,7 +1823,6 @@ def create_app(
             include_total,
             spec_id=spec_id,
             importer_type=importer_type,
-            calculation_date=calculation_date,
         )
 
     application.include_router(protected_router)
