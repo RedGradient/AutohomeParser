@@ -1666,8 +1666,6 @@ def create_app(
         importer_type=None,
         status=None,
         calculation_date=None,
-        calculation_date_from=None,
-        calculation_date_to=None,
     ):
         statement = (
             select(CustomsCalculation)
@@ -1685,10 +1683,6 @@ def create_app(
         ):
             if value is not None:
                 filters.append(column == value)
-        if calculation_date_from is not None:
-            filters.append(CustomsCalculation.calculation_date >= calculation_date_from)
-        if calculation_date_to is not None:
-            filters.append(CustomsCalculation.calculation_date <= calculation_date_to)
         statement = statement.where(*filters).order_by(
             CustomsCalculation.calculation_date.desc(), CustomsCalculation.id.desc()
         )
@@ -1718,12 +1712,6 @@ def create_app(
                 "MISSING_DATA, UNSUPPORTED или MANUAL_REVIEW."
             ),
         ),
-        calculation_date_from: date | None = Query(
-            None, description="Начальная дата расчёта включительно."
-        ),
-        calculation_date_to: date | None = Query(
-            None, description="Конечная дата расчёта включительно."
-        ),
         limit: int = Query(
             24, ge=1, le=100, description="Максимальное число элементов на странице."
         ),
@@ -1733,7 +1721,6 @@ def create_app(
         include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
         session: AsyncSession = Depends(get_session),
     ):
-        _check_range(calculation_date_from, calculation_date_to, "calculation_date")
         return await calculations_impl(
             session,
             limit,
@@ -1744,8 +1731,6 @@ def create_app(
             series_id=series_id,
             importer_type=importer_type,
             status=status,
-            calculation_date_from=calculation_date_from,
-            calculation_date_to=calculation_date_to,
         )
 
     @protected_router.get(
