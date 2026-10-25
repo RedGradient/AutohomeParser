@@ -57,6 +57,7 @@ class AlembicMigrationTests(unittest.TestCase):
         self.database_url = f"sqlite:///{database_path}"
         self.config = Config(str(PROJECT_ROOT / "alembic.ini"))
         self.config.set_main_option("sqlalchemy.url", self.database_url)
+        self.config.attributes["database_url"] = self.database_url
 
     def tearDown(self):
         self.temp_dir.cleanup()
