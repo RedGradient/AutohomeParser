@@ -4,16 +4,12 @@ from contextlib import asynccontextmanager
 from decimal import Decimal
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, Query
 from fastapi import Path as ApiPath
 from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from autohome.api.auth import (
-    AuthSettings,
-    create_access_token,
-    credentials_are_valid,
-)
+from autohome.api.auth import AuthSettings
 from autohome.api.common import (
     EXPECTED_CUSTOMS_PAYMENT_TYPES,
     KNOWN_SERIES_STATE_CODES,
@@ -73,16 +69,15 @@ from autohome.api.errors import (
 )
 from autohome.api.pagination import INCLUDE_TOTAL_DESCRIPTION
 from autohome.api.pagination import page as _page
+from autohome.api.routers.auth import create_auth_router
+from autohome.api.routers.brands import create_brands_router
+from autohome.api.routers.manufacturers import create_manufacturers_router
 from autohome.api.schemas import (
-    BrandPage,
-    BrandResponse,
     CustomsCalculationPage,
     CustomsCalculationResponse,
     ErrorResponse,
     GalleryColorsResponse,
     ImporterType,
-    ManufacturerPage,
-    ManufacturerResponse,
     ModificationPage,
     ModificationResponse,
     ParameterGroupsResponse,
@@ -92,13 +87,10 @@ from autohome.api.schemas import (
     SeriesState,
     SpecDetailResponse,
     SpecPage,
-    TokenRequest,
-    TokenResponse,
 )
 from autohome.api.session import DatabaseSessionManager
 from autohome.models import (
     Brand,
-    BrandManufacturer,
     CustomsCalculation,
     CustomsPaymentResult,
     Manufacturer,
@@ -205,175 +197,17 @@ def create_app(
     require_authenticated_user = authenticated_user_dependency(auth_settings)
     protected_router = APIRouter(dependencies=[Depends(require_authenticated_user)])
     register_exception_handlers(application)
-
-    @application.post(
-        "/api/v1/auth/token",
-        response_model=TokenResponse,
-        tags=["Auth"],
-        summary="Получить JWT",
-        description="Проверяет логин и пароль и выдаёт Bearer-токен с ограниченным сроком действия.",
+    application.include_router(create_auth_router(auth_settings))
+    application.include_router(
+        create_brands_router(get_session, require_authenticated_user)
     )
-    async def issue_token(credentials: TokenRequest):
-        if not credentials_are_valid(
-            credentials.username, credentials.password, auth_settings
-        ):
-            raise HTTPException(
-                status_code=401,
-                detail={
-                    "code": "INVALID_CREDENTIALS",
-                    "message": "Invalid username or password",
-                },
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        return {
-            "access_token": create_access_token(credentials.username, auth_settings),
-            "token_type": "bearer",
-            "expires_in": auth_settings.access_token_ttl_seconds,
-        }
+    application.include_router(
+        create_manufacturers_router(get_session, require_authenticated_user)
+    )
 
     @application.get("/health", include_in_schema=False)
     async def health():
         return {"status": "ok"}
-
-    @protected_router.get(
-        "/api/v1/brands",
-        response_model=BrandPage,
-        tags=["Brands"],
-        summary="Получить бренды",
-        description="Возвращает бренды с фильтрацией и offset-пагинацией.",
-    )
-    async def brands(
-        q: str | None = Query(
-            None, description="Поиск по части названия бренда без учёта регистра."
-        ),
-        manufacturer_id: int | None = Query(
-            None, description="Оставить бренды указанного производителя."
-        ),
-        is_new_energy: bool | None = Query(
-            None, description="Оставить бренды с сериями указанной категории NEV."
-        ),
-        sort: Literal["name", "series_count"] = Query(
-            "name", description="Поле сортировки."
-        ),
-        order: SortOrder = Query(
-            "asc", description="Направление сортировки: asc или desc."
-        ),
-        limit: int = Query(
-            24, ge=1, le=100, description="Максимальное число элементов на странице."
-        ),
-        offset: int = Query(
-            0, ge=0, description="Количество записей, которые нужно пропустить."
-        ),
-        include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
-        session: AsyncSession = Depends(get_session),
-    ):
-        statement = select(Brand)
-        matching_series = select(Series.id).where(Series.brand_id == Brand.id)
-        if manufacturer_id is not None:
-            matching_series = matching_series.where(
-                Series.manufacturer_id == manufacturer_id
-            )
-        if is_new_energy is not None:
-            matching_series = matching_series.where(
-                Series.is_new_energy == is_new_energy
-            )
-        if q:
-            statement = statement.where(
-                func.lower(Brand.name).like(_contains_pattern(q), escape="\\")
-            )
-        if any(v is not None for v in (manufacturer_id, is_new_energy)):
-            statement = statement.where(exists(matching_series))
-        sort_column = {"name": Brand.name, "series_count": Brand.series_count}[sort]
-        statement = statement.order_by(
-            sort_column.desc() if order == "desc" else sort_column.asc(), Brand.id.asc()
-        )
-        rows, pagination = await _page(session, statement, limit, offset, include_total)
-        items = [
-            {
-                "id": brand.id,
-                "name": brand.name,
-                "logo_url": brand.logo_url,
-                "series_count": brand.series_count,
-            }
-            for (brand,) in rows
-        ]
-        return {"items": items, "pagination": pagination}
-
-    @protected_router.get(
-        "/api/v1/brands/{brand_id}",
-        response_model=BrandResponse,
-        tags=["Brands"],
-        summary="Получить бренд",
-    )
-    async def brand_detail(
-        brand_id: int = ApiPath(description="Идентификатор бренда."),
-        session: AsyncSession = Depends(get_session),
-    ):
-        brand = await session.get(Brand, brand_id)
-        if brand is None:
-            raise _not_found("Brand")
-        return {
-            "id": brand.id,
-            "name": brand.name,
-            "logo_url": brand.logo_url,
-            "series_count": brand.series_count,
-        }
-
-    @protected_router.get(
-        "/api/v1/manufacturers",
-        response_model=ManufacturerPage,
-        tags=["Manufacturers"],
-        summary="Получить производителей",
-        description="Возвращает производителей с поиском по названию и фильтром по бренду.",
-    )
-    async def manufacturers(
-        q: str | None = Query(
-            None,
-            description="Поиск по части названия производителя без учёта регистра.",
-        ),
-        brand_id: int | None = Query(
-            None, description="Оставить производителей указанного бренда."
-        ),
-        limit: int = Query(
-            24, ge=1, le=100, description="Максимальное число элементов на странице."
-        ),
-        offset: int = Query(
-            0, ge=0, description="Количество записей, которые нужно пропустить."
-        ),
-        include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
-        session: AsyncSession = Depends(get_session),
-    ):
-        statement = select(Manufacturer)
-        if brand_id is not None:
-            statement = statement.join(
-                BrandManufacturer,
-                BrandManufacturer.manufacturer_id == Manufacturer.id,
-            ).where(BrandManufacturer.brand_id == brand_id)
-        if q:
-            statement = statement.where(
-                func.lower(Manufacturer.name).like(_contains_pattern(q), escape="\\")
-            )
-        statement = statement.order_by(Manufacturer.name, Manufacturer.id)
-        rows, pagination = await _page(session, statement, limit, offset, include_total)
-        return {
-            "items": [{"id": item.id, "name": item.name} for (item,) in rows],
-            "pagination": pagination,
-        }
-
-    @protected_router.get(
-        "/api/v1/manufacturers/{manufacturer_id}",
-        response_model=ManufacturerResponse,
-        tags=["Manufacturers"],
-        summary="Получить производителя",
-    )
-    async def manufacturer_detail(
-        manufacturer_id: int = ApiPath(description="Идентификатор производителя."),
-        session: AsyncSession = Depends(get_session),
-    ):
-        manufacturer = await session.get(Manufacturer, manufacturer_id)
-        if manufacturer is None:
-            raise _not_found("Manufacturer")
-        return {"id": manufacturer.id, "name": manufacturer.name}
 
     def series_statement():
         price = _effective_price()
