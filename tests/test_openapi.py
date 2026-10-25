@@ -33,6 +33,8 @@ class OpenApiSchemaTests(unittest.TestCase):
                 "parameters"
             ]
         }
+        importer_schema = customs_parameters["importer_type"]["schema"]["anyOf"][0]
+        self.assertEqual(importer_schema["$ref"], "#/components/schemas/ImporterType")
         self.assertNotIn("status", customs_parameters)
         self.assertNotIn("calculation_date_from", customs_parameters)
         self.assertNotIn("calculation_date_to", customs_parameters)
@@ -41,6 +43,19 @@ class OpenApiSchemaTests(unittest.TestCase):
         ]
         self.assertIn("актуальный сценарий", calculation_schema["description"].lower())
         self.assertNotIn("status", calculation_schema["properties"])
+        self.assertEqual(
+            calculation_schema["properties"]["importer_type"]["$ref"],
+            "#/components/schemas/ImporterType",
+        )
+        payment_schema = schema["components"]["schemas"]["CustomsPaymentResponse"]
+        self.assertEqual(
+            payment_schema["properties"]["payment_type"]["$ref"],
+            "#/components/schemas/CustomsPaymentType",
+        )
+        self.assertEqual(
+            payment_schema["properties"]["status"]["$ref"],
+            "#/components/schemas/CalculationStatus",
+        )
         self.assertIn(
             "/api/v1/series/{series_id}/modifications",
             schema["paths"],

@@ -482,6 +482,11 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         cases = (
             ("/api/v1/specs", {"limit": 0}, "query"),
             ("/api/v1/series", {"state": "INVALID"}, "query"),
+            (
+                "/api/v1/customs-calculations",
+                {"importer_type": "INVALID"},
+                "query",
+            ),
             ("/api/v1/specs/not-an-integer", None, "path"),
         )
         for path, params, expected_location in cases:

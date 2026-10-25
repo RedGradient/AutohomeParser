@@ -27,6 +27,7 @@ from autohome.api.schemas import (
     CustomsCalculationResponse,
     ErrorResponse,
     GalleryColorsResponse,
+    ImporterType,
     ManufacturerPage,
     ManufacturerResponse,
     ModificationPage,
@@ -1734,9 +1735,7 @@ def create_app(
         spec_id: int | None = Query(None, description="Идентификатор комплектации."),
         brand_id: int | None = Query(None, description="Идентификатор бренда."),
         series_id: int | None = Query(None, description="Идентификатор серии."),
-        importer_type: str | None = Query(
-            None, description="Тип импортёра: INDIVIDUAL или LEGAL_ENTITY."
-        ),
+        importer_type: ImporterType | None = Query(None, description="Тип импортёра."),
         limit: int = Query(
             24, ge=1, le=100, description="Максимальное число элементов на странице."
         ),
@@ -1782,9 +1781,7 @@ def create_app(
     )
     async def spec_calculations(
         spec_id: int = ApiPath(description="Идентификатор комплектации."),
-        importer_type: str | None = Query(
-            None, description="Тип импортёра: INDIVIDUAL или LEGAL_ENTITY."
-        ),
+        importer_type: ImporterType | None = Query(None, description="Тип импортёра."),
         calculation_date: date | None = Query(None, description="Точная дата расчёта."),
         limit: int = Query(
             24, ge=1, le=100, description="Максимальное число элементов на странице."
