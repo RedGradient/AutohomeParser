@@ -404,12 +404,26 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["code"], "INVALID_CREDENTIALS")
         self.assertEqual(response.headers["www-authenticate"], "Bearer")
 
-    async def test_health_endpoint_is_protected(self):
+    async def test_health_endpoint_is_public(self):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=self.app), base_url="http://test"
         ) as client:
             response = await client.get("/health")
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
+
+    async def test_search_treats_like_wildcards_as_literal_text(self):
+        for path in (
+            "/api/v1/brands",
+            "/api/v1/manufacturers",
+            "/api/v1/series",
+            "/api/v1/specs",
+        ):
+            for query in ("%", "_", "\\"):
+                with self.subTest(path=path, query=query):
+                    response = await self.client.get(path, params={"q": query})
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(response.json()["items"], [])
 
     async def test_docs_endpoint_is_available(self):
         self.assertEqual((await self.client.get("/docs")).status_code, 200)

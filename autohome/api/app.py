@@ -154,6 +154,13 @@ def _price_column(price_type: PriceType):
     }[price_type]
 
 
+def _contains_pattern(value: str) -> str:
+    """Экранировать пользовательский текст для поиска через SQL LIKE."""
+    escaped = value.lower().replace("\\", "\\\\")
+    escaped = escaped.replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
 async def _page(
     session: AsyncSession,
     statement,
@@ -325,7 +332,7 @@ def _apply_spec_filters(
 ):
     filters = []
     if q:
-        filters.append(func.lower(Spec.name).like(f"%{q.lower()}%"))
+        filters.append(func.lower(Spec.name).like(_contains_pattern(q), escape="\\"))
     mappings = (
         (Series.brand_id, brand_id),
         (Spec.series_id, series_id),
@@ -494,7 +501,7 @@ def create_app(
             "expires_in": auth_settings.access_token_ttl_seconds,
         }
 
-    @protected_router.get("/health", include_in_schema=False)
+    @application.get("/health", include_in_schema=False)
     async def health():
         return {"status": "ok"}
 
@@ -541,7 +548,9 @@ def create_app(
                 Series.is_new_energy == is_new_energy
             )
         if q:
-            statement = statement.where(func.lower(Brand.name).like(f"%{q.lower()}%"))
+            statement = statement.where(
+                func.lower(Brand.name).like(_contains_pattern(q), escape="\\")
+            )
         if any(v is not None for v in (manufacturer_id, is_new_energy)):
             statement = statement.where(exists(matching_series))
         sort_column = {"name": Brand.name, "series_count": Brand.series_count}[sort]
@@ -612,7 +621,7 @@ def create_app(
             ).where(BrandManufacturer.brand_id == brand_id)
         if q:
             statement = statement.where(
-                func.lower(Manufacturer.name).like(f"%{q.lower()}%")
+                func.lower(Manufacturer.name).like(_contains_pattern(q), escape="\\")
             )
         statement = statement.order_by(Manufacturer.name, Manufacturer.id)
         rows, pagination = await _page(session, statement, limit, offset, include_total)
@@ -779,7 +788,9 @@ def create_app(
         elif state is not None:
             direct.append(Series.state.in_(SERIES_STATE_CODES[state]))
         if q:
-            direct.append(func.lower(Series.name).like(f"%{q.lower()}%"))
+            direct.append(
+                func.lower(Series.name).like(_contains_pattern(q), escape="\\")
+            )
         matching_specs = _apply_spec_filters(
             select(Spec.id)
             .outerjoin(Series, Series.id == Spec.series_id)
