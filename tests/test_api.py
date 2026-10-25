@@ -366,6 +366,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.get("/api/v1/customs-calculations/900")
 
         self.assertEqual(response.status_code, 200)
+        self.assertNotIn("status", response.json())
         details = response.json()["payments"][0]["details"]
         self.assertNotIn("field_labels", details)
         self.assertEqual(details["source"], "https://example.test/rule")

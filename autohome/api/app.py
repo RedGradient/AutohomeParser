@@ -1639,7 +1639,6 @@ def create_app(
             "engine_displacement_ml": calculation.engine_displacement_ml,
             "tnved_code": calculation.tnved_code,
             "classification_status": calculation.classification_status,
-            "status": calculation.status,
             "warnings": calculation.warnings_json,
             "payments": [
                 {
@@ -1664,7 +1663,6 @@ def create_app(
         brand_id=None,
         series_id=None,
         importer_type=None,
-        status=None,
         calculation_date=None,
     ):
         statement = (
@@ -1678,7 +1676,6 @@ def create_app(
             (Series.brand_id, brand_id),
             (Spec.series_id, series_id),
             (CustomsCalculation.importer_type, importer_type),
-            (CustomsCalculation.status, status),
             (CustomsCalculation.calculation_date, calculation_date),
         ):
             if value is not None:
@@ -1705,13 +1702,6 @@ def create_app(
         importer_type: str | None = Query(
             None, description="Тип импортёра: INDIVIDUAL или LEGAL_ENTITY."
         ),
-        status: str | None = Query(
-            None,
-            description=(
-                "Итоговый статус расчёта: CALCULATED, NOT_APPLICABLE, "
-                "MISSING_DATA, UNSUPPORTED или MANUAL_REVIEW."
-            ),
-        ),
         limit: int = Query(
             24, ge=1, le=100, description="Максимальное число элементов на странице."
         ),
@@ -1730,7 +1720,6 @@ def create_app(
             brand_id=brand_id,
             series_id=series_id,
             importer_type=importer_type,
-            status=status,
         )
 
     @protected_router.get(

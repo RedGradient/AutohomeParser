@@ -424,7 +424,6 @@ class CustomsCalculationResponse(ApiSchema):
     )
     tnved_code: str | None = Field(description="Определённый код ТН ВЭД.")
     classification_status: str = Field(description="Статус товарной классификации.")
-    status: str = Field(description="Итоговый статус расчёта.")
     warnings: list[dict[str, Any]] = Field(
         description="Предупреждения о неполных или неточных исходных данных."
     )

@@ -33,14 +33,14 @@ class OpenApiSchemaTests(unittest.TestCase):
                 "parameters"
             ]
         }
-        self.assertIn("CALCULATED", customs_parameters["status"]["description"])
-        self.assertIn("MANUAL_REVIEW", customs_parameters["status"]["description"])
+        self.assertNotIn("status", customs_parameters)
         self.assertNotIn("calculation_date_from", customs_parameters)
         self.assertNotIn("calculation_date_to", customs_parameters)
         calculation_schema = schema["components"]["schemas"][
             "CustomsCalculationResponse"
         ]
         self.assertIn("актуальный сценарий", calculation_schema["description"].lower())
+        self.assertNotIn("status", calculation_schema["properties"])
         self.assertIn(
             "/api/v1/series/{series_id}/modifications",
             schema["paths"],
