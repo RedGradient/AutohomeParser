@@ -178,7 +178,7 @@ api-run: postgres-up
 
 database-reset: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
-		.venv/bin/python reset_database.py --yes
+		.venv/bin/python reset_database.py
 
 parameters-reset: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
