@@ -7,6 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import httpx
+from sqlalchemy import event
 
 from autohome.api.app import create_app
 from autohome.api.auth import create_access_token
@@ -366,6 +367,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.get("/api/v1/customs-calculations/900")
 
         self.assertEqual(response.status_code, 200)
+        self.assertNotIn("status", response.json())
         details = response.json()["payments"][0]["details"]
         self.assertNotIn("field_labels", details)
         self.assertEqual(details["source"], "https://example.test/rule")
@@ -393,6 +395,28 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(response.json()["total_rub"])
         self.assertFalse(response.json()["is_total_complete"])
 
+    async def test_customs_page_loads_payments_in_one_query(self):
+        select_statements = []
+
+        def capture_selects(_, __, statement, *___):
+            if statement.lstrip().upper().startswith("SELECT"):
+                select_statements.append(statement)
+
+        engine = self.app.state.engine.sync_engine
+        event.listen(engine, "before_cursor_execute", capture_selects)
+        try:
+            response = await self.client.get("/api/v1/customs-calculations")
+        finally:
+            event.remove(engine, "before_cursor_execute", capture_selects)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(select_statements), 2)
+        for calculation in response.json()["items"]:
+            payment_types = [
+                payment["payment_type"] for payment in calculation["payments"]
+            ]
+            self.assertEqual(payment_types, sorted(payment_types))
+
     async def test_token_endpoint_rejects_invalid_credentials(self):
         response = await self.client.post(
             "/api/v1/auth/token",
@@ -403,12 +427,26 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["code"], "INVALID_CREDENTIALS")
         self.assertEqual(response.headers["www-authenticate"], "Bearer")
 
-    async def test_health_endpoint_is_protected(self):
+    async def test_health_endpoint_is_public(self):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=self.app), base_url="http://test"
         ) as client:
             response = await client.get("/health")
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
+
+    async def test_search_treats_like_wildcards_as_literal_text(self):
+        for path in (
+            "/api/v1/brands",
+            "/api/v1/manufacturers",
+            "/api/v1/series",
+            "/api/v1/specs",
+        ):
+            for query in ("%", "_", "\\"):
+                with self.subTest(path=path, query=query):
+                    response = await self.client.get(path, params={"q": query})
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(response.json()["items"], [])
 
     async def test_docs_endpoint_is_available(self):
         self.assertEqual((await self.client.get("/docs")).status_code, 200)
@@ -462,6 +500,29 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["code"], "INVALID_RANGE")
+
+    async def test_validation_errors_use_public_error_schema(self):
+        cases = (
+            ("/api/v1/specs", {"limit": 0}, "query"),
+            ("/api/v1/series", {"state": "INVALID"}, "query"),
+            (
+                "/api/v1/customs-calculations",
+                {"importer_type": "INVALID"},
+                "query",
+            ),
+            ("/api/v1/specs/not-an-integer", None, "path"),
+        )
+        for path, params, expected_location in cases:
+            with self.subTest(path=path, params=params):
+                response = await self.client.get(path, params=params)
+                self.assertEqual(response.status_code, 422)
+                payload = response.json()
+                self.assertEqual(payload["code"], "VALIDATION_ERROR")
+                self.assertEqual(payload["message"], "Request validation failed")
+                self.assertTrue(payload["details"]["errors"])
+                error = payload["details"]["errors"][0]
+                self.assertEqual(error["location"][0], expected_location)
+                self.assertEqual(set(error), {"location", "message", "type"})
 
     async def test_photo_color_scope_filter_maps_public_enum_to_database_value(self):
         response = await self.client.get(

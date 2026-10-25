@@ -6,6 +6,28 @@ from autohome.api.app import create_app
 
 
 class OpenApiSchemaTests(unittest.TestCase):
+    EXPECTED_OPERATIONS = {
+        ("POST", "/api/v1/auth/token"),
+        ("GET", "/api/v1/brands"),
+        ("GET", "/api/v1/brands/{brand_id}"),
+        ("GET", "/api/v1/manufacturers"),
+        ("GET", "/api/v1/manufacturers/{manufacturer_id}"),
+        ("GET", "/api/v1/series"),
+        ("GET", "/api/v1/series/{series_id}"),
+        ("GET", "/api/v1/modifications"),
+        ("GET", "/api/v1/series/{series_id}/modifications"),
+        ("GET", "/api/v1/modifications/{modification_id}"),
+        ("GET", "/api/v1/specs"),
+        ("GET", "/api/v1/modifications/{modification_id}/specs"),
+        ("GET", "/api/v1/specs/{spec_id}"),
+        ("GET", "/api/v1/specs/{spec_id}/parameters"),
+        ("GET", "/api/v1/series/{series_id}/photos"),
+        ("GET", "/api/v1/series/{series_id}/gallery-colors"),
+        ("GET", "/api/v1/customs-calculations"),
+        ("GET", "/api/v1/customs-calculations/{calculation_id}"),
+        ("GET", "/api/v1/specs/{spec_id}/customs-calculations"),
+    }
+
     @classmethod
     def setUpClass(cls):
         app = create_app(
@@ -23,14 +45,48 @@ class OpenApiSchemaTests(unittest.TestCase):
         self.assertIn("- фотографии.", schema["info"]["description"])
         self.assertIn("ввозную таможенную пошлину", schema["info"]["description"])
         self.assertIn("утилизационный сбор", schema["info"]["description"])
+        self.assertIn("акциз", schema["info"]["description"])
+        self.assertIn("НДС", schema["info"]["description"])
         self.assertEqual(
             schema["paths"]["/api/v1/customs-calculations"]["get"]["summary"],
             "Получить актуальные таможенные расчёты",
         )
+        customs_parameters = {
+            item["name"]: item
+            for item in schema["paths"]["/api/v1/customs-calculations"]["get"][
+                "parameters"
+            ]
+        }
+        importer_schema = customs_parameters["importer_type"]["schema"]["anyOf"][0]
+        self.assertEqual(importer_schema["$ref"], "#/components/schemas/ImporterType")
+        self.assertNotIn("status", customs_parameters)
+        self.assertNotIn("calculation_date_from", customs_parameters)
+        self.assertNotIn("calculation_date_to", customs_parameters)
+        spec_customs_parameters = {
+            item["name"]: item
+            for item in schema["paths"]["/api/v1/specs/{spec_id}/customs-calculations"][
+                "get"
+            ]["parameters"]
+        }
+        self.assertNotIn("calculation_date", spec_customs_parameters)
         calculation_schema = schema["components"]["schemas"][
             "CustomsCalculationResponse"
         ]
         self.assertIn("актуальный сценарий", calculation_schema["description"].lower())
+        self.assertNotIn("status", calculation_schema["properties"])
+        self.assertEqual(
+            calculation_schema["properties"]["importer_type"]["$ref"],
+            "#/components/schemas/ImporterType",
+        )
+        payment_schema = schema["components"]["schemas"]["CustomsPaymentResponse"]
+        self.assertEqual(
+            payment_schema["properties"]["payment_type"]["$ref"],
+            "#/components/schemas/CustomsPaymentType",
+        )
+        self.assertEqual(
+            payment_schema["properties"]["status"]["$ref"],
+            "#/components/schemas/CalculationStatus",
+        )
         self.assertIn(
             "/api/v1/series/{series_id}/modifications",
             schema["paths"],
@@ -52,6 +108,12 @@ class OpenApiSchemaTests(unittest.TestCase):
             "Стадия продаж комплектации.",
         )
         operation = schema["paths"]["/api/v1/specs"]["get"]
+        self.assertEqual(
+            operation["responses"]["422"]["content"]["application/json"]["schema"][
+                "$ref"
+            ],
+            "#/components/schemas/ErrorResponse",
+        )
         self.assertEqual(
             operation["responses"]["200"]["content"]["application/json"]["schema"][
                 "$ref"
@@ -93,6 +155,30 @@ class OpenApiSchemaTests(unittest.TestCase):
             properties = schema["components"]["schemas"][page_name]["properties"]
             self.assertIn("description", properties["items"])
             self.assertIn("description", properties["pagination"])
+
+    def test_public_api_operations_have_complete_contract(self):
+        """Проверяет состав, документацию и авторизацию публичных операций API."""
+        operations = {
+            (method.upper(), path): operation
+            for path, methods in self.schema["paths"].items()
+            for method, operation in methods.items()
+            if method in {"get", "post", "put", "patch", "delete"}
+        }
+
+        self.assertEqual(set(operations), self.EXPECTED_OPERATIONS)
+        for (method, path), operation in operations.items():
+            self.assertTrue(operation.get("summary"), f"{method} {path}: нет summary")
+            self.assertIn(
+                "200", operation["responses"], f"{method} {path}: нет ответа 200"
+            )
+            if path == "/api/v1/auth/token":
+                self.assertNotIn("security", operation)
+            else:
+                self.assertEqual(
+                    operation.get("security"),
+                    [{"JWT Bearer": []}],
+                    f"{method} {path}: неверная схема авторизации",
+                )
 
 
 if __name__ == "__main__":

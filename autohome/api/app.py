@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from datetime import date
 from decimal import Decimal
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Security
 from fastapi import Path as ApiPath
 from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import and_, case, exists, func, or_, select
@@ -26,6 +26,7 @@ from autohome.api.schemas import (
     CustomsCalculationResponse,
     ErrorResponse,
     GalleryColorsResponse,
+    ImporterType,
     ManufacturerPage,
     ManufacturerResponse,
     ModificationPage,
@@ -152,6 +153,13 @@ def _price_column(price_type: PriceType):
         "guide": Spec.guide_price_yuan,
         "dealer": Spec.dealer_price_yuan,
     }[price_type]
+
+
+def _contains_pattern(value: str) -> str:
+    """Экранировать пользовательский текст для поиска через SQL LIKE."""
+    escaped = value.lower().replace("\\", "\\\\")
+    escaped = escaped.replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
 async def _page(
@@ -325,7 +333,7 @@ def _apply_spec_filters(
 ):
     filters = []
     if q:
-        filters.append(func.lower(Spec.name).like(f"%{q.lower()}%"))
+        filters.append(func.lower(Spec.name).like(_contains_pattern(q), escape="\\"))
     mappings = (
         (Series.brand_id, brand_id),
         (Spec.series_id, series_id),
@@ -399,7 +407,8 @@ def create_app(
             "- характеристики;\n"
             "- фотографии.\n\n"
             "API также возвращает предварительно рассчитанные таможенные платежи: "
-            "ввозную таможенную пошлину, таможенный сбор и утилизационный сбор."
+            "ввозную таможенную пошлину, таможенный сбор, утилизационный сбор, "
+            "акциз и НДС."
         ),
         version="1.0.0",
         docs_url="/docs",
@@ -433,6 +442,10 @@ def create_app(
             404: {
                 "model": ErrorResponse,
                 "description": "Запрошенная сущность не найдена.",
+            },
+            422: {
+                "model": ErrorResponse,
+                "description": "Параметры или тело запроса не прошли валидацию.",
             },
         },
     )
@@ -469,6 +482,25 @@ def create_app(
             headers=exc.headers,
         )
 
+    @application.exception_handler(RequestValidationError)
+    async def validation_exception_handler(_, exc: RequestValidationError):
+        errors = [
+            {
+                "location": list(error["loc"]),
+                "message": error["msg"],
+                "type": error["type"],
+            }
+            for error in exc.errors()
+        ]
+        return JSONResponse(
+            status_code=422,
+            content={
+                "code": "VALIDATION_ERROR",
+                "message": "Request validation failed",
+                "details": {"errors": errors},
+            },
+        )
+
     @application.post(
         "/api/v1/auth/token",
         response_model=TokenResponse,
@@ -494,7 +526,7 @@ def create_app(
             "expires_in": auth_settings.access_token_ttl_seconds,
         }
 
-    @protected_router.get("/health", include_in_schema=False)
+    @application.get("/health", include_in_schema=False)
     async def health():
         return {"status": "ok"}
 
@@ -541,7 +573,9 @@ def create_app(
                 Series.is_new_energy == is_new_energy
             )
         if q:
-            statement = statement.where(func.lower(Brand.name).like(f"%{q.lower()}%"))
+            statement = statement.where(
+                func.lower(Brand.name).like(_contains_pattern(q), escape="\\")
+            )
         if any(v is not None for v in (manufacturer_id, is_new_energy)):
             statement = statement.where(exists(matching_series))
         sort_column = {"name": Brand.name, "series_count": Brand.series_count}[sort]
@@ -612,7 +646,7 @@ def create_app(
             ).where(BrandManufacturer.brand_id == brand_id)
         if q:
             statement = statement.where(
-                func.lower(Manufacturer.name).like(f"%{q.lower()}%")
+                func.lower(Manufacturer.name).like(_contains_pattern(q), escape="\\")
             )
         statement = statement.order_by(Manufacturer.name, Manufacturer.id)
         rows, pagination = await _page(session, statement, limit, offset, include_total)
@@ -779,7 +813,9 @@ def create_app(
         elif state is not None:
             direct.append(Series.state.in_(SERIES_STATE_CODES[state]))
         if q:
-            direct.append(func.lower(Series.name).like(f"%{q.lower()}%"))
+            direct.append(
+                func.lower(Series.name).like(_contains_pattern(q), escape="\\")
+            )
         matching_specs = _apply_spec_filters(
             select(Spec.id)
             .outerjoin(Series, Series.id == Spec.series_id)
@@ -1594,18 +1630,32 @@ def create_app(
             ]
         }
 
-    async def calculation_payload(
-        session: AsyncSession, calculation: CustomsCalculation
-    ):
-        payments = list(
-            (
-                await session.execute(
-                    select(CustomsPaymentResult)
-                    .where(CustomsPaymentResult.calculation_id == calculation.id)
-                    .order_by(CustomsPaymentResult.payment_type)
+    async def calculation_payments(
+        session: AsyncSession, calculation_ids: list[int]
+    ) -> dict[int, list[CustomsPaymentResult]]:
+        """Загрузить платежи нескольких расчётов одним упорядоченным запросом."""
+        if not calculation_ids:
+            return {}
+        values = (
+            await session.execute(
+                select(CustomsPaymentResult)
+                .where(CustomsPaymentResult.calculation_id.in_(calculation_ids))
+                .order_by(
+                    CustomsPaymentResult.calculation_id,
+                    CustomsPaymentResult.payment_type,
                 )
-            ).scalars()
-        )
+            )
+        ).scalars()
+        grouped = {calculation_id: [] for calculation_id in calculation_ids}
+        for payment in values:
+            grouped[payment.calculation_id].append(payment)
+        return grouped
+
+    def calculation_payload(
+        calculation: CustomsCalculation,
+        payments: list[CustomsPaymentResult],
+    ):
+        """Сформировать публичный расчёт из заранее загруженных платежей."""
         payment_types = {item.payment_type for item in payments}
         expected_types_present = payment_types in {
             frozenset(EXPECTED_CUSTOMS_PAYMENT_TYPES),
@@ -1639,7 +1689,6 @@ def create_app(
             "engine_displacement_ml": calculation.engine_displacement_ml,
             "tnved_code": calculation.tnved_code,
             "classification_status": calculation.classification_status,
-            "status": calculation.status,
             "warnings": calculation.warnings_json,
             "payments": [
                 {
@@ -1664,10 +1713,6 @@ def create_app(
         brand_id=None,
         series_id=None,
         importer_type=None,
-        status=None,
-        calculation_date=None,
-        calculation_date_from=None,
-        calculation_date_to=None,
     ):
         statement = (
             select(CustomsCalculation)
@@ -1680,21 +1725,25 @@ def create_app(
             (Series.brand_id, brand_id),
             (Spec.series_id, series_id),
             (CustomsCalculation.importer_type, importer_type),
-            (CustomsCalculation.status, status),
-            (CustomsCalculation.calculation_date, calculation_date),
         ):
             if value is not None:
                 filters.append(column == value)
-        if calculation_date_from is not None:
-            filters.append(CustomsCalculation.calculation_date >= calculation_date_from)
-        if calculation_date_to is not None:
-            filters.append(CustomsCalculation.calculation_date <= calculation_date_to)
         statement = statement.where(*filters).order_by(
             CustomsCalculation.calculation_date.desc(), CustomsCalculation.id.desc()
         )
         rows, pagination = await _page(session, statement, limit, offset, include_total)
+        calculations = [row[0] for row in rows]
+        payments = await calculation_payments(
+            session, [calculation.id for calculation in calculations]
+        )
         return {
-            "items": [await calculation_payload(session, row[0]) for row in rows],
+            "items": [
+                calculation_payload(
+                    calculation,
+                    payments.get(calculation.id, []),
+                )
+                for calculation in calculations
+            ],
             "pagination": pagination,
         }
 
@@ -1708,16 +1757,7 @@ def create_app(
         spec_id: int | None = Query(None, description="Идентификатор комплектации."),
         brand_id: int | None = Query(None, description="Идентификатор бренда."),
         series_id: int | None = Query(None, description="Идентификатор серии."),
-        importer_type: str | None = Query(
-            None, description="Тип импортёра: INDIVIDUAL или LEGAL_ENTITY."
-        ),
-        status: str | None = Query(None, description="Итоговый статус расчёта."),
-        calculation_date_from: date | None = Query(
-            None, description="Начальная дата расчёта включительно."
-        ),
-        calculation_date_to: date | None = Query(
-            None, description="Конечная дата расчёта включительно."
-        ),
+        importer_type: ImporterType | None = Query(None, description="Тип импортёра."),
         limit: int = Query(
             24, ge=1, le=100, description="Максимальное число элементов на странице."
         ),
@@ -1727,7 +1767,6 @@ def create_app(
         include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
         session: AsyncSession = Depends(get_session),
     ):
-        _check_range(calculation_date_from, calculation_date_to, "calculation_date")
         return await calculations_impl(
             session,
             limit,
@@ -1737,9 +1776,6 @@ def create_app(
             brand_id=brand_id,
             series_id=series_id,
             importer_type=importer_type,
-            status=status,
-            calculation_date_from=calculation_date_from,
-            calculation_date_to=calculation_date_to,
         )
 
     @protected_router.get(
@@ -1757,7 +1793,8 @@ def create_app(
         item = await session.get(CustomsCalculation, calculation_id)
         if item is None:
             raise _not_found("Customs calculation")
-        return await calculation_payload(session, item)
+        payments = await calculation_payments(session, [item.id])
+        return calculation_payload(item, payments.get(item.id, []))
 
     @protected_router.get(
         "/api/v1/specs/{spec_id}/customs-calculations",
@@ -1767,10 +1804,7 @@ def create_app(
     )
     async def spec_calculations(
         spec_id: int = ApiPath(description="Идентификатор комплектации."),
-        importer_type: str | None = Query(
-            None, description="Тип импортёра: INDIVIDUAL или LEGAL_ENTITY."
-        ),
-        calculation_date: date | None = Query(None, description="Точная дата расчёта."),
+        importer_type: ImporterType | None = Query(None, description="Тип импортёра."),
         limit: int = Query(
             24, ge=1, le=100, description="Максимальное число элементов на странице."
         ),
@@ -1789,7 +1823,6 @@ def create_app(
             include_total,
             spec_id=spec_id,
             importer_type=importer_type,
-            calculation_date=calculation_date,
         )
 
     application.include_router(protected_router)

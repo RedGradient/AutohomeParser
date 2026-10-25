@@ -14,6 +14,44 @@ ColorScope = Literal["EXTERIOR", "INTERIOR"]
 PriceSource = Literal["GUIDE", "DEALER", "MISSING", "NOT_REQUIRED"]
 
 
+class ImporterType(StrEnum):
+    """Тип импортёра в публичном API."""
+
+    INDIVIDUAL = "INDIVIDUAL"
+    LEGAL_ENTITY = "LEGAL_ENTITY"
+
+
+class CustomsPaymentType(StrEnum):
+    """Компонент таможенных платежей."""
+
+    IMPORT_DUTY = "IMPORT_DUTY"
+    CUSTOMS_FEE = "CUSTOMS_FEE"
+    RECYCLING_FEE = "RECYCLING_FEE"
+    EXCISE = "EXCISE"
+    VAT = "VAT"
+
+
+class CalculationStatus(StrEnum):
+    """Статус результата отдельного расчёта."""
+
+    CALCULATED = "CALCULATED"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+    MISSING_DATA = "MISSING_DATA"
+    UNSUPPORTED = "UNSUPPORTED"
+    MANUAL_REVIEW = "MANUAL_REVIEW"
+
+
+class ClassificationStatus(StrEnum):
+    """Статус товарной классификации автомобиля."""
+
+    CLASSIFIED = "CLASSIFIED"
+    NOT_REQUIRED = "NOT_REQUIRED"
+    AMBIGUOUS = "AMBIGUOUS"
+    MISSING_DATA = "MISSING_DATA"
+    UNSUPPORTED = "UNSUPPORTED"
+    MANUAL_REVIEW = "MANUAL_REVIEW"
+
+
 class SeriesState(StrEnum):
     """Публичная стадия продаж серии."""
 
@@ -381,19 +419,12 @@ class PhotoResponse(ApiSchema):
 class CustomsPaymentResponse(ApiSchema):
     """Один компонент таможенных платежей."""
 
-    payment_type: str = Field(
-        description=(
-            "Тип платежа: IMPORT_DUTY, CUSTOMS_FEE, RECYCLING_FEE, EXCISE или VAT."
-        ),
+    payment_type: CustomsPaymentType = Field(
+        description="Тип таможенного платежа.",
         examples=["IMPORT_DUTY"],
     )
     amount_rub: Money | None = Field(description="Сумма платежа в рублях.")
-    status: str = Field(
-        description=(
-            "Статус компонента: CALCULATED, NOT_APPLICABLE, MISSING_DATA, "
-            "UNSUPPORTED или MANUAL_REVIEW."
-        )
-    )
+    status: CalculationStatus = Field(description="Статус расчёта компонента.")
     rule_code: str | None = Field(description="Код применённого правила.")
     details: dict[str, Any] = Field(
         description="Промежуточные значения и пояснения расчёта."
@@ -405,9 +436,7 @@ class CustomsCalculationResponse(ApiSchema):
 
     id: int = Field(description="Идентификатор таможенного расчёта.")
     spec_id: int = Field(description="Идентификатор комплектации.")
-    importer_type: str = Field(
-        description="Тип импортёра: INDIVIDUAL или LEGAL_ENTITY."
-    )
+    importer_type: ImporterType = Field(description="Тип импортёра.")
     calculation_date: date = Field(
         description="Дата, на которую выполнен актуальный расчёт."
     )
@@ -423,8 +452,9 @@ class CustomsCalculationResponse(ApiSchema):
         description="Рабочий объём ДВС в миллилитрах."
     )
     tnved_code: str | None = Field(description="Определённый код ТН ВЭД.")
-    classification_status: str = Field(description="Статус товарной классификации.")
-    status: str = Field(description="Итоговый статус расчёта.")
+    classification_status: ClassificationStatus = Field(
+        description="Статус товарной классификации."
+    )
     warnings: list[dict[str, Any]] = Field(
         description="Предупреждения о неполных или неточных исходных данных."
     )
