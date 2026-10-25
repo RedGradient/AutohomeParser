@@ -6,8 +6,7 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
 
-from autohome.models import Base
-
+from autohome.database_migrations import upgrade_database
 
 PROTECTED_DATABASES = {"postgres", "template0", "template1"}
 
@@ -17,7 +16,7 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Удалить целевую PostgreSQL целиком, создать её заново и "
-            "развернуть актуальные таблицы SQLAlchemy."
+            "применить все миграции Alembic."
         )
     )
     parser.add_argument(
@@ -53,7 +52,7 @@ def validate_target(database_url: str, maintenance_database: str):
 
 
 def recreate_database(database_url: str, maintenance_database: str) -> str:
-    """Удалить целевую базу, создать пустую и развернуть все таблицы."""
+    """Удалить целевую базу, создать пустую и применить миграции."""
     target_url = validate_target(database_url, maintenance_database)
     database_name = target_url.database
     maintenance_url = target_url.set(database=maintenance_database)
@@ -75,11 +74,7 @@ def recreate_database(database_url: str, maintenance_database: str) -> str:
     finally:
         maintenance_engine.dispose()
 
-    target_engine = create_engine(target_url, pool_pre_ping=True)
-    try:
-        Base.metadata.create_all(target_engine)
-    finally:
-        target_engine.dispose()
+    upgrade_database(target_url.render_as_string(hide_password=False))
     return database_name
 
 
@@ -95,10 +90,7 @@ def main() -> int:
         args.database_url,
         args.maintenance_database,
     )
-    print(
-        f"База {database_name!r} пересоздана; "
-        f"создано таблиц: {len(Base.metadata.tables)}."
-    )
+    print(f"База {database_name!r} пересоздана и обновлена до Alembic head.")
     return 0
 
 

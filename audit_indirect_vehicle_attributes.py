@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 from collections import Counter
 from itertools import groupby
-import os
 from typing import Any
 
 from sqlalchemy import create_engine, select
@@ -101,10 +101,12 @@ def _record_result(
         )
         counters["constructive_profile"][(body_type, profile)] += 1
         if special_value is None:
-            counters["unresolved_body_class"][(
-                body_type,
-                vehicle_class or "NULL",
-            )] += 1
+            counters["unresolved_body_class"][
+                (
+                    body_type,
+                    vehicle_class or "NULL",
+                )
+            ] += 1
 
 
 def audit_inferences(engine, limit: int | None = None) -> dict[str, Counter]:
@@ -180,9 +182,9 @@ def audit_inferences(engine, limit: int | None = None) -> dict[str, Counter]:
                 parameter_statement = parameter_statement.where(
                     SpecParameter.spec_id.in_(metadata)
                 )
-            parameter_rows = connection.execution_options(
-                stream_results=True
-            ).execute(parameter_statement)
+            parameter_rows = connection.execution_options(stream_results=True).execute(
+                parameter_statement
+            )
         else:
             parameter_rows = ()
 

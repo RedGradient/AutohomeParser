@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -17,9 +17,8 @@ from autohome.import_duty.currency import fetch_cbr_rates
 from autohome.import_duty.types import ExchangeRate
 from autohome.models import CbrExchangeRate
 
-
 RateFetcher = Callable[[date], dict[str, ExchangeRate]]
-Recalculator = Callable[[str, date, dict[str, ExchangeRate]], None]
+Recalculator = Callable[[str, date, dict[str, ExchangeRate], str], None]
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -38,11 +37,12 @@ def run_customs_recalculation(
     database_url: str,
     calculation_date: date,
     rates: dict[str, ExchangeRate],
+    mode: str,
 ) -> None:
     """Запустить существующую утилиту расчёта с уже полученными курсами."""
     command = [
         sys.executable,
-        str(PROJECT_ROOT / "calculate_import_duties.py"),
+        str(PROJECT_ROOT / "calculate_customs_payments.py"),
         "--database-url",
         database_url,
         "--date",
@@ -55,6 +55,8 @@ def run_customs_recalculation(
         str(rates["EUR"].rate_rub),
         "--eur-nominal",
         str(rates["EUR"].nominal),
+        "--mode",
+        mode,
     ]
     subprocess.run(command, check=True, env=os.environ.copy())
 
@@ -71,7 +73,6 @@ def synchronize_cbr_rates(
     previous = fetcher(calculation_date - timedelta(days=1))
     engine = create_engine(database_url, pool_pre_ping=True)
     try:
-        CbrExchangeRate.__table__.create(engine, checkfirst=True)
         with Session(engine) as session:
             stored_rates = {
                 item.currency: item
@@ -84,8 +85,9 @@ def synchronize_cbr_rates(
                 for currency in ("CNY", "EUR")
             )
             changed = rates_differ(current, previous) or stored_is_stale
+        recalculation_mode = "full" if changed else "stale"
+        recalculator(database_url, calculation_date, current, recalculation_mode)
         if changed:
-            recalculator(database_url, calculation_date, current)
             with Session(engine) as session:
                 for currency in ("CNY", "EUR"):
                     rate = current[currency]
@@ -96,13 +98,14 @@ def synchronize_cbr_rates(
                     stored.nominal = rate.nominal
                     stored.rate_rub = rate.rate_rub
                     stored.rate_date = rate.rate_date
-                    stored.fetched_at = datetime.now(timezone.utc)
+                    stored.fetched_at = datetime.now(UTC)
                 session.commit()
     finally:
         engine.dispose()
 
     return {
         "changed": changed,
+        "recalculation_mode": recalculation_mode,
         "calculation_date": calculation_date.isoformat(),
         "current": {
             currency: {

@@ -9,7 +9,6 @@ from zoneinfo import ZoneInfo
 from autohome.celery_app import app
 from autohome.import_duty.scheduled_rates import synchronize_cbr_rates
 
-
 MOSCOW_TIMEZONE = ZoneInfo("Europe/Moscow")
 
 

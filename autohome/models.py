@@ -5,14 +5,15 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     Date,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
-    JSON,
     Numeric,
     PrimaryKeyConstraint,
     String,
@@ -22,7 +23,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-
 
 JSON_TYPE = JSON().with_variant(JSONB(), "postgresql")
 PRICE_TYPE = Numeric(16, 2)
@@ -74,6 +74,10 @@ class Series(Base):
     """Серия автомобилей внутри марки и производителя."""
 
     __tablename__ = "series"
+    __table_args__ = (
+        Index("ix_series_brand_name_id", "brand_id", "name", "id"),
+        Index("ix_series_manufacturer_name_id", "manufacturer_id", "name", "id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     brand_id: Mapped[int | None] = mapped_column(ForeignKey("brands.id"), index=True)
@@ -94,6 +98,10 @@ class Spec(Base):
     """Конкретная комплектация серии автомобиля."""
 
     __tablename__ = "specs"
+    __table_args__ = (
+        Index("ix_specs_series_year_id", "series_id", "year", "id"),
+        Index("ix_specs_modification_id_id", "modification_id", "id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     series_id: Mapped[int | None] = mapped_column(ForeignKey("series.id"), index=True)
@@ -160,9 +168,7 @@ class SpecParameter(Base):
     """Значение параметра для конкретной комплектации."""
 
     __tablename__ = "spec_parameters"
-    __table_args__ = (
-        PrimaryKeyConstraint("spec_id", "parameter_id"),
-    )
+    __table_args__ = (PrimaryKeyConstraint("spec_id", "parameter_id"),)
 
     spec_id: Mapped[int] = mapped_column(ForeignKey("specs.id"), index=True)
     parameter_id: Mapped[int] = mapped_column(
@@ -237,6 +243,10 @@ class SpecPowertrain(Base):
     """Нормализованные признаки силовой установки комплектации."""
 
     __tablename__ = "spec_powertrains"
+    __table_args__ = (
+        Index("ix_spec_powertrains_engine_displacement_ml", "engine_displacement_ml"),
+        Index("ix_spec_powertrains_engine_power_hp", "engine_power_hp"),
+    )
 
     spec_id: Mapped[int] = mapped_column(ForeignKey("specs.id"), primary_key=True)
     series_id: Mapped[int] = mapped_column(ForeignKey("series.id"), index=True)
@@ -282,6 +292,9 @@ class SpecVehicleAttributes(Base):
     """Нормализованные кузовные и классификационные признаки комплектации."""
 
     __tablename__ = "spec_vehicle_attributes"
+    __table_args__ = (
+        Index("ix_spec_vehicle_attributes_seat_count_max", "seat_count_max"),
+    )
 
     spec_id: Mapped[int] = mapped_column(ForeignKey("specs.id"), primary_key=True)
     series_id: Mapped[int] = mapped_column(ForeignKey("series.id"), index=True)
@@ -377,16 +390,25 @@ class Modification(Base):
 
 
 class CustomsCalculation(Base):
-    """Один воспроизводимый сценарий расчёта таможенных платежей."""
+    """Актуальный воспроизводимый расчёт для комплектации и типа импортёра."""
 
     __tablename__ = "customs_calculations"
     __table_args__ = (
         UniqueConstraint(
             "spec_id",
             "importer_type",
+            name="uq_customs_calculations_spec_importer",
+        ),
+        Index(
+            "ix_customs_calculations_calculation_date_id",
             "calculation_date",
-            "rules_version",
-            "price_source",
+            "id",
+        ),
+        Index(
+            "ix_customs_calculations_spec_date_id",
+            "spec_id",
+            "calculation_date",
+            "id",
         ),
     )
 
@@ -501,9 +523,7 @@ class NewEnergyRanking(Base):
     """Месячная позиция серии в рейтинге автомобилей новой энергии."""
 
     __tablename__ = "new_energy_rankings"
-    __table_args__ = (
-        PrimaryKeyConstraint("month", "subrank_type", "series_id"),
-    )
+    __table_args__ = (PrimaryKeyConstraint("month", "subrank_type", "series_id"),)
 
     month: Mapped[date] = mapped_column(Date)
     subrank_type: Mapped[int] = mapped_column(Integer)
@@ -595,9 +615,7 @@ class DiscountRanking(Base):
     """Снимок максимальных дилерских скидок по сериям и комплектациям."""
 
     __tablename__ = "discount_rankings"
-    __table_args__ = (
-        PrimaryKeyConstraint("snapshot_date", "city_id", "series_id"),
-    )
+    __table_args__ = (PrimaryKeyConstraint("snapshot_date", "city_id", "series_id"),)
 
     snapshot_date: Mapped[date] = mapped_column(Date)
     city_id: Mapped[int] = mapped_column(Integer)
@@ -663,7 +681,15 @@ class SeriesGalleryColor(Base):
     """Цвет кузова или салона в фотогалерее серии."""
 
     __tablename__ = "series_gallery_colors"
-    __table_args__ = (PrimaryKeyConstraint("series_id", "color_scope", "color_id"),)
+    __table_args__ = (
+        PrimaryKeyConstraint("series_id", "color_scope", "color_id"),
+        Index(
+            "ix_series_gallery_colors_series_scope_name",
+            "series_id",
+            "color_scope",
+            "name",
+        ),
+    )
 
     series_id: Mapped[int] = mapped_column(ForeignKey("series.id"), index=True)
     color_scope: Mapped[str] = mapped_column(String(20))
@@ -679,6 +705,10 @@ class SeriesPhoto(Base):
     """Фотография серии с прямой ссылкой на изображение."""
 
     __tablename__ = "series_photos"
+    __table_args__ = (
+        Index("ix_series_photos_series_category_id", "series_id", "category_id", "id"),
+        Index("ix_series_photos_series_spec_id", "series_id", "spec_id", "id"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     series_id: Mapped[int] = mapped_column(ForeignKey("series.id"), index=True)
@@ -708,6 +738,13 @@ class SeriesPhotoColor(Base):
                 "series_gallery_colors.color_scope",
                 "series_gallery_colors.color_id",
             ],
+        ),
+        Index(
+            "ix_series_photo_colors_lookup",
+            "series_id",
+            "color_scope",
+            "color_id",
+            "photo_id",
         ),
     )
 

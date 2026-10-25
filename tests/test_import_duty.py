@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+import unittest
 from dataclasses import replace
 from datetime import date
 from decimal import Decimal
-import unittest
 
 from autohome.import_duty import DutyContext, ExchangeRate, ImporterType
 from autohome.import_duty.calculator import calculate_import_duty
 from autohome.import_duty.types import CalculationStatus
-from calculate_import_duties import select_vehicle_price
+from calculate_customs_payments import select_vehicle_price
 
 
 def context(
@@ -27,8 +27,8 @@ def context(
         importer_type=importer,
         calculation_date=calculation_date,
         price_cny=Decimal(price_cny),
-        cny_rate=ExchangeRate("CNY", 10, Decimal("110"), calculation_date),
-        eur_rate=ExchangeRate("EUR", 1, Decimal("100"), calculation_date),
+        cny_rate=ExchangeRate("CNY", 10, Decimal(110), calculation_date),
+        eur_rate=ExchangeRate("EUR", 1, Decimal(100), calculation_date),
         model_year=year,
         energy_type=energy,
         body_type=body,
@@ -183,14 +183,14 @@ class LegalEntityDutyTests(unittest.TestCase):
 class PriceSelectionTests(unittest.TestCase):
     def test_guide_price_has_priority(self):
         self.assertEqual(
-            select_vehicle_price(Decimal("100000"), Decimal("90000")),
-            (Decimal("100000"), "GUIDE"),
+            select_vehicle_price(Decimal(100000), Decimal(90000)),
+            (Decimal(100000), "GUIDE"),
         )
 
     def test_dealer_price_is_used_as_fallback(self):
         self.assertEqual(
-            select_vehicle_price(None, Decimal("90000")),
-            (Decimal("90000"), "DEALER"),
+            select_vehicle_price(None, Decimal(90000)),
+            (Decimal(90000), "DEALER"),
         )
 
     def test_missing_price_is_reported(self):

@@ -1,17 +1,16 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date
-from decimal import Decimal
-import re
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from .types import CalculationStatus, ImporterType
 
-
 RECYCLING_FEE_RULES_VERSION = "RU-RECYCLING-FEE-M1-2026-v1"
 RECYCLING_FEE_RULES_SOURCE = "https://www.consultant.ru/document/cons_doc_LAW_517977/"
-RECYCLING_FEE_BASE_RUB = Decimal("20000")
+RECYCLING_FEE_BASE_RUB = Decimal(20000)
 PERSONAL_ICE_MAX_POWER_KW = Decimal("117.68")
 PERSONAL_ELECTRIC_MAX_POWER_KW = Decimal("58.84")
 
@@ -38,6 +37,17 @@ class RecyclingFeeResult:
     details: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class RecyclingFeeRatePeriod:
+    """Период действия одной ежегодной ступени коэффициентов раздела I."""
+
+    effective_from: date
+    effective_to: date | None
+    coefficient_multiplier: Decimal
+    rules_version: str
+    rate_year: int
+
+
 POWER_BAND_MAX_KW = (
     Decimal("51.48"),
     Decimal("73.55"),
@@ -47,7 +57,7 @@ POWER_BAND_MAX_KW = (
     Decimal("161.81"),
     Decimal("183.88"),
     Decimal("205.94"),
-    Decimal("228"),
+    Decimal(228),
     Decimal("250.07"),
     Decimal("272.13"),
     Decimal("294.20"),
@@ -69,15 +79,15 @@ COMMERCIAL_ICE_COEFFICIENTS_2026 = {
     ),
     2000: (
         *((Decimal("40.04"), Decimal("70.44")),) * 4,
-        (Decimal("45"), Decimal("74.64")),
+        (Decimal(45), Decimal("74.64")),
         (Decimal("47.64"), Decimal("79.2")),
         (Decimal("50.52"), Decimal("83.88")),
         (Decimal("57.12"), Decimal("91.92")),
         (Decimal("64.56"), Decimal("100.56")),
         (Decimal("72.96"), Decimal("110.16")),
         (Decimal("83.16"), Decimal("120.6")),
-        (Decimal("94.8"), Decimal("132")),
-        (Decimal("108"), Decimal("144.6")),
+        (Decimal("94.8"), Decimal(132)),
+        (Decimal(108), Decimal("144.6")),
         (Decimal("123.24"), Decimal("158.4")),
         (Decimal("140.4"), Decimal("173.4")),
         (Decimal("160.08"), Decimal("189.84")),
@@ -87,7 +97,7 @@ COMMERCIAL_ICE_COEFFICIENTS_2026 = {
         (Decimal("115.34"), Decimal("172.8")),
         (Decimal("118.2"), Decimal("175.08")),
         (Decimal("120.12"), Decimal("177.6")),
-        (Decimal("126"), Decimal("183")),
+        (Decimal(126), Decimal(183)),
         (Decimal("131.04"), Decimal("188.52")),
         (Decimal("136.32"), Decimal("193.68")),
         (Decimal("141.72"), Decimal("199.08")),
@@ -103,10 +113,10 @@ COMMERCIAL_ICE_COEFFICIENTS_2026 = {
         (Decimal("134.4"), Decimal("202.2")),
         (Decimal("137.16"), Decimal("204.36")),
         (Decimal("140.52"), Decimal("207.24")),
-        (Decimal("144"), Decimal("212.4")),
+        (Decimal(144), Decimal("212.4")),
         (Decimal("151.92"), Decimal("217.8")),
         (Decimal("160.32"), Decimal("224.28")),
-        (Decimal("169.2"), Decimal("231")),
+        (Decimal("169.2"), Decimal(231)),
         (Decimal("178.44"), Decimal("237.96")),
         (Decimal("188.28"), Decimal("245.04")),
         (Decimal("198.6"), Decimal("252.48")),
@@ -118,7 +128,7 @@ COMMERCIAL_ICE_COEFFICIENTS_2026 = {
         (Decimal("170.16"), Decimal("222.84")),
         (Decimal("173.04"), Decimal("226.2")),
         (Decimal("176.52"), Decimal("231.36")),
-        (Decimal("180"), Decimal("236.64")),
+        (Decimal(180), Decimal("236.64")),
         (Decimal("186.36"), Decimal("249.6")),
         (Decimal("192.88"), Decimal("263.4")),
         (Decimal("199.68"), Decimal("277.92")),
@@ -135,13 +145,138 @@ GENERAL_ELECTRIC_COEFFICIENTS_2026 = (
     (Decimal("40.04"), Decimal("70.44")),
     (Decimal("49.56"), Decimal("82.08")),
     (Decimal("65.88"), Decimal("95.64")),
-    (Decimal("78"), Decimal("111.36")),
+    (Decimal(78), Decimal("111.36")),
     (Decimal("92.4"), Decimal("129.72")),
     (Decimal("109.68"), Decimal("151.2")),
     (Decimal("129.96"), Decimal("176.16")),
     (Decimal("153.96"), Decimal("205.2")),
     *((Decimal("182.4"), Decimal("239.04")),) * 8,
 )
+
+
+# Начиная с 2027 года коэффициенты ежегодно индексируются на 10 процентов.
+# Значения 2030 года применяются и далее. Исключения ниже фиксируют точные
+# значения опубликованной таблицы ПП N 1291 в редакции ПП N 1713 там, где
+# арифметическое округление исходной величины 2026 года отличается на 0,01.
+RECYCLING_FEE_RATE_PERIODS = (
+    RecyclingFeeRatePeriod(
+        date(2026, 1, 1),
+        date(2026, 12, 31),
+        Decimal("1"),
+        RECYCLING_FEE_RULES_VERSION,
+        2026,
+    ),
+    RecyclingFeeRatePeriod(
+        date(2027, 1, 1),
+        date(2027, 12, 31),
+        Decimal("1.1"),
+        "RU-RECYCLING-FEE-M1-2027-PP1291-PP1713-v1",
+        2027,
+    ),
+    RecyclingFeeRatePeriod(
+        date(2028, 1, 1),
+        date(2028, 12, 31),
+        Decimal("1.21"),
+        "RU-RECYCLING-FEE-M1-2028-PP1291-PP1713-v1",
+        2028,
+    ),
+    RecyclingFeeRatePeriod(
+        date(2029, 1, 1),
+        date(2029, 12, 31),
+        Decimal("1.331"),
+        "RU-RECYCLING-FEE-M1-2029-PP1291-PP1713-v1",
+        2029,
+    ),
+    RecyclingFeeRatePeriod(
+        date(2030, 1, 1),
+        None,
+        Decimal("1.4641"),
+        "RU-RECYCLING-FEE-M1-2030-AND-LATER-PP1291-PP1713-v1",
+        2030,
+    ),
+)
+
+ELECTRIC_RATE_GROUP = "ELECTRIC"
+RateOverrideKey = tuple[str | int | None, int, int]
+RECYCLING_FEE_COEFFICIENT_OVERRIDES: dict[int, dict[RateOverrideKey, Decimal]] = {
+    2027: {
+        (ELECTRIC_RATE_GROUP, 0, 0): Decimal("44.05"),
+        (3000, 0, 0): Decimal("123.78"),
+        (3000, 1, 0): Decimal("123.78"),
+        (3000, 2, 0): Decimal("123.78"),
+        (3000, 3, 0): Decimal("123.78"),
+        (None, 0, 0): Decimal("180.99"),
+        (None, 1, 0): Decimal("180.99"),
+        (None, 2, 0): Decimal("180.99"),
+        (None, 3, 0): Decimal("180.99"),
+        (None, 10, 0): Decimal("212.16"),
+    },
+    2028: {
+        (3500, 0, 0): Decimal("156.34"),
+        (3500, 1, 0): Decimal("156.34"),
+        (3500, 2, 0): Decimal("156.34"),
+        (3500, 3, 0): Decimal("156.34"),
+    },
+    2029: {
+        (ELECTRIC_RATE_GROUP, 0, 0): Decimal("53.3"),
+        (3000, 0, 0): Decimal("149.77"),
+        (3000, 1, 0): Decimal("149.77"),
+        (3000, 2, 0): Decimal("149.77"),
+        (3000, 3, 0): Decimal("149.77"),
+        (3000, 4, 0): Decimal("153.51"),
+        (3500, 0, 1): Decimal("263.28"),
+        (3500, 1, 1): Decimal("263.28"),
+        (3500, 2, 1): Decimal("263.28"),
+        (3500, 3, 1): Decimal("263.28"),
+    },
+    2030: {
+        (ELECTRIC_RATE_GROUP, 0, 0): Decimal("58.63"),
+        (3000, 0, 0): Decimal("164.75"),
+        (3000, 0, 1): Decimal("249.43"),
+        (3000, 1, 0): Decimal("164.75"),
+        (3000, 1, 1): Decimal("249.43"),
+        (3000, 2, 0): Decimal("164.75"),
+        (3000, 2, 1): Decimal("249.43"),
+        (3000, 3, 0): Decimal("164.75"),
+        (3000, 3, 1): Decimal("249.43"),
+        (3500, 0, 0): Decimal("189.17"),
+        (3500, 1, 0): Decimal("189.17"),
+        (3500, 2, 0): Decimal("189.17"),
+        (3500, 3, 0): Decimal("189.17"),
+        (None, 9, 1): Decimal("365.4"),
+        (None, 10, 0): Decimal("282.39"),
+    },
+}
+
+
+def _rate_period(calculation_date: date) -> RecyclingFeeRatePeriod | None:
+    """Выбрать ступень ставок, действующую на дату расчёта."""
+    for period in RECYCLING_FEE_RATE_PERIODS:
+        if calculation_date < period.effective_from:
+            continue
+        if period.effective_to is None or calculation_date <= period.effective_to:
+            return period
+    return None
+
+
+def _annual_coefficient(
+    base_coefficient: Decimal,
+    period: RecyclingFeeRatePeriod,
+    group: str | int | None,
+    power_band_index: int,
+    age_index: int,
+) -> Decimal:
+    """Получить точный коэффициент ежегодной нормативной ступени."""
+    override = RECYCLING_FEE_COEFFICIENT_OVERRIDES.get(period.rate_year, {}).get(
+        (group, power_band_index, age_index)
+    )
+    if override is not None:
+        return override
+    if period.coefficient_multiplier == 1:
+        return base_coefficient
+    return (base_coefficient * period.coefficient_multiplier).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
 
 
 def _power_band_index(power_kw: Decimal) -> int:
@@ -166,11 +301,11 @@ def _volume_band_from_engine_summary(engine_summary: str | None) -> int | None:
     if match is None:
         return None
     nominal_liters = Decimal(match.group(1).replace(",", "."))
-    if nominal_liters <= Decimal("1"):
+    if nominal_liters <= Decimal(1):
         return 1000
-    if nominal_liters <= Decimal("2"):
+    if nominal_liters <= Decimal(2):
         return 2000
-    if nominal_liters <= Decimal("3"):
+    if nominal_liters <= Decimal(3):
         return 3000
     if nominal_liters <= Decimal("3.5"):
         return 3500
@@ -181,6 +316,7 @@ def _result(
     context: RecyclingFeeContext,
     coefficient: Decimal,
     rule_code: str,
+    period: RecyclingFeeRatePeriod,
 ) -> RecyclingFeeResult:
     amount = (RECYCLING_FEE_BASE_RUB * coefficient).quantize(Decimal("0.01"))
     return RecyclingFeeResult(
@@ -189,7 +325,7 @@ def _result(
         rule_code=rule_code,
         details={
             "source": RECYCLING_FEE_RULES_SOURCE,
-            "rules_version": RECYCLING_FEE_RULES_VERSION,
+            "rules_version": period.rules_version,
             "formula": "base_rate_rub * coefficient",
             "base_rate_rub": str(RECYCLING_FEE_BASE_RUB),
             "coefficient": str(coefficient),
@@ -206,12 +342,13 @@ def _result(
 
 
 def calculate_recycling_fee(context: RecyclingFeeContext) -> RecyclingFeeResult:
-    """Рассчитать поддерживаемые сценарии утильсбора категории M1 за 2026 год."""
+    """Рассчитать поддерживаемые сценарии утильсбора категории M1 по дате."""
+    period = _rate_period(context.calculation_date)
     common = {
         "source": RECYCLING_FEE_RULES_SOURCE,
-        "rules_version": RECYCLING_FEE_RULES_VERSION,
+        "rules_version": period.rules_version if period is not None else None,
     }
-    if context.calculation_date.year != 2026:
+    if period is None:
         return RecyclingFeeResult(
             status=CalculationStatus.UNSUPPORTED,
             details={**common, "reason": "UNSUPPORTED_RATE_YEAR"},
@@ -251,18 +388,28 @@ def calculate_recycling_fee(context: RecyclingFeeContext) -> RecyclingFeeResult:
         and context.power_kw <= personal_limit
     ):
         coefficient = Decimal("0.26") if is_older else Decimal("0.17")
-        return _result(context, coefficient, "RECYCLING_FEE_M1_PERSONAL_PREFERENTIAL")
+        return _result(
+            context,
+            coefficient,
+            "RECYCLING_FEE_M1_PERSONAL_PREFERENTIAL",
+            period,
+        )
 
     if electric_branch:
-        coefficient = GENERAL_ELECTRIC_COEFFICIENTS_2026[
-            _power_band_index(context.power_kw)
-        ][age_index]
-        rule_code = (
-            "RECYCLING_FEE_M1_PERSONAL_NON_PREFERENTIAL_2026"
-            if context.importer_type == ImporterType.INDIVIDUAL and context.personal_use
-            else "RECYCLING_FEE_M1_GENERAL_ELECTRIC_2026"
+        power_band_index = _power_band_index(context.power_kw)
+        coefficient = _annual_coefficient(
+            GENERAL_ELECTRIC_COEFFICIENTS_2026[power_band_index][age_index],
+            period,
+            ELECTRIC_RATE_GROUP,
+            power_band_index,
+            age_index,
         )
-        return _result(context, coefficient, rule_code)
+        rule_code = (
+            f"RECYCLING_FEE_M1_PERSONAL_NON_PREFERENTIAL_{period.rate_year}"
+            if context.importer_type == ImporterType.INDIVIDUAL and context.personal_use
+            else f"RECYCLING_FEE_M1_GENERAL_ELECTRIC_{period.rate_year}"
+        )
+        return _result(context, coefficient, rule_code, period)
     if context.powertrain_type not in {"ICE", "HEV", "PHEV"}:
         return RecyclingFeeResult(
             status=CalculationStatus.UNSUPPORTED,
@@ -280,15 +427,20 @@ def calculate_recycling_fee(context: RecyclingFeeContext) -> RecyclingFeeResult:
             )
         volume_band = inferred_band or None
         volume_source = "ENGINE_SUMMARY_NOMINAL_VOLUME"
-    coefficient = COMMERCIAL_ICE_COEFFICIENTS_2026[volume_band][
-        _power_band_index(context.power_kw)
-    ][age_index]
-    rule_code = (
-        "RECYCLING_FEE_M1_PERSONAL_NON_PREFERENTIAL_2026"
-        if context.importer_type == ImporterType.INDIVIDUAL and context.personal_use
-        else "RECYCLING_FEE_M1_COMMERCIAL_2026"
+    power_band_index = _power_band_index(context.power_kw)
+    coefficient = _annual_coefficient(
+        COMMERCIAL_ICE_COEFFICIENTS_2026[volume_band][power_band_index][age_index],
+        period,
+        volume_band,
+        power_band_index,
+        age_index,
     )
-    result = _result(context, coefficient, rule_code)
+    rule_code = (
+        f"RECYCLING_FEE_M1_PERSONAL_NON_PREFERENTIAL_{period.rate_year}"
+        if context.importer_type == ImporterType.INDIVIDUAL and context.personal_use
+        else f"RECYCLING_FEE_M1_COMMERCIAL_{period.rate_year}"
+    )
+    result = _result(context, coefficient, rule_code, period)
     result.details.update(
         {
             "engine_volume_band_cc": (

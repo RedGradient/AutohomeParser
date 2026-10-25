@@ -9,7 +9,6 @@ POSTGRES_DB ?= autohome
 POSTGRES_USER ?= autohome
 POSTGRES_PASSWORD ?= autohome
 POSTGRES_PORT ?= 5432
-AUTOHOME_INTERFACES ?= wlp0s20f3,enp0s20f0u1c4i2
 DATABASE_BATCH_SIZE ?= 1000
 SHUTDOWN_TIMEOUT ?= 120
 NORMALIZE_VEHICLE_ATTRIBUTES_ARGS ?=
@@ -17,7 +16,7 @@ AUDIT_VEHICLE_CLASSIFICATIONS_ARGS ?=
 AUDIT_INDIRECT_VEHICLE_ATTRIBUTES_ARGS ?=
 AUDIT_RECYCLING_FEE_COMMERCIAL_CATEGORIES_ARGS ?=
 BACKFILL_VEHICLE_ATTRIBUTE_INFERENCES_ARGS ?=
-CALCULATE_IMPORT_DUTIES_ARGS ?=
+CALCULATE_CUSTOMS_PAYMENTS_ARGS ?=
 API_HOST ?= 0.0.0.0
 API_PORT ?= 8000
 API_USERNAME ?= autohome
@@ -26,20 +25,19 @@ API_JWT_SECRET ?= development-only-autohome-jwt-secret-change-me
 API_JWT_TTL_SECONDS ?= 3600
 DATABASE_URL ?= postgresql+psycopg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@127.0.0.1:$(POSTGRES_PORT)/$(POSTGRES_DB)
 
-# Используемые по умолчанию сетевые интерфейсы.
-WIFI_IF ?= wlp0s20f3
-ETH_IF ?= enp0s20f0u1c4i2
-
 # Отдельные таблицы и приоритеты выбраны из редко используемого диапазона.
 WIFI_TABLE := 10101
 ETH_TABLE := 10102
 WIFI_PRIORITY := 10101
 ETH_PRIORITY := 10102
 
-.PHONY: help network-up network-down network-status network-test postgres-up database-migrate api-up api-logs celery-logs parser-run parser-resume parser-logs api-run database-reset parameters-reset build-modifications normalize-vehicle-attributes audit-vehicle-classifications audit-indirect-vehicle-attributes audit-recycling-fee-commercial-categories backfill-vehicle-attribute-inferences translate-db calculate-import-duties docker-down
+.PHONY: help lint lint-fix pre-commit-install network-up network-down network-status network-test postgres-up database-migrate api-up api-logs celery-logs parser-run parser-resume parser-logs api-run database-reset parameters-reset build-modifications normalize-vehicle-attributes audit-vehicle-classifications audit-indirect-vehicle-attributes audit-recycling-fee-commercial-categories backfill-vehicle-attribute-inferences translate-db calculate-customs-payments docker-down
 
 help:
 	@echo "Доступные команды:"
+	@echo "  make lint            — проверить Python-код с помощью Ruff"
+	@echo "  make lint-fix        — исправить и отформатировать Python-код"
+	@echo "  make pre-commit-install — установить проверку Ruff перед коммитом"
 	@echo "  make network-up      — включить временную маршрутизацию"
 	@echo "  make network-down    — удалить временные правила"
 	@echo "  make network-status  — показать интерфейсы и правила"
@@ -61,13 +59,27 @@ help:
 	@echo "  make audit-recycling-fee-commercial-categories — проверить готовность M2/M3/N1/N2/N3"
 	@echo "  make backfill-vehicle-attribute-inferences — dry-run косвенных признаков"
 	@echo "  make translate-db    — перевести уже сохранённые данные"
-	@echo "  make calculate-import-duties — рассчитать ввозную пошлину"
+	@echo "  make calculate-customs-payments — рассчитать таможенные платежи"
 	@echo "  make docker-down     — остановить контейнеры"
 	@echo
 	@echo "Интерфейсы можно переопределить:"
 	@echo "  make WIFI_IF=wlan0 ETH_IF=eth0 network-up"
 
+lint:
+	@.venv/bin/ruff check .
+	.venv/bin/ruff format --check .
+
+lint-fix:
+	@.venv/bin/ruff format .
+	.venv/bin/ruff check --fix .
+	.venv/bin/ruff format .
+
+pre-commit-install:
+	@.venv/bin/pre-commit install
+
 network-up:
+	@[ -n "$(WIFI_IF)" ] || { echo "Не задан WIFI_IF" >&2; exit 1; }
+	[ -n "$(ETH_IF)" ] || { echo "Не задан ETH_IF" >&2; exit 1; }
 	@wifi_cidr="$$(ip -o -4 addr show dev "$(WIFI_IF)" scope global | awk 'NR == 1 {print $$4}')"
 	eth_cidr="$$(ip -o -4 addr show dev "$(ETH_IF)" scope global | awk 'NR == 1 {print $$4}')"
 	[[ -n "$$wifi_cidr" ]] || { echo "Нет IPv4-адреса на $(WIFI_IF)" >&2; exit 1; }
@@ -102,6 +114,8 @@ network-down:
 	echo "Временные правила маршрутизации удалены."
 
 network-status:
+	@[ -n "$(WIFI_IF)" ] || { echo "Не задан WIFI_IF" >&2; exit 1; }
+	[ -n "$(ETH_IF)" ] || { echo "Не задан ETH_IF" >&2; exit 1; }
 	@ip -br -4 addr show dev "$(WIFI_IF)"
 	ip -br -4 addr show dev "$(ETH_IF)"
 	echo
@@ -114,6 +128,8 @@ network-status:
 	ip -4 route show table $(ETH_TABLE)
 
 network-test:
+	@[ -n "$(WIFI_IF)" ] || { echo "Не задан WIFI_IF" >&2; exit 1; }
+	[ -n "$(ETH_IF)" ] || { echo "Не задан ETH_IF" >&2; exit 1; }
 	@wifi_ip="$$(ip -o -4 addr show dev "$(WIFI_IF)" scope global | awk 'NR == 1 {sub(/\/.*/, "", $$4); print $$4}')"
 	eth_ip="$$(ip -o -4 addr show dev "$(ETH_IF)" scope global | awk 'NR == 1 {sub(/\/.*/, "", $$4); print $$4}')"
 	[[ -n "$$wifi_ip" && -n "$$eth_ip" ]] || { echo "Не найдены IPv4-адреса интерфейсов" >&2; exit 1; }
@@ -135,8 +151,7 @@ database-migrate: postgres-up
 	@docker compose -f '$(COMPOSE_FILE)' run --rm --build migrate
 
 api-up:
-	@docker compose -f '$(COMPOSE_FILE)' up -d --build --wait \
-		api celery-worker celery-beat
+	@docker compose -f '$(COMPOSE_FILE)' up -d --build --wait
 
 api-logs:
 	@docker compose -f '$(COMPOSE_FILE)' logs -f api
@@ -145,11 +160,13 @@ celery-logs:
 	@docker compose -f '$(COMPOSE_FILE)' logs -f celery-worker celery-beat
 
 parser-run: postgres-up
+	@[ -n "$(AUTOHOME_INTERFACES)" ] || { echo "Не задан AUTOHOME_INTERFACES" >&2; exit 1; }
 	@docker compose -f '$(COMPOSE_FILE)' run --rm parser \
 		--interfaces '$(AUTOHOME_INTERFACES)' \
 		--shutdown-timeout '$(SHUTDOWN_TIMEOUT)'
 
 parser-resume: postgres-up
+	@[ -n "$(AUTOHOME_INTERFACES)" ] || { echo "Не задан AUTOHOME_INTERFACES" >&2; exit 1; }
 	@docker compose -f '$(COMPOSE_FILE)' run --rm parser \
 		--interfaces '$(AUTOHOME_INTERFACES)' \
 		--shutdown-timeout '$(SHUTDOWN_TIMEOUT)' \
@@ -159,12 +176,12 @@ api-run: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
 		API_USERNAME='$(API_USERNAME)' API_PASSWORD='$(API_PASSWORD)' \
 		API_JWT_SECRET='$(API_JWT_SECRET)' API_JWT_TTL_SECONDS='$(API_JWT_TTL_SECONDS)' \
-		.venv/bin/uvicorn autohome.api.app:app \
+		.venv/bin/uvicorn autohome.api.app:create_app --factory \
 		--host '$(API_HOST)' --port '$(API_PORT)'
 
 database-reset: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
-		.venv/bin/python reset_database.py --yes
+		.venv/bin/python reset_database.py
 
 parameters-reset: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
@@ -203,10 +220,10 @@ translate-db: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
 		.venv/bin/python translate_database.py
 
-calculate-import-duties: postgres-up
+calculate-customs-payments: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
-		.venv/bin/python calculate_import_duties.py \
-		$(CALCULATE_IMPORT_DUTIES_ARGS)
+		.venv/bin/python calculate_customs_payments.py \
+		$(CALCULATE_CUSTOMS_PAYMENTS_ARGS)
 
 docker-down:
 	@docker compose -f '$(COMPOSE_FILE)' down

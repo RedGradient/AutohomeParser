@@ -4,9 +4,9 @@ Revision ID: 0002_rename_color_type
 Revises: 0001_existing_schema
 """
 
-from alembic import op
 from sqlalchemy import inspect
 
+from alembic import op
 
 revision = "0002_rename_color_type"
 down_revision = "0001_existing_schema"

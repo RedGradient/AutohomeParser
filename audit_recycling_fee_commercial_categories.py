@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 import os
 import re
+from collections import Counter
 
 from sqlalchemy import create_engine, or_, select
 
 from autohome.models import Series, Spec, SpecPowertrain, SpecVehicleAttributes
-
 
 COMMERCIAL_CATEGORIES = frozenset({"M2", "M3", "N1", "N2", "N3"})
 CHASSIS_NAME_RE = re.compile(r"(?:底盘|\bшасси\b)", re.IGNORECASE)

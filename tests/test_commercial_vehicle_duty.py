@@ -30,8 +30,8 @@ def context(
         importer_type=importer,
         calculation_date=calculation_date,
         price_cny=Decimal(price) if price is not None else None,
-        cny_rate=ExchangeRate("CNY", 10, Decimal("110"), calculation_date),
-        eur_rate=ExchangeRate("EUR", 1, Decimal("100"), calculation_date),
+        cny_rate=ExchangeRate("CNY", 10, Decimal(110), calculation_date),
+        eur_rate=ExchangeRate("EUR", 1, Decimal(100), calculation_date),
         model_year=year,
         energy_type=energy,
         body_type="VAN" if heading == "8702" else "TRUCK",
@@ -69,9 +69,7 @@ class BusDutyTests(unittest.TestCase):
         self.assertEqual(result.tnved_code, "8702109993")
 
     def test_electric_bus_is_ten_percent(self):
-        result = calculate_import_duty(
-            context("8702", energy="BEV", volume=None)
-        )
+        result = calculate_import_duty(context("8702", energy="BEV", volume=None))
 
         self.assertEqual(result.amount_rub, Decimal("110000.00"))
         self.assertEqual(result.tnved_code, "8702400009")
@@ -97,9 +95,7 @@ class BusDutyTests(unittest.TestCase):
 
 class TruckDutyTests(unittest.TestCase):
     def test_new_small_gasoline_truck_over_2800_is_twelve_and_half_percent(self):
-        result = calculate_import_duty(
-            context("8704", volume=3000, gross_mass=5000)
-        )
+        result = calculate_import_duty(context("8704", volume=3000, gross_mass=5000))
 
         self.assertEqual(result.amount_rub, Decimal("137500.00"))
         self.assertEqual(result.tnved_code, "8704313200")

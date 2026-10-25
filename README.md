@@ -27,7 +27,7 @@ export API_USERNAME=autohome
 export API_PASSWORD='сложный-пароль'
 export API_JWT_SECRET="$(openssl rand -hex 32)"
 export API_JWT_TTL_SECONDS=3600
-uvicorn autohome.api.app:app --host 0.0.0.0 --port 8000
+uvicorn autohome.api.app:create_app --factory --host 0.0.0.0 --port 8000
 ```
 
 Получение токена:
@@ -63,8 +63,9 @@ make api-up
 ```
 
 Команда собирает образ приложения, ожидает готовности PostgreSQL и запускает
-API на `http://127.0.0.1:8000`, Redis, Celery worker и Celery beat. Просмотр
-логов и остановка:
+API на `http://127.0.0.1:8000`, Redis, Celery worker и Celery beat. Production
+Compose публикует только nginx, а контейнер API доступен лишь во внутренней
+Docker-сети. Просмотр логов и остановка:
 
 ```bash
 make api-logs
@@ -82,6 +83,22 @@ make COMPOSE_FILE=compose.prod.yaml api-up
 интерфейсы и использует временные правила маршрутизации, созданные командой
 `make network-up`. Каталог `data/` подключается в контейнер и сохраняет кеш
 каталога и состояние загрузки:
+
+Имена интерфейсов зависят от компьютера. Посмотрите их командой:
+
+```bash
+ip -br link
+```
+
+Затем задайте их в `.env`. Например, имена `wlp0s20f3` и
+`enp0s20f0u1c4i2` относятся только к одному из возможных вариантов
+конфигурации ноутбука:
+
+```dotenv
+AUTOHOME_INTERFACES=wlp0s20f3,enp0s20f0u1c4i2
+WIFI_IF=wlp0s20f3
+ETH_IF=enp0s20f0u1c4i2
+```
 
 ```bash
 make network-up
@@ -314,7 +331,7 @@ make network-down
 - `series_gallery_colors` — цвета кузова и салона в галереях серий;
 - `series_photos` — фотографии серий, категории и прямые URL изображений;
 - `series_photo_colors` — связь фотографий с цветами кузова и салона;
-- `customs_calculations` — входной снимок и статус сценария расчёта;
+- `customs_calculations` — актуальный расчёт для комплектации и типа импортёра;
 - `customs_payment_results` — суммы и детализация отдельных платежей.
 
 Пара `(spec_id, parameter_id)` является первичным ключом `spec_parameters`.
@@ -422,7 +439,7 @@ make backfill-vehicle-attribute-inferences \
 `INFERRED_INPUTS_USED`. Эта же метка переносится в `warnings_json` таможенного
 расчёта и в его снимок входных данных.
 
-## Расчёт ввозной пошлины
+## Расчёт таможенных платежей
 
 Поддерживаемые категории транспорта, обязательные данные и границы будущего
 расширения на позиции 8702 и 8704 зафиксированы в
@@ -431,19 +448,33 @@ make backfill-vehicle-attribute-inferences \
 грузового отсека и специального назначения описаны в
 [`docs/indirect-vehicle-attributes-raw-audit.md`](docs/indirect-vehicle-attributes-raw-audit.md).
 
-Для нормализованных легковых автомобилей можно рассчитать ввозную пошлину при
-импорте из Китая в Россию для физического и юридического лица:
+Для нормализованных автомобилей можно рассчитать поддерживаемые таможенные
+платежи при импорте из Китая в Россию для физического и юридического лица:
 
 ```bash
-make calculate-import-duties
+make calculate-customs-payments
 ```
 
-Аргументы команды можно передать через `CALCULATE_IMPORT_DUTIES_ARGS`, например
+По умолчанию команда полностью обновляет текущие расчёты. Режим
+`--mode stale` записывает только отсутствующие или изменившиеся сценарии:
+
+```bash
+make calculate-customs-payments \
+  CALCULATE_CUSTOMS_PAYMENTS_ARGS="--mode stale"
+```
+
+Ежедневная задача Celery выполняет полный пересчёт после изменения курса ЦБ и
+инкрементальный — при неизменном курсе. После успешного завершения
+многопроцессного парсера инкрементальный пересчёт запускается автоматически.
+Его можно отключить аргументом `--skip-customs-recalculation` утилиты
+`run_multi.py`.
+
+Аргументы команды можно передать через `CALCULATE_CUSTOMS_PAYMENTS_ARGS`, например
 для полного проверочного запуска без записи:
 
 ```bash
-make calculate-import-duties \
-  CALCULATE_IMPORT_DUTIES_ARGS="--date 2026-10-19 --dry-run"
+make calculate-customs-payments \
+  CALCULATE_CUSTOMS_PAYMENTS_ARGS="--date 2026-10-19 --dry-run"
 ```
 
 Команда сначала использует каталожную цену `guide_price_yuan`, а при её
@@ -463,7 +494,7 @@ make calculate-import-duties \
 Проверка небольшой выборки без записи в базу:
 
 ```bash
-DATABASE_URL="$DATABASE_URL" .venv/bin/python calculate_import_duties.py \
+DATABASE_URL="$DATABASE_URL" .venv/bin/python calculate_customs_payments.py \
   --date 2026-10-19 --limit 100 --dry-run
 ```
 

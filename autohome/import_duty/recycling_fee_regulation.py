@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-
 RECYCLING_FEE_REGULATION_SOURCE = (
     "https://www.consultant.ru/document/cons_doc_LAW_156832/"
     "fa680b07af423adb3a41d702b10b38386564470d/"

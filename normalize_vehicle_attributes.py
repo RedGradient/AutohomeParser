@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 import json
 import os
+from collections import Counter
 
 from sqlalchemy import create_engine, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
@@ -16,7 +16,6 @@ from autohome.models import (
     SpecPowertrain,
     SpecVehicleAttributes,
 )
-from autohome.vehicle_attribute_schema import ensure_vehicle_attribute_schema
 from autohome.vehicle_attributes_normalizer import (
     NORMALIZATION_VERSION,
     REQUIRED_SOURCE_FIELDS,
@@ -24,7 +23,6 @@ from autohome.vehicle_attributes_normalizer import (
     extract_vehicle_attribute_value,
     normalize_vehicle_attributes,
 )
-
 
 MAX_UPSERT_ROWS = 500
 INFERENCE_COMPATIBLE_FIELDS = frozenset(
@@ -147,8 +145,7 @@ def select_spec_batch(
         ).where(
             or_(
                 SpecVehicleAttributes.spec_id.is_(None),
-                SpecVehicleAttributes.normalization_version
-                < NORMALIZATION_VERSION,
+                SpecVehicleAttributes.normalization_version < NORMALIZATION_VERSION,
             )
         )
     return [
@@ -164,8 +161,7 @@ def build_normalized_rows(
 ) -> tuple[list[dict], int]:
     """Собрать значения партии и применить общий нормализатор."""
     values_by_spec: dict[int, dict] = {
-        spec_id: {"drive_type": drive_type}
-        for spec_id, _, drive_type in spec_rows
+        spec_id: {"drive_type": drive_type} for spec_id, _, drive_type in spec_rows
     }
     seen_by_spec: dict[int, set[str]] = {spec_id: set() for spec_id, _, _ in spec_rows}
     for spec_id, parameter_id, raw_value in parameter_rows:
@@ -203,9 +199,7 @@ def upsert_rows(connection, rows: list[dict]) -> None:
         elif connection.dialect.name == "sqlite":
             statement = sqlite_insert(SpecVehicleAttributes).values(batch)
         else:
-            raise RuntimeError(
-                f"СУБД {connection.dialect.name} не поддерживается"
-            )
+            raise RuntimeError(f"СУБД {connection.dialect.name} не поддерживается")
         primary_keys = {
             column.name for column in SpecVehicleAttributes.__table__.primary_key
         }
@@ -234,17 +228,13 @@ def backfill(engine, args: argparse.Namespace) -> Counter:
     counts: Counter = Counter()
     with engine.connect() as connection:
         parameter_ids = load_parameter_ids(connection)
-    reverse_ids = {
-        parameter_id: field for field, parameter_id in parameter_ids.items()
-    }
+    reverse_ids = {parameter_id: field for field, parameter_id in parameter_ids.items()}
 
     after_id = (args.min_spec_id - 1) if args.min_spec_id is not None else -1
     remaining = args.limit
     while remaining is None or remaining > 0:
         current_batch_size = (
-            args.batch_size
-            if remaining is None
-            else min(args.batch_size, remaining)
+            args.batch_size if remaining is None else min(args.batch_size, remaining)
         )
         with engine.connect() as connection:
             spec_rows = select_spec_batch(
@@ -300,8 +290,6 @@ def main() -> int:
     validate_arguments(args)
     engine = create_engine(args.database_url, pool_pre_ping=True)
     try:
-        if not args.dry_run:
-            ensure_vehicle_attribute_schema(engine)
         counts = backfill(engine, args)
     finally:
         engine.dispose()

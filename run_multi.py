@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import json
 import multiprocessing
 import os
-from pathlib import Path
 import re
 import socket
 import subprocess
 import sys
 import time
-
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 LOG_COLORS = (
     "\033[96m",  # Ярко-голубой.
@@ -27,10 +26,7 @@ AUTOHOME_HOSTS = (
     "car.app.autohome.com.cn",
     "car.autohome.com.cn",
 )
-TREE_URL = (
-    "https://www.autohome.com.cn/web-main/car/web/price/"
-    "treeMenu?extendseries=1"
-)
+TREE_URL = "https://www.autohome.com.cn/web-main/car/web/price/treeMenu?extendseries=1"
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -115,6 +111,11 @@ def parse_arguments() -> argparse.Namespace:
         default=Path("data/tree_menu.json"),
         help="Общий файл дерева каталога, подготовленный мастер-процессом.",
     )
+    parser.add_argument(
+        "--skip-customs-recalculation",
+        action="store_true",
+        help="Не досчитывать отсутствующие таможенные платежи после парсинга.",
+    )
     return parser.parse_args()
 
 
@@ -190,7 +191,9 @@ def check_autohome_dns(interface: str, source_ip: str) -> None:
                 addresses,
             )
             available = [
-                address for address, is_available in zip(addresses, checks) if is_available
+                address
+                for address, is_available in zip(addresses, checks)
+                if is_available
             ]
         unavailable = [address for address in addresses if address not in available]
         if not available:
@@ -199,8 +202,7 @@ def check_autohome_dns(interface: str, source_ip: str) -> None:
                 f"DNS вернул {', '.join(addresses)}"
             )
         print(
-            f"Проверка DNS {interface}: {hostname} — доступны "
-            f"{', '.join(available)}",
+            f"Проверка DNS {interface}: {hostname} — доступны {', '.join(available)}",
             flush=True,
         )
         if unavailable:
@@ -233,17 +235,11 @@ def database_display_name(database_url: str) -> str:
     return make_url(database_url).render_as_string(hide_password=True)
 
 
-def initialize_database(database_url: str) -> None:
-    """Проверить подключение и создать схему до запуска worker-процессов."""
-    from sqlalchemy import create_engine
+def validate_database(database_url: str) -> None:
+    """Проверить подключение и актуальность миграций базы."""
+    from autohome.database_migrations import require_current_database
 
-    from autohome.models import Base
-
-    engine = create_engine(database_url, pool_pre_ping=True)
-    try:
-        Base.metadata.create_all(engine)
-    finally:
-        engine.dispose()
+    require_current_database(database_url)
 
 
 def download_catalog(
@@ -263,7 +259,9 @@ def download_catalog(
 
     errors: list[str] = []
     for source_address in source_addresses:
-        temporary_path = catalog_path.with_name(f".{catalog_path.name}.{os.getpid()}.tmp")
+        temporary_path = catalog_path.with_name(
+            f".{catalog_path.name}.{os.getpid()}.tmp"
+        )
         command = [
             "curl",
             "-fsS",
@@ -395,6 +393,22 @@ def wait_for_graceful_shutdown(
     return True
 
 
+def run_stale_customs_recalculation(database_url: str) -> None:
+    """Досчитать отсутствующие или изменившиеся таможенные платежи."""
+    environment = os.environ.copy()
+    environment["DATABASE_URL"] = database_url
+    subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).resolve().parent / "calculate_customs_payments.py"),
+            "--mode",
+            "stale",
+        ],
+        check=True,
+        env=environment,
+    )
+
+
 def main() -> int:
     """Проверить интерфейсы, запустить worker-процессы и дождаться завершения."""
     args = parse_arguments()
@@ -420,7 +434,9 @@ def main() -> int:
             try:
                 check_autohome_dns(interface, address)
             except (OSError, RuntimeError) as error:
-                raise SystemExit(f"Проверка DNS завершилась ошибкой: {error}") from error
+                raise SystemExit(
+                    f"Проверка DNS завершилась ошибкой: {error}"
+                ) from error
         database_url = database_url_for_worker(
             args.database_url,
             args.database_dir,
@@ -431,10 +447,10 @@ def main() -> int:
     unique_database_urls = {database_url for _, _, database_url in workers}
     for database_url in unique_database_urls:
         try:
-            initialize_database(database_url)
+            validate_database(database_url)
         except Exception as error:
             safe_url = database_display_name(database_url)
-            raise SystemExit(f"Не удалось подготовить базу {safe_url}: {error}") from error
+            raise SystemExit(f"База {safe_url} не готова к запуску: {error}") from error
 
     catalog_path = args.catalog_path.resolve()
     try:
@@ -523,6 +539,18 @@ def main() -> int:
                 file=sys.stderr,
             )
         return 1
+    if not args.skip_customs_recalculation:
+        for database_url in sorted(unique_database_urls):
+            try:
+                run_stale_customs_recalculation(database_url)
+            except subprocess.CalledProcessError as error:
+                safe_url = database_display_name(database_url)
+                print(
+                    f"Не удалось досчитать таможенные платежи в {safe_url}: "
+                    f"код {error.returncode}",
+                    file=sys.stderr,
+                )
+                return 1
     return 0
 
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections import defaultdict
 import json
 import unittest
+from collections import defaultdict
 
 from scrapy.http import Request, TextResponse
 

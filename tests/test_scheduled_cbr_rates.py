@@ -6,12 +6,14 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from autohome.import_duty.scheduled_rates import synchronize_cbr_rates
 from autohome.import_duty.types import ExchangeRate
-from autohome.models import CbrExchangeRate
+from autohome.models import Base, CbrExchangeRate, CustomsCalculation
+from calculate_customs_payments import process_batch
+from tests.test_customs_recalculation import calculation_row, payment_rows
 
 
 def rates(rate_date: date, cny: str, eur: str) -> dict[str, ExchangeRate]:
@@ -27,15 +29,20 @@ class ScheduledCbrRatesTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         database_path = Path(self.temp_dir.name) / "rates.sqlite3"
         self.database_url = f"sqlite:///{database_path}"
+        engine = create_engine(self.database_url)
+        try:
+            Base.metadata.create_all(engine)
+        finally:
+            engine.dispose()
         self.today = date(2026, 10, 22)
         self.yesterday = date(2026, 10, 21)
-        self.calls: list[tuple[date, dict[str, ExchangeRate]]] = []
+        self.calls: list[tuple[date, dict[str, ExchangeRate], str]] = []
 
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def recalculator(self, _database_url, calculation_date, current_rates):
-        self.calls.append((calculation_date, current_rates))
+    def recalculator(self, _database_url, calculation_date, current_rates, mode):
+        self.calls.append((calculation_date, current_rates, mode))
 
     def test_first_run_saves_rates_and_starts_recalculation(self):
         values = {
@@ -52,6 +59,7 @@ class ScheduledCbrRatesTests(unittest.TestCase):
 
         self.assertTrue(result["changed"])
         self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][2], "full")
         engine = create_engine(self.database_url)
         try:
             with Session(engine) as session:
@@ -64,7 +72,7 @@ class ScheduledCbrRatesTests(unittest.TestCase):
         finally:
             engine.dispose()
 
-    def test_unchanged_rates_do_not_start_second_recalculation(self):
+    def test_unchanged_rates_start_stale_recalculation(self):
         values = {
             self.yesterday: rates(self.yesterday, "110.00", "91.00"),
             self.today: rates(self.today, "110.00", "91.00"),
@@ -77,7 +85,59 @@ class ScheduledCbrRatesTests(unittest.TestCase):
                 recalculator=self.recalculator,
             )
 
-        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(self.calls[0][2], "full")
+        self.assertEqual(self.calls[1][2], "stale")
+
+    def test_unchanged_rates_calculate_new_spec_for_both_importers(self):
+        values = {
+            self.yesterday: rates(self.yesterday, "110.00", "91.00"),
+            self.today: rates(self.today, "110.00", "91.00"),
+        }
+        synchronize_cbr_rates(
+            self.database_url,
+            self.today,
+            fetcher=values.__getitem__,
+            recalculator=self.recalculator,
+        )
+
+        def calculate_new_spec(database_url, _date, _rates, mode):
+            individual = calculation_row()
+            individual["id"] = 301
+            individual["spec_id"] = 3001
+            individual["importer_type"] = "INDIVIDUAL"
+            legal_entity = dict(individual)
+            legal_entity["id"] = 302
+            legal_entity["importer_type"] = "LEGAL_ENTITY"
+            engine = create_engine(database_url)
+            try:
+                process_batch(
+                    engine,
+                    [individual, legal_entity],
+                    payment_rows(301) + payment_rows(302),
+                    mode=mode,
+                    dry_run=False,
+                )
+            finally:
+                engine.dispose()
+
+        result = synchronize_cbr_rates(
+            self.database_url,
+            self.today,
+            fetcher=values.__getitem__,
+            recalculator=calculate_new_spec,
+        )
+
+        engine = create_engine(self.database_url)
+        try:
+            with engine.connect() as connection:
+                count = connection.scalar(
+                    select(func.count()).select_from(CustomsCalculation)
+                )
+        finally:
+            engine.dispose()
+        self.assertEqual(result["recalculation_mode"], "stale")
+        self.assertEqual(count, 2)
 
     def test_changed_rate_is_saved_and_starts_recalculation(self):
         baseline = {
@@ -104,6 +164,7 @@ class ScheduledCbrRatesTests(unittest.TestCase):
 
         self.assertTrue(result["changed"])
         self.assertEqual(len(self.calls), 2)
+        self.assertEqual(self.calls[1][2], "full")
         engine = create_engine(self.database_url)
         try:
             with Session(engine) as session:
@@ -132,8 +193,6 @@ class ScheduledCbrRatesTests(unittest.TestCase):
         engine = create_engine(self.database_url)
         try:
             with Session(engine) as session:
-                self.assertEqual(
-                    session.scalars(select(CbrExchangeRate)).all(), []
-                )
+                self.assertEqual(session.scalars(select(CbrExchangeRate)).all(), [])
         finally:
             engine.dispose()

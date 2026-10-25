@@ -30,8 +30,7 @@ class VehicleAttributesBackfillTests(unittest.TestCase):
             "body_construction": "承载式",
         }
         reverse_ids = {
-            parameter_id: field
-            for parameter_id, field in enumerate(fields, start=1)
+            parameter_id: field for parameter_id, field in enumerate(fields, start=1)
         }
         parameter_rows = [
             (101, parameter_id, fields[field])
@@ -75,8 +74,7 @@ class VehicleAttributesBackfillTests(unittest.TestCase):
             "body_construction": "承载式",
         }
         reverse_ids = {
-            parameter_id: field
-            for parameter_id, field in enumerate(fields, start=1)
+            parameter_id: field for parameter_id, field in enumerate(fields, start=1)
         }
         parameter_rows = [
             (

@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import unittest
 
+from autohome.translator import (
+    translate_powertrain_code,
+    translate_vehicle_attribute_code,
+)
 from autohome.vehicle_attributes_normalizer import (
     NORMALIZATION_VERSION,
     extract_vehicle_attribute_value,
     normalize_vehicle_attributes,
     parse_cargo_dimensions,
     parse_integer_range,
-)
-from autohome.translator import (
-    translate_powertrain_code,
-    translate_vehicle_attribute_code,
 )
 
 
@@ -133,9 +133,7 @@ class CargoDimensionTests(unittest.TestCase):
     def test_dimension_variants_are_preserved(self):
         warnings = []
 
-        result = parse_cargo_dimensions(
-            "3050x1560x1310/1570/1700", warnings
-        )
+        result = parse_cargo_dimensions("3050x1560x1310/1570/1700", warnings)
 
         self.assertEqual(result["cargo_height_min_mm"], 1310)
         self.assertEqual(result["cargo_height_max_mm"], 1700)
@@ -248,9 +246,7 @@ class VehicleAttributesNormalizerTests(unittest.TestCase):
         row = normalize_vehicle_attributes(10, 20, {})
 
         self.assertFalse(row["is_complete"])
-        self.assertEqual(
-            row["missing_fields_json"], ["body_type", "vehicle_class"]
-        )
+        self.assertEqual(row["missing_fields_json"], ["body_type", "vehicle_class"])
 
     def test_repeated_normalization_is_stable_except_timestamp(self):
         values = {

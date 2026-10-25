@@ -5,23 +5,37 @@ from __future__ import annotations
 import os
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import create_engine
 from sqlalchemy.pool import NullPool
 
+from alembic import context
 from autohome.models import Base
-
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+MANAGED_EXPRESSION_INDEXES = {
+    "ix_brands_name_lower_trgm",
+    "ix_manufacturers_name_lower_trgm",
+    "ix_series_name_lower_trgm",
+    "ix_specs_name_lower_trgm",
+}
+
+
+def include_object(_, name, type_, __, ___) -> bool:
+    """Не сравнивать индексы выражений, которыми управляет отдельная миграция."""
+    return not (type_ == "index" and name in MANAGED_EXPRESSION_INDEXES)
 
 
 def database_url() -> str:
     """Получить URL базы из окружения или конфигурации Alembic."""
-    return os.getenv("DATABASE_URL") or config.get_main_option("sqlalchemy.url")
+    return (
+        config.attributes.get("database_url")
+        or os.getenv("DATABASE_URL")
+        or config.get_main_option("sqlalchemy.url")
+    )
 
 
 def run_migrations_offline() -> None:
@@ -32,6 +46,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_object=include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -45,6 +60,7 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             compare_type=True,
+            include_object=include_object,
         )
         with context.begin_transaction():
             context.run_migrations()

@@ -35,12 +35,22 @@ class VolumeRate:
 # равна максимуму из процента стоимости и минимальной ставки за 1 см³:
 # max(value_eur * percent, engine_cc * minimum_eur_per_cc).
 PERSONAL_UNDER_3 = (
-    PersonalValueRate(Decimal("8500"), Decimal("0.54"), Decimal("2.5"), "PERSONAL_U3_000_8500"),
-    PersonalValueRate(Decimal("16700"), Decimal("0.48"), Decimal("3.5"), "PERSONAL_U3_8500_16700"),
-    PersonalValueRate(Decimal("42300"), Decimal("0.48"), Decimal("5.5"), "PERSONAL_U3_16700_42300"),
-    PersonalValueRate(Decimal("84500"), Decimal("0.48"), Decimal("7.5"), "PERSONAL_U3_42300_84500"),
-    PersonalValueRate(Decimal("169000"), Decimal("0.48"), Decimal("15"), "PERSONAL_U3_84500_169000"),
-    PersonalValueRate(None, Decimal("0.48"), Decimal("20"), "PERSONAL_U3_OVER_169000"),
+    PersonalValueRate(
+        Decimal(8500), Decimal("0.54"), Decimal("2.5"), "PERSONAL_U3_000_8500"
+    ),
+    PersonalValueRate(
+        Decimal(16700), Decimal("0.48"), Decimal("3.5"), "PERSONAL_U3_8500_16700"
+    ),
+    PersonalValueRate(
+        Decimal(42300), Decimal("0.48"), Decimal("5.5"), "PERSONAL_U3_16700_42300"
+    ),
+    PersonalValueRate(
+        Decimal(84500), Decimal("0.48"), Decimal("7.5"), "PERSONAL_U3_42300_84500"
+    ),
+    PersonalValueRate(
+        Decimal(169000), Decimal("0.48"), Decimal(15), "PERSONAL_U3_84500_169000"
+    ),
+    PersonalValueRate(None, Decimal("0.48"), Decimal(20), "PERSONAL_U3_OVER_169000"),
 )
 
 # Физлица: автомобиль старше 3 лет, но не старше 5 лет.
@@ -83,11 +93,21 @@ class CommercialUsedRate:
 # 7 лет применяется только engine_cc * over_7_eur_per_cc. tnved_heading хранит
 # тарифную ветку, а max_volume_cc — верхнюю границу объёма двигателя.
 COMMERCIAL_GASOLINE_USED = (
-    CommercialUsedRate(1000, "870321", Decimal("0.20"), Decimal("0.36"), Decimal("1.4")),
-    CommercialUsedRate(1500, "870322", Decimal("0.20"), Decimal("0.40"), Decimal("1.5")),
-    CommercialUsedRate(1800, "870323", Decimal("0.20"), Decimal("0.36"), Decimal("1.6")),
-    CommercialUsedRate(3000, "870323", Decimal("0.20"), Decimal("0.44"), Decimal("2.2")),
-    CommercialUsedRate(None, "870324", Decimal("0.20"), Decimal("0.80"), Decimal("3.2")),
+    CommercialUsedRate(
+        1000, "870321", Decimal("0.20"), Decimal("0.36"), Decimal("1.4")
+    ),
+    CommercialUsedRate(
+        1500, "870322", Decimal("0.20"), Decimal("0.40"), Decimal("1.5")
+    ),
+    CommercialUsedRate(
+        1800, "870323", Decimal("0.20"), Decimal("0.36"), Decimal("1.6")
+    ),
+    CommercialUsedRate(
+        3000, "870323", Decimal("0.20"), Decimal("0.44"), Decimal("2.2")
+    ),
+    CommercialUsedRate(
+        None, "870324", Decimal("0.20"), Decimal("0.80"), Decimal("3.2")
+    ),
 )
 
 # Юрлица: подержанные легковые автомобили с дизельным двигателем.
@@ -95,9 +115,15 @@ COMMERCIAL_GASOLINE_USED = (
 # максимум из 20% стоимости и минимальной ставки за 1 см³, старше 7 лет —
 # фиксированная ставка over_7_eur_per_cc за 1 см³.
 COMMERCIAL_DIESEL_USED = (
-    CommercialUsedRate(1500, "870331", Decimal("0.20"), Decimal("0.32"), Decimal("1.5")),
-    CommercialUsedRate(2500, "870332", Decimal("0.20"), Decimal("0.40"), Decimal("2.2")),
-    CommercialUsedRate(None, "870333", Decimal("0.20"), Decimal("0.80"), Decimal("3.2")),
+    CommercialUsedRate(
+        1500, "870331", Decimal("0.20"), Decimal("0.32"), Decimal("1.5")
+    ),
+    CommercialUsedRate(
+        2500, "870332", Decimal("0.20"), Decimal("0.40"), Decimal("2.2")
+    ),
+    CommercialUsedRate(
+        None, "870333", Decimal("0.20"), Decimal("0.80"), Decimal("3.2")
+    ),
 )
 
 
@@ -136,7 +162,7 @@ def _percent(
     return CommercialVehicleRate(
         tnved_code=tnved_code,
         code=f"ETT_{tnved_code}_{suffix}_PERCENT",
-        percent=Decimal(percent) / Decimal("100"),
+        percent=Decimal(percent) / Decimal(100),
         minimum_eur_per_cc=Decimal(minimum) if minimum is not None else None,
     )
 
@@ -156,9 +182,7 @@ def _specific(tnved_code: str, eur_per_cc: str) -> CommercialVehicleRate:
 BUS_8702_RATES = {
     ("DIESEL", "OVER_2500", "NEW"): _percent("8702101199", "10"),
     ("DIESEL", "OVER_2500", "USED_UP_TO_5"): _percent("8702101997", "20"),
-    ("DIESEL", "OVER_2500", "USED_5_TO_7"): _percent(
-        "8702101995", "20", minimum="0.8"
-    ),
+    ("DIESEL", "OVER_2500", "USED_5_TO_7"): _percent("8702101995", "20", minimum="0.8"),
     ("DIESEL", "OVER_2500", "USED_OVER_7"): _specific("8702101994", "3"),
     ("DIESEL", "UP_TO_2500", "NEW"): _percent("8702109199", "10"),
     ("DIESEL", "UP_TO_2500", "USED_UP_TO_5"): _percent("8702109998", "20"),

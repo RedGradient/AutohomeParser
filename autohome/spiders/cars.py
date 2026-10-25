@@ -1,29 +1,32 @@
 from __future__ import annotations
 
+import json
+import re
+import subprocess
 from collections import deque
+from collections.abc import Iterable
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from hashlib import blake2b
-import json
-import subprocess
 from pathlib import Path
-import re
-from typing import Any, Iterable
+from typing import Any
 
 import scrapy
+from scrapy.downloadermiddlewares.retry import get_retry_request
 from scrapy.http import TextResponse
 from sqlalchemy import create_engine, select
 
 from autohome.items import (
     AttentionRankingItem,
-    BrandMonthlySaleItem,
-    BrandManufacturerItem,
     BrandItem,
+    BrandManufacturerItem,
+    BrandMonthlySaleItem,
     ConfigCrawlTaskItem,
     DiscountRankingItem,
     GalleryCrawlTaskItem,
     ManufacturerItem,
     MeasuredTestRankingItem,
+    ModificationItem,
     NewEnergyRankingItem,
     ParameterColorItem,
     ParameterColorSetItem,
@@ -31,19 +34,18 @@ from autohome.items import (
     ParameterGroupItem,
     ParameterSectionItem,
     ParameterSubitemItem,
-    SeriesItem,
+    ResaleValueRankingItem,
     SeriesGalleryColorItem,
+    SeriesItem,
     SeriesMonthlySaleItem,
     SeriesPhotoColorItem,
     SeriesPhotoItem,
     SmartTestRankingItem,
-    ModificationItem,
     SpecItem,
     SpecModificationItem,
     SpecParameterItem,
     SpecPowertrainItem,
     SpecVehicleAttributesItem,
-    ResaleValueRankingItem,
     TechnologyRankingItem,
 )
 from autohome.models import (
@@ -61,15 +63,19 @@ from autohome.powertrain_normalizer import (
     normalize_powertrain,
 )
 from autohome.translator import translate_powertrain_code, translate_powertrain_field
-from autohome.vehicle_attributes_normalizer import (
-    PATH_TO_FIELD as VEHICLE_ATTRIBUTE_PATH_TO_FIELD,
-    REQUIRED_SOURCE_FIELDS as REQUIRED_VEHICLE_ATTRIBUTE_SOURCE_FIELDS,
-    extract_vehicle_attribute_value,
-    normalize_vehicle_attributes,
-)
 from autohome.vehicle_attribute_inference import (
     RawParameter,
     apply_vehicle_attribute_inference,
+)
+from autohome.vehicle_attributes_normalizer import (
+    PATH_TO_FIELD as VEHICLE_ATTRIBUTE_PATH_TO_FIELD,
+)
+from autohome.vehicle_attributes_normalizer import (
+    REQUIRED_SOURCE_FIELDS as REQUIRED_VEHICLE_ATTRIBUTE_SOURCE_FIELDS,
+)
+from autohome.vehicle_attributes_normalizer import (
+    extract_vehicle_attribute_value,
+    normalize_vehicle_attributes,
 )
 
 
@@ -120,7 +126,7 @@ def yuan_from_text(value: object) -> Decimal | None:
     if amount is None:
         return None
     if "万" in str(value):
-        amount *= Decimal("10000")
+        amount *= Decimal(10000)
     return amount
 
 
@@ -151,16 +157,25 @@ def walk_objects(value: Any) -> Iterable[dict]:
             yield from walk_objects(child)
 
 
+class InvalidApiResponse(ValueError):
+    """Ответ API, который нельзя безопасно обработать как JSON-объект."""
+
+
 class CarsSpider(scrapy.Spider):
     """Собирать каталог, параметры, продажи и фотогалереи Autohome."""
+
     name = "cars"
+    invalid_response_retry_times = 3
+    invalid_response_retry_delay = 2.0
     allowed_domains = [
         "www.autohome.com.cn",
         "car.app.autohome.com.cn",
         "car.autohome.com.cn",
     ]
 
-    tree_url = "https://www.autohome.com.cn/web-main/car/web/price/treeMenu?extendseries=1"
+    tree_url = (
+        "https://www.autohome.com.cn/web-main/car/web/price/treeMenu?extendseries=1"
+    )
     spec_list_url = (
         "https://car.app.autohome.com.cn/carMiddle/getSpecListBySeriesId"
         "?seriesId={series_id}&appId=pc&cityId={city_id}"
@@ -192,7 +207,9 @@ class CarsSpider(scrapy.Spider):
             },
         ),
     )
-    gallery_url = "https://car.autohome.com.cn/pic/series/{series_id}-{category_id}.html"
+    gallery_url = (
+        "https://car.autohome.com.cn/pic/series/{series_id}-{category_id}.html"
+    )
     gallery_category_names = {
         1: "Экстерьер",
         10: "Панель управления и руль",
@@ -349,14 +366,11 @@ class CarsSpider(scrapy.Spider):
             .where(SpecPowertrain.spec_id == Spec.id)
             .exists()
         )
-        legacy_statement = (
-            select(Spec.id)
-            .where(
-                has_parameters,
-                has_powertrain,
-                Spec.modification_id.is_not(None),
-                Spec.series_id % self.worker_count == self.worker_index,
-            )
+        legacy_statement = select(Spec.id).where(
+            has_parameters,
+            has_powertrain,
+            Spec.modification_id.is_not(None),
+            Spec.series_id % self.worker_count == self.worker_index,
         )
         task_statement = select(
             ConfigCrawlTask.spec_id,
@@ -441,8 +455,7 @@ class CarsSpider(scrapy.Spider):
         finally:
             engine.dispose()
         self.logger.info(
-            "Режим дозагрузки: завершённых страниц галерей %d, "
-            "ожидают повтора %d",
+            "Режим дозагрузки: завершённых страниц галерей %d, ожидают повтора %d",
             len(self.completed_gallery_task_ids),
             len(self.pending_gallery_tasks),
         )
@@ -453,9 +466,7 @@ class CarsSpider(scrapy.Spider):
         cache_path = self.catalog_path
         if self.catalog_preloaded:
             if not cache_path.exists() or cache_path.stat().st_size <= 100_000:
-                raise RuntimeError(
-                    f"Мастер-процесс не подготовил каталог {cache_path}"
-                )
+                raise RuntimeError(f"Мастер-процесс не подготовил каталог {cache_path}")
             body = cache_path.read_bytes()
             self.logger.info("Используется каталог мастер-процесса из %s", cache_path)
             return TextResponse(
@@ -953,10 +964,13 @@ class CarsSpider(scrapy.Spider):
         task_id: int | None = None,
     ):
         """Зарегистрировать ожидающую задачу и затем отправить её запрос."""
-        page_url = (url or self.gallery_url.format(
-            series_id=series_id,
-            category_id=category_id,
-        )).split("#", 1)[0]
+        page_url = (
+            url
+            or self.gallery_url.format(
+                series_id=series_id,
+                category_id=category_id,
+            )
+        ).split("#", 1)[0]
         if task_id is None:
             task_id = stable_id(
                 "gallery-page",
@@ -1067,7 +1081,7 @@ class CarsSpider(scrapy.Spider):
                     series_id,
                     discovered_category,
                     gallery_url,
-                    discovered_type,
+                    discovered_scope,
                     discovered_id,
                 )
 
@@ -1081,16 +1095,15 @@ class CarsSpider(scrapy.Spider):
             if photo_id is None:
                 continue
             photo_count += 1
-            thumbnail = node.css("img::attr(data-webp)").get() or node.css(
-                "img::attr(src)"
-            ).get()
-            thumbnail = self._absolute_url(thumbnail)
-            image_url = re.sub(
-                r"/\d+x\d+_\d+_q\d+_c\d+_", "/", thumbnail or ""
+            thumbnail = (
+                node.css("img::attr(data-webp)").get()
+                or node.css("img::attr(src)").get()
             )
-            title = node.css("img::attr(title)").get() or node.css(
-                "img::attr(alt)"
-            ).get()
+            thumbnail = self._absolute_url(thumbnail)
+            image_url = re.sub(r"/\d+x\d+_\d+_q\d+_c\d+_", "/", thumbnail or "")
+            title = (
+                node.css("img::attr(title)").get() or node.css("img::attr(alt)").get()
+            )
             page_url = response.urljoin(href.split("#", 1)[0])
             yield SeriesPhotoItem(
                 id=photo_id,
@@ -1177,16 +1190,60 @@ class CarsSpider(scrapy.Spider):
             meta=self._network_meta(),
         )
 
+    @staticmethod
+    def _json_object(response, endpoint: str) -> dict:
+        """Прочитать JSON-объект или описать полученный невалидный ответ."""
+        try:
+            payload = response.json()
+        except (TypeError, ValueError) as error:
+            content_type = response.headers.get("Content-Type", b"").decode(
+                errors="replace"
+            )
+            preview = " ".join(response.text[:160].split())
+            raise InvalidApiResponse(
+                f"{endpoint} вернул невалидный JSON "
+                f"(Content-Type={content_type or 'не указан'}, начало={preview!r})"
+            ) from error
+        if not isinstance(payload, dict):
+            raise InvalidApiResponse(
+                f"{endpoint} вернул JSON типа {type(payload).__name__}, ожидался object"
+            )
+        return payload
+
+    def _invalid_response_retry(self, response, error: InvalidApiResponse):
+        """Создать ограниченный повтор запроса после невалидного ответа API."""
+        request = get_retry_request(
+            response.request,
+            spider=self,
+            reason=error,
+            max_retry_times=self.invalid_response_retry_times,
+            stats_base_key="invalid_response_retry",
+        )
+        if request is not None:
+            request.meta["retry_delay"] = self.invalid_response_retry_delay
+        return request
+
     def parse_spec_list(self, response, series_id: int):
         """Сохранить комплектации серии и запустить загрузку их параметров."""
-        payload = response.json()
+        try:
+            payload = self._json_object(
+                response, f"Список комплектаций series_id={series_id}"
+            )
+        except InvalidApiResponse as error:
+            retry = self._invalid_response_retry(response, error)
+            if retry is not None:
+                yield retry
+                return
+            raise
         specs: dict[int, dict] = {}
         for obj in walk_objects(payload.get("result", payload)):
             spec_id = as_int(first(obj, "specid", "specId"))
             if spec_id is None:
                 continue
             # Пропускаем обёртки, которые только ссылаются на комплектацию.
-            if not any(k in obj for k in ("name", "specname", "specName", "price", "year")):
+            if not any(
+                k in obj for k in ("name", "specname", "specName", "price", "year")
+            ):
                 continue
             current = specs.get(spec_id)
             if current is None or (
@@ -1316,17 +1373,32 @@ class CarsSpider(scrapy.Spider):
         attempts: int,
     ):
         """Разобрать определения и значения параметров комплектаций."""
-        payload = response.json()
-        result = payload.get("result")
-        if not isinstance(result, dict):
-            raise ValueError(
-                f"API конфигурации spec_id={requested_spec_id} не вернул result"
+        try:
+            payload = self._json_object(
+                response, f"Конфигурация spec_id={requested_spec_id}"
             )
-        datalist = result.get("datalist")
-        if not isinstance(datalist, list):
-            raise ValueError(
-                f"API конфигурации spec_id={requested_spec_id} не вернул datalist"
+            result = payload.get("result")
+            if not isinstance(result, dict):
+                raise InvalidApiResponse(
+                    f"API конфигурации spec_id={requested_spec_id} не вернул result"
+                )
+            datalist = result.get("datalist")
+            if not isinstance(datalist, list):
+                raise InvalidApiResponse(
+                    f"API конфигурации spec_id={requested_spec_id} не вернул datalist"
+                )
+        except InvalidApiResponse as error:
+            retry = self._invalid_response_retry(response, error)
+            if retry is not None:
+                yield retry
+                return
+            yield from self._config_failure_outputs(
+                requested_spec_id,
+                series_id,
+                attempts,
+                str(error),
             )
+            return
 
         group_positions: dict[str, int] = {}
         section_positions: dict[str, int] = {}
@@ -1339,7 +1411,9 @@ class CarsSpider(scrapy.Spider):
             section_name = str(group.get("itemtype") or "")
             group_id = stable_id("parameter-group", group_name)
             section_id = stable_id("parameter-section", group_name, section_name)
-            group_position = group_positions.setdefault(group_name, len(group_positions))
+            group_position = group_positions.setdefault(
+                group_name, len(group_positions)
+            )
             section_position = section_positions.get(group_name, 0)
             section_positions[group_name] = section_position + 1
             yield ParameterGroupItem(
@@ -1387,9 +1461,7 @@ class CarsSpider(scrapy.Spider):
                     (group_name, section_name, parameter_name)
                 )
                 if vehicle_attribute_field is not None:
-                    local_vehicle_attribute_fields[title_id] = (
-                        vehicle_attribute_field
-                    )
+                    local_vehicle_attribute_fields[title_id] = vehicle_attribute_field
                 yield ParameterDefinitionItem(
                     id=parameter_id,
                     semantic_key=semantic_key,
@@ -1459,9 +1531,11 @@ class CarsSpider(scrapy.Spider):
                 if powertrain_field not in SUBITEM_FIELDS:
                     if powertrain_field is not None:
                         raw_value = parameter.get("itemname")
-                        powertrain_values[powertrain_field] = translate_powertrain_field(
-                            powertrain_field,
-                            raw_value,
+                        powertrain_values[powertrain_field] = (
+                            translate_powertrain_field(
+                                powertrain_field,
+                                raw_value,
+                            )
                         )
                         if powertrain_field == "transmission_type":
                             powertrain_values["clutch_type"] = (
@@ -1491,9 +1565,11 @@ class CarsSpider(scrapy.Spider):
                         and str(subitem.get("value") or "").strip() == "●"
                     ):
                         raw_value = subitem.get("name")
-                        powertrain_values[powertrain_field] = translate_powertrain_field(
-                            powertrain_field,
-                            raw_value,
+                        powertrain_values[powertrain_field] = (
+                            translate_powertrain_field(
+                                powertrain_field,
+                                raw_value,
+                            )
                         )
                         if powertrain_field == "drive_type":
                             powertrain_values["engine_layout"] = (
@@ -1533,8 +1609,7 @@ class CarsSpider(scrapy.Spider):
             yield ModificationItem(**modification)
             yield SpecPowertrainItem(**powertrain)
             missing_attribute_sources = (
-                REQUIRED_VEHICLE_ATTRIBUTE_SOURCE_FIELDS
-                - seen_vehicle_attribute_fields
+                REQUIRED_VEHICLE_ATTRIBUTE_SOURCE_FIELDS - seen_vehicle_attribute_fields
             )
             if missing_attribute_sources:
                 self.logger.warning(
@@ -1589,27 +1664,39 @@ class CarsSpider(scrapy.Spider):
         self.processed_spec_ids.update(returned_ids)
         yield from self._next_config_outputs(series_id)
 
+    def _config_failure_outputs(
+        self,
+        spec_id: int,
+        series_id: int,
+        attempts: int,
+        error: str,
+    ):
+        """Записать ошибку конфигурации и перейти к следующей комплектации."""
+        self.logger.error(
+            "Configuration request failed for spec %d: %s", spec_id, error
+        )
+        yield self._config_task_item(
+            spec_id,
+            series_id,
+            "failed",
+            attempts,
+            last_error=error,
+        )
+        self.processed_spec_ids.add(spec_id)
+        yield from self._next_config_outputs(series_id)
+
     def config_error(self, failure):
         """Записать ошибку конфигурации и продолжить обработку серии."""
         request = failure.request
         series_id = request.cb_kwargs["series_id"]
         requested_spec_id = request.cb_kwargs["requested_spec_id"]
         attempts = request.cb_kwargs["attempts"]
-        self.logger.error(
-            "Configuration request failed for spec %d: %s",
-            requested_spec_id,
-            failure.getErrorMessage(),
-        )
-        yield self._config_task_item(
+        yield from self._config_failure_outputs(
             requested_spec_id,
             series_id,
-            "failed",
             attempts,
-            last_error=failure.getErrorMessage(),
+            failure.getErrorMessage(),
         )
-        # Продолжаем серию после исчерпания стандартных повторов Scrapy.
-        self.processed_spec_ids.add(requested_spec_id)
-        yield from self._next_config_outputs(series_id)
 
     @staticmethod
     def _spec_has_price(obj: dict) -> bool:
@@ -1626,7 +1713,9 @@ class CarsSpider(scrapy.Spider):
         return SpecItem(
             id=spec_id,
             series_id=series_id,
-            name=str(first(obj, "specname", "specName", "name", default=f"spec-{spec_id}")),
+            name=str(
+                first(obj, "specname", "specName", "name", default=f"spec-{spec_id}")
+            ),
             year=as_int(obj.get("year")),
             state=as_int(first(obj, "specstatus", "state")),
             guide_price_yuan=first(obj, "minprice", "price"),

@@ -7,7 +7,11 @@ from types import SimpleNamespace
 
 from autohome.import_duty import ExchangeRate, ImporterType
 from autohome.import_duty.rates import RULES_VERSION
-from calculate_import_duties import classify_database_row, make_rows
+from calculate_customs_payments import (
+    classify_database_row,
+    make_rows,
+    stable_calculation_id,
+)
 
 CALCULATION_DATE = date(2026, 10, 19)
 RATES = {
@@ -64,6 +68,114 @@ def database_row(**overrides):
 
 
 class ImportDutyClassificationIntegrationTests(unittest.TestCase):
+    def test_calculation_id_identifies_spec_and_importer_only(self):
+        individual_id = stable_calculation_id(101, ImporterType.INDIVIDUAL)
+
+        self.assertEqual(
+            individual_id,
+            stable_calculation_id(101, ImporterType.INDIVIDUAL),
+        )
+        self.assertNotEqual(
+            individual_id,
+            stable_calculation_id(101, ImporterType.LEGAL_ENTITY),
+        )
+
+    def test_personal_use_marks_vat_not_applicable(self):
+        _, payments = make_rows(
+            database_row(),
+            ImporterType.INDIVIDUAL,
+            CALCULATION_DATE,
+            RATES,
+        )
+
+        vat = next(item for item in payments if item["payment_type"] == "VAT")
+        self.assertEqual(vat["status"], "NOT_APPLICABLE")
+        self.assertIsNone(vat["amount_rub"])
+
+    def test_commercial_m1_has_calculated_vat(self):
+        _, payments = make_rows(
+            database_row(),
+            ImporterType.LEGAL_ENTITY,
+            CALCULATION_DATE,
+            RATES,
+        )
+
+        vat = next(item for item in payments if item["payment_type"] == "VAT")
+        self.assertEqual(vat["status"], "CALCULATED")
+        self.assertEqual(vat["amount_rub"], Decimal("280412.00"))
+
+    def test_vat_is_blocked_when_excise_is_not_applicable(self):
+        _, payments = make_rows(
+            database_row(vehicle_technical_category="N1"),
+            ImporterType.LEGAL_ENTITY,
+            CALCULATION_DATE,
+            RATES,
+        )
+
+        vat = next(item for item in payments if item["payment_type"] == "VAT")
+        self.assertEqual(vat["status"], "UNSUPPORTED")
+        self.assertEqual(vat["details_json"]["dependency_status"], "NOT_APPLICABLE")
+
+    def test_vat_inherits_blocking_import_duty_status(self):
+        _, payments = make_rows(
+            database_row(seat_count_min=None, seat_count_max=None),
+            ImporterType.LEGAL_ENTITY,
+            CALCULATION_DATE,
+            RATES,
+        )
+
+        vat = next(item for item in payments if item["payment_type"] == "VAT")
+        self.assertEqual(vat["status"], "MISSING_DATA")
+        self.assertEqual(vat["details_json"]["dependency_status"], "MISSING_DATA")
+
+    def test_personal_use_marks_excise_not_applicable(self):
+        _, payments = make_rows(
+            database_row(),
+            ImporterType.INDIVIDUAL,
+            CALCULATION_DATE,
+            RATES,
+        )
+
+        excise = next(item for item in payments if item["payment_type"] == "EXCISE")
+        self.assertEqual(excise["status"], "NOT_APPLICABLE")
+        self.assertIsNone(excise["amount_rub"])
+
+    def test_commercial_m1_has_calculated_excise(self):
+        _, payments = make_rows(
+            database_row(),
+            ImporterType.LEGAL_ENTITY,
+            CALCULATION_DATE,
+            RATES,
+        )
+
+        excise = next(item for item in payments if item["payment_type"] == "EXCISE")
+        self.assertEqual(excise["status"], "CALCULATED")
+        self.assertEqual(excise["amount_rub"], Decimal("9600.00"))
+
+    def test_commercial_non_m1_marks_excise_not_applicable(self):
+        _, payments = make_rows(
+            database_row(vehicle_technical_category="N1"),
+            ImporterType.LEGAL_ENTITY,
+            CALCULATION_DATE,
+            RATES,
+        )
+
+        excise = next(item for item in payments if item["payment_type"] == "EXCISE")
+        self.assertEqual(excise["status"], "NOT_APPLICABLE")
+        self.assertIsNone(excise["amount_rub"])
+
+    def test_unknown_category_requires_excise_review(self):
+        _, payments = make_rows(
+            database_row(vehicle_technical_category=None),
+            ImporterType.LEGAL_ENTITY,
+            CALCULATION_DATE,
+            RATES,
+        )
+
+        excise = next(item for item in payments if item["payment_type"] == "EXCISE")
+        self.assertEqual(excise["status"], "MANUAL_REVIEW")
+        self.assertIsNone(excise["amount_rub"])
+
     def test_classification_failure_blocks_old_passenger_formula(self):
         row = database_row(seat_count_min=None, seat_count_max=None)
 

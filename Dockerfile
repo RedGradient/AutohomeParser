@@ -20,10 +20,10 @@ RUN python -m pip install --upgrade pip \
 COPY autohome ./autohome
 COPY alembic ./alembic
 COPY alembic.ini ./
-COPY scrapy.cfg run_multi.py calculate_import_duties.py ./
+COPY scrapy.cfg run_multi.py calculate_customs_payments.py ./
 
 USER autohome
 
 EXPOSE 8000
 
-CMD ["uvicorn", "autohome.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "autohome.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]

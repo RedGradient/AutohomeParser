@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import argparse
 import os
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from sqlalchemy import and_, bindparam, create_engine, select, tuple_, update
 
@@ -73,11 +74,11 @@ def update_table(
                 break
             updates = []
             for row in rows:
-                values = {name: transform(row[name]) for name, transform in fields.items()}
+                values = {
+                    name: transform(row[name]) for name, transform in fields.items()
+                }
                 if any(values[name] != row[name] for name in fields):
-                    key_values = {
-                        f"_pk_{name}": row[name] for name in primary_keys
-                    }
+                    key_values = {f"_pk_{name}": row[name] for name in primary_keys}
                     updates.append({**key_values, **values})
             if updates:
                 statement = (

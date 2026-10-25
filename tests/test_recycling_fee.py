@@ -19,7 +19,7 @@ def context(**overrides) -> RecyclingFeeContext:
         "vehicle_technical_category": "M1",
         "age_months": 12,
         "powertrain_type": "ICE",
-        "power_kw": Decimal("100"),
+        "power_kw": Decimal(100),
         "power_source": "ENGINE_POWER_KW",
         "engine_displacement_cc": 1500,
     }
@@ -58,15 +58,38 @@ class RecyclingFeeTests(unittest.TestCase):
         self.assertEqual(result.amount_rub, Decimal("800800.00"))
         self.assertEqual(result.details["coefficient"], "40.04")
 
+    def test_2027_stage_starts_on_january_first(self):
+        last_2026 = calculate_recycling_fee(
+            context(calculation_date=date(2026, 12, 31))
+        )
+        first_2027 = calculate_recycling_fee(context(calculation_date=date(2027, 1, 1)))
+
+        self.assertEqual(last_2026.details["coefficient"], "40.04")
+        self.assertEqual(first_2027.details["coefficient"], "44.04")
+        self.assertEqual(last_2026.amount_rub, Decimal("800800.00"))
+        self.assertEqual(first_2027.amount_rub, Decimal("880800.00"))
+
+    def test_2030_stage_is_used_for_later_dates(self):
+        result = calculate_recycling_fee(context(calculation_date=date(2035, 1, 1)))
+
+        self.assertEqual(result.status, CalculationStatus.CALCULATED)
+        self.assertEqual(result.details["coefficient"], "58.62")
+
+    def test_date_before_available_rates_is_unsupported(self):
+        result = calculate_recycling_fee(context(calculation_date=date(2025, 12, 31)))
+
+        self.assertEqual(result.status, CalculationStatus.UNSUPPORTED)
+        self.assertEqual(result.details["reason"], "UNSUPPORTED_RATE_YEAR")
+
     def test_commercial_power_band_above_personal_limit(self):
-        result = calculate_recycling_fee(context(power_kw=Decimal("130")))
+        result = calculate_recycling_fee(context(power_kw=Decimal(130)))
 
         self.assertEqual(result.amount_rub, Decimal("900000.00"))
         self.assertEqual(result.details["coefficient"], "45")
 
     def test_commercial_volume_and_power_boundaries(self):
         result = calculate_recycling_fee(
-            context(engine_displacement_cc=2500, power_kw=Decimal("300"))
+            context(engine_displacement_cc=2500, power_kw=Decimal(300))
         )
 
         self.assertEqual(result.amount_rub, Decimal("3067200.00"))
@@ -90,7 +113,7 @@ class RecyclingFeeTests(unittest.TestCase):
             context(
                 importer_type=ImporterType.INDIVIDUAL,
                 personal_use=True,
-                power_kw=Decimal("130"),
+                power_kw=Decimal(130),
             )
         )
 
@@ -106,7 +129,7 @@ class RecyclingFeeTests(unittest.TestCase):
             context(
                 importer_type=ImporterType.INDIVIDUAL,
                 personal_use=True,
-                power_kw=Decimal("130"),
+                power_kw=Decimal(130),
                 engine_displacement_cc=None,
                 engine_summary="2.0T 205 л.с. I4",
             )
@@ -157,7 +180,7 @@ class RecyclingFeeTests(unittest.TestCase):
         result = calculate_recycling_fee(
             context(
                 powertrain_type="EV",
-                power_kw=Decimal("100"),
+                power_kw=Decimal(100),
                 engine_displacement_cc=None,
             )
         )

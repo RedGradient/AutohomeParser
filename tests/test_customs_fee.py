@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import date
 from decimal import Decimal
 
 from autohome.import_duty.customs_fee import calculate_customs_fee
@@ -22,16 +23,25 @@ class CustomsFeeTests(unittest.TestCase):
 
         for customs_value, expected_fee in cases:
             with self.subTest(customs_value=customs_value):
-                result = calculate_customs_fee(Decimal(customs_value))
+                result = calculate_customs_fee(
+                    Decimal(customs_value), date(2026, 12, 31)
+                )
                 self.assertEqual(result.status, CalculationStatus.CALCULATED)
                 self.assertEqual(result.amount_rub, Decimal(expected_fee))
 
     def test_missing_customs_value_is_not_calculated(self):
-        result = calculate_customs_fee(None)
+        result = calculate_customs_fee(None, date(2026, 12, 31))
 
         self.assertEqual(result.status, CalculationStatus.MISSING_DATA)
         self.assertIsNone(result.amount_rub)
         self.assertEqual(result.details["missing_fields"], ["customs_value_rub"])
+
+    def test_date_without_rates_is_unsupported(self):
+        result = calculate_customs_fee(Decimal(200000), date(2027, 1, 1))
+
+        self.assertEqual(result.status, CalculationStatus.UNSUPPORTED)
+        self.assertIsNone(result.amount_rub)
+        self.assertEqual(result.details["reason"], "UNSUPPORTED_RATE_DATE")
 
 
 if __name__ == "__main__":

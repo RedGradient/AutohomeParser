@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
-from hashlib import blake2b
 import json
 import re
+from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
+from hashlib import blake2b
 from typing import Any
 
 from autohome.recycling_fee_power import select_recycling_fee_power
-
 
 NORMALIZATION_VERSION = 5
 EMPTY_VALUES = {None, "", "-", "Нет", "Неизвестно"}
@@ -153,7 +152,7 @@ def normalize_powertrain(
         is_complete=not missing,
         missing_fields_json=missing,
         normalization_version=NORMALIZATION_VERSION,
-        normalized_at=datetime.now(timezone.utc),
+        normalized_at=datetime.now(UTC),
     )
     return row
 
@@ -285,5 +284,5 @@ def modification_row(row: dict) -> dict:
         "is_complete": row["is_complete"],
         "spec_count": 0,
         "normalization_version": NORMALIZATION_VERSION,
-        "generated_at": datetime.now(timezone.utc),
+        "generated_at": datetime.now(UTC),
     }

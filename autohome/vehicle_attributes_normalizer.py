@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
 import re
-from typing import Any, Mapping
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
+from typing import Any
 
 from autohome.translator import translate_vehicle_attribute_code
-
 
 NORMALIZATION_VERSION = 4
 EMPTY_VALUES = {
@@ -68,8 +68,8 @@ REQUIRED_SOURCE_FIELDS = frozenset(
 )
 
 PLAIN_NUMBER_RE = re.compile(r"^\s*([0-9]+(?:[.,][0-9]+)?)\s*$")
-BODY_SEAT_RE = re.compile(r"(?P<first>\d+)(?:/(?P<second>\d+))?-местн", re.I)
-BODY_DOOR_RE = re.compile(r"(?P<count>\d+)-дверн", re.I)
+BODY_SEAT_RE = re.compile(r"(?P<first>\d+)(?:/(?P<second>\d+))?-местн", re.IGNORECASE)
+BODY_DOOR_RE = re.compile(r"(?P<count>\d+)-дверн", re.IGNORECASE)
 CHINESE_SEAT_RE = re.compile(r"(?P<first>\d+)(?:/(?P<second>\d+))?座")
 CHINESE_DOOR_RE = re.compile(r"(?P<count>\d+)门")
 DIMENSION_SEPARATOR_RE = re.compile(r"[xX×*]")
@@ -255,9 +255,7 @@ def parse_cargo_dimensions(
         result[f"cargo_{name}_min_mm"] = minimum
         result[f"cargo_{name}_max_mm"] = maximum
     if was_sanitized:
-        warnings.append(
-            warning("SANITIZED_CARGO_DIMENSIONS", "cargo_dimensions", text)
-        )
+        warnings.append(warning("SANITIZED_CARGO_DIMENSIONS", "cargo_dimensions", text))
     return result
 
 
@@ -367,12 +365,8 @@ def normalize_vehicle_attributes(
         ),
         "seat_count_min": seat_min,
         "seat_count_max": seat_max,
-        "door_count": parse_doors(
-            values.get("door_count"), body_description, warnings
-        ),
-        "curb_mass_kg": (
-            curb_mass_min if curb_mass_min == curb_mass_max else None
-        ),
+        "door_count": parse_doors(values.get("door_count"), body_description, warnings),
+        "curb_mass_kg": (curb_mass_min if curb_mass_min == curb_mass_max else None),
         "curb_mass_kg_min": curb_mass_min,
         "curb_mass_kg_max": curb_mass_max,
         "gross_mass_kg": parse_single_integer(
@@ -383,9 +377,7 @@ def normalize_vehicle_attributes(
         "length_mm": parse_single_integer(
             values.get("length_mm"), "length_mm", warnings
         ),
-        "width_mm": parse_single_integer(
-            values.get("width_mm"), "width_mm", warnings
-        ),
+        "width_mm": parse_single_integer(values.get("width_mm"), "width_mm", warnings),
         "height_mm": parse_single_integer(
             values.get("height_mm"), "height_mm", warnings
         ),
@@ -420,9 +412,7 @@ def normalize_vehicle_attributes(
         "has_separate_cargo_compartment": parse_optional_boolean(
             values.get("has_separate_cargo_compartment")
         ),
-        "is_special_purpose": parse_optional_boolean(
-            values.get("is_special_purpose")
-        ),
+        "is_special_purpose": parse_optional_boolean(values.get("is_special_purpose")),
         **parse_cargo_dimensions(values.get("cargo_dimensions"), warnings),
     }
     missing = required_missing(row)
@@ -431,6 +421,6 @@ def normalize_vehicle_attributes(
         missing_fields_json=missing,
         warnings_json=warnings,
         normalization_version=NORMALIZATION_VERSION,
-        normalized_at=datetime.now(timezone.utc),
+        normalized_at=datetime.now(UTC),
     )
     return row
