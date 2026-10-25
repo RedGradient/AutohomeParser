@@ -7,7 +7,6 @@ from decimal import Decimal
 from pathlib import Path
 
 import httpx
-from sqlalchemy.orm import Session
 
 from autohome.api.app import create_app
 from autohome.api.auth import create_access_token
@@ -29,7 +28,7 @@ from autohome.models import (
 
 
 class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
+    async def asyncSetUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         database_path = Path(self.temp_dir.name) / "api.sqlite3"
         self.username = "test-user"
@@ -40,8 +39,9 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
             api_password=self.password,
             jwt_secret="test-jwt-secret-longer-than-thirty-two-bytes",
         )
-        Base.metadata.create_all(self.app.state.engine)
-        with Session(self.app.state.engine) as session:
+        async with self.app.state.engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        async with self.app.state.session_factory() as session:
             session.add(Brand(id=1, name="Test Brand", raw_json={}))
             session.add(Manufacturer(id=2, name="Test Manufacturer", raw_json={}))
             session.add(BrandManufacturer(brand_id=1, manufacturer_id=2, position=0))
@@ -257,7 +257,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
                     color_id=7,
                 )
             )
-            session.commit()
+            await session.commit()
         token = create_access_token(self.username, self.app.state.auth_settings)
         self.client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=self.app),
@@ -267,7 +267,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         await self.client.aclose()
-        self.app.state.engine.dispose()
+        await self.app.state.engine.dispose()
         self.temp_dir.cleanup()
 
     async def test_protected_endpoint_rejects_missing_token(self):

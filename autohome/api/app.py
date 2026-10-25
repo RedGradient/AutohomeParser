@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import os
-from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from datetime import date
 from decimal import Decimal
-from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Security
@@ -12,8 +10,8 @@ from fastapi import Path as ApiPath
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import and_, case, create_engine, exists, func, or_, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import and_, case, exists, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from autohome.api.auth import (
     AuthSettings,
@@ -42,6 +40,7 @@ from autohome.api.schemas import (
     TokenRequest,
     TokenResponse,
 )
+from autohome.api.session import DatabaseSessionManager
 from autohome.models import (
     Brand,
     BrandManufacturer,
@@ -61,11 +60,6 @@ from autohome.models import (
     SpecParameter,
     SpecPowertrain,
     SpecVehicleAttributes,
-)
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DATABASE_URL = (
-    f"sqlite:///{(PROJECT_ROOT / 'data' / 'autohome.sqlite3').resolve()}"
 )
 
 PriceType = Literal["effective", "guide", "dealer"]
@@ -160,8 +154,8 @@ def _price_column(price_type: PriceType):
     }[price_type]
 
 
-def _page(
-    session: Session,
+async def _page(
+    session: AsyncSession,
     statement,
     limit: int,
     offset: int,
@@ -172,8 +166,8 @@ def _page(
         count_statement = select(func.count()).select_from(
             statement.order_by(None).subquery()
         )
-        total = int(session.scalar(count_statement) or 0)
-    rows = session.execute(statement.offset(offset).limit(limit + 1)).all()
+        total = int(await session.scalar(count_statement) or 0)
+    rows = (await session.execute(statement.offset(offset).limit(limit + 1))).all()
     has_more = len(rows) > limit
     return rows[:limit], {
         "limit": limit,
@@ -383,6 +377,16 @@ def create_app(
         secret=jwt_secret,
         access_token_ttl_seconds=jwt_ttl_seconds,
     )
+    database = DatabaseSessionManager(database_url)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        """Освободить ресурсы приложения при его остановке."""
+        try:
+            yield
+        finally:
+            await database.engine.dispose()
+
     application = FastAPI(
         title="Autohome Catalog API",
         description=(
@@ -401,6 +405,7 @@ def create_app(
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
+        lifespan=lifespan,
         openapi_tags=[
             {"name": "Auth", "description": "Получение JWT для доступа к API."},
             {"name": "Brands", "description": "Бренды автомобилей."},
@@ -431,17 +436,11 @@ def create_app(
             },
         },
     )
-    url = database_url or os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
-    connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-    engine = create_engine(url, pool_pre_ping=True, connect_args=connect_args)
-    session_factory = sessionmaker(engine, expire_on_commit=False)
-    application.state.engine = engine
-    application.state.session_factory = session_factory
+    application.state.database = database
+    application.state.engine = database.engine
+    application.state.session_factory = database.session_factory
     application.state.auth_settings = auth_settings
-
-    async def get_session() -> AsyncGenerator[Session]:
-        with session_factory() as session:
-            yield session
+    get_session = database.get_session
 
     bearer_scheme = HTTPBearer(
         bearerFormat="JWT",
@@ -529,7 +528,7 @@ def create_app(
             0, ge=0, description="Количество записей, которые нужно пропустить."
         ),
         include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
-        session: Session = Depends(get_session),
+        session: AsyncSession = Depends(get_session),
     ):
         statement = select(Brand)
         matching_series = select(Series.id).where(Series.brand_id == Brand.id)
@@ -549,7 +548,7 @@ def create_app(
         statement = statement.order_by(
             sort_column.desc() if order == "desc" else sort_column.asc(), Brand.id.asc()
         )
-        rows, pagination = _page(session, statement, limit, offset, include_total)
+        rows, pagination = await _page(session, statement, limit, offset, include_total)
         items = [
             {
                 "id": brand.id,
@@ -569,9 +568,9 @@ def create_app(
     )
     async def brand_detail(
         brand_id: int = ApiPath(description="Идентификатор бренда."),
-        session: Session = Depends(get_session),
+        session: AsyncSession = Depends(get_session),
     ):
-        brand = session.get(Brand, brand_id)
+        brand = await session.get(Brand, brand_id)
         if brand is None:
             raise _not_found("Brand")
         return {
@@ -603,7 +602,7 @@ def create_app(
             0, ge=0, description="Количество записей, которые нужно пропустить."
         ),
         include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
-        session: Session = Depends(get_session),
+        session: AsyncSession = Depends(get_session),
     ):
         statement = select(Manufacturer)
         if brand_id is not None:
@@ -616,7 +615,7 @@ def create_app(
                 func.lower(Manufacturer.name).like(f"%{q.lower()}%")
             )
         statement = statement.order_by(Manufacturer.name, Manufacturer.id)
-        rows, pagination = _page(session, statement, limit, offset, include_total)
+        rows, pagination = await _page(session, statement, limit, offset, include_total)
         return {
             "items": [{"id": item.id, "name": item.name} for (item,) in rows],
             "pagination": pagination,
@@ -630,9 +629,9 @@ def create_app(
     )
     async def manufacturer_detail(
         manufacturer_id: int = ApiPath(description="Идентификатор производителя."),
-        session: Session = Depends(get_session),
+        session: AsyncSession = Depends(get_session),
     ):
-        manufacturer = session.get(Manufacturer, manufacturer_id)
+        manufacturer = await session.get(Manufacturer, manufacturer_id)
         if manufacturer is None:
             raise _not_found("Manufacturer")
         return {"id": manufacturer.id, "name": manufacturer.name}
@@ -661,17 +660,18 @@ def create_app(
             .outerjoin(prices, prices.c.series_id == Series.id)
         )
 
-    def official_images(session: Session, series_ids: list[int]):
+    async def official_images(session: AsyncSession, series_ids: list[int]):
         if not series_ids:
             return {}
-        photos = session.execute(
+        photos = await session.execute(
             select(SeriesPhoto)
             .where(
                 SeriesPhoto.series_id.in_(series_ids),
                 SeriesPhoto.category_id == 53,
             )
             .order_by(SeriesPhoto.series_id, SeriesPhoto.id)
-        ).scalars()
+        )
+        photos = photos.scalars()
         result: dict[int, list[dict[str, Any]]] = {}
         for photo in photos:
             result.setdefault(photo.series_id, []).append(
@@ -751,7 +751,7 @@ def create_app(
             0, ge=0, description="Количество записей, которые нужно пропустить."
         ),
         include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
-        session: Session = Depends(get_session),
+        session: AsyncSession = Depends(get_session),
     ):
         for low, high, name in (
             (year_from, year_to, "year"),
@@ -832,8 +832,8 @@ def create_app(
             sort_column.desc() if order == "desc" else sort_column.asc(),
             Series.id.asc(),
         )
-        rows, pagination = _page(session, statement, limit, offset, include_total)
-        images_by_series = official_images(session, [row[0].id for row in rows])
+        rows, pagination = await _page(session, statement, limit, offset, include_total)
+        images_by_series = await official_images(session, [row[0].id for row in rows])
         items = [
             {
                 "id": item.id,
@@ -858,10 +858,10 @@ def create_app(
     )
     async def series_detail(
         series_id: int = ApiPath(description="Идентификатор серии."),
-        session: Session = Depends(get_session),
+        session: AsyncSession = Depends(get_session),
     ):
-        row = session.execute(
-            series_statement().where(Series.id == series_id)
+        row = (
+            await session.execute(series_statement().where(Series.id == series_id))
         ).one_or_none()
         if row is None:
             raise _not_found("Series")
@@ -875,11 +875,13 @@ def create_app(
             "state": _series_state(item.state),
             "spec_count": item.spec_count,
             "price": {"min_cny": _money(minimum), "max_cny": _money(maximum)},
-            "official_images": official_images(session, [item.id]).get(item.id, []),
+            "official_images": (await official_images(session, [item.id])).get(
+                item.id, []
+            ),
         }
 
-    def modification_list_impl(
-        session: Session,
+    async def modification_list_impl(
+        session: AsyncSession,
         *,
         series_id=None,
         brand_id=None,
@@ -966,7 +968,7 @@ def create_app(
             sort_column.desc() if order == "desc" else sort_column.asc(),
             Modification.id.asc(),
         )
-        rows, pagination = _page(session, statement, limit, offset, include_total)
+        rows, pagination = await _page(session, statement, limit, offset, include_total)
         items = [
             {
                 "id": item.id,
@@ -1041,7 +1043,7 @@ def create_app(
             0, ge=0, description="Количество записей, которые нужно пропустить."
         ),
         include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
-        session: Session = Depends(get_session),
+        session: AsyncSession = Depends(get_session),
     ):
         argument_names = {
             "series_id",
@@ -1065,7 +1067,7 @@ def create_app(
             "offset",
             "include_total",
         }
-        return modification_list_impl(
+        return await modification_list_impl(
             session,
             **{key: value for key, value in locals().items() if key in argument_names},
         )
@@ -1114,11 +1116,11 @@ def create_app(
             0, ge=0, description="Количество записей, которые нужно пропустить."
         ),
         include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
-        session: Session = Depends(get_session),
+        session: AsyncSession = Depends(get_session),
     ):
-        if session.get(Series, series_id) is None:
+        if await session.get(Series, series_id) is None:
             raise _not_found("Series")
-        return modification_list_impl(
+        return await modification_list_impl(
             session,
             series_id=series_id,
             year_from=year_from,
@@ -1149,15 +1151,17 @@ def create_app(
         modification_id: int = ApiPath(
             description="Идентификатор технической модификации."
         ),
-        session: Session = Depends(get_session),
+        session: AsyncSession = Depends(get_session),
     ):
-        item = session.get(Modification, modification_id)
+        item = await session.get(Modification, modification_id)
         if item is None:
             raise _not_found("Modification")
         price = _effective_price()
-        minimum, maximum = session.execute(
-            select(func.min(price), func.max(price)).where(
-                Spec.modification_id == modification_id
+        minimum, maximum = (
+            await session.execute(
+                select(func.min(price), func.max(price)).where(
+                    Spec.modification_id == modification_id
+                )
             )
         ).one()
         return {
@@ -1179,8 +1183,8 @@ def create_app(
             "price": {"min_cny": _money(minimum), "max_cny": _money(maximum)},
         }
 
-    def specs_impl(
-        session: Session,
+    async def specs_impl(
+        session: AsyncSession,
         limit: int,
         offset: int,
         include_total: bool,
@@ -1212,7 +1216,7 @@ def create_app(
         statement = statement.order_by(
             sort_column.desc() if order == "desc" else sort_column.asc(), Spec.id.asc()
         )
-        rows, pagination = _page(session, statement, limit, offset, include_total)
+        rows, pagination = await _page(session, statement, limit, offset, include_total)
         return {"items": [_spec_payload(row) for row in rows], "pagination": pagination}
 
     @protected_router.get(
@@ -1284,7 +1288,7 @@ def create_app(
             0, ge=0, description="Количество записей, которые нужно пропустить."
         ),
         include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
-        session: Session = Depends(get_session),
+        session: AsyncSession = Depends(get_session),
     ):
         filter_names = {
             "q",
@@ -1311,7 +1315,7 @@ def create_app(
             "price_type",
         }
         values = {key: value for key, value in locals().items() if key in filter_names}
-        return specs_impl(
+        return await specs_impl(
             session, limit, offset, include_total, sort=sort, order=order, **values
         )
 
@@ -1335,11 +1339,11 @@ def create_app(
             0, ge=0, description="Количество записей, которые нужно пропустить."
         ),
         include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
-        session: Session = Depends(get_session),
+        session: AsyncSession = Depends(get_session),
     ):
-        if session.get(Modification, modification_id) is None:
+        if await session.get(Modification, modification_id) is None:
             raise _not_found("Modification")
-        return specs_impl(
+        return await specs_impl(
             session,
             limit,
             offset,
@@ -1358,9 +1362,11 @@ def create_app(
     )
     async def spec_detail(
         spec_id: int = ApiPath(description="Идентификатор комплектации."),
-        session: Session = Depends(get_session),
+        session: AsyncSession = Depends(get_session),
     ):
-        row = session.execute(_spec_select().where(Spec.id == spec_id)).one_or_none()
+        row = (
+            await session.execute(_spec_select().where(Spec.id == spec_id))
+        ).one_or_none()
         if row is None:
             raise _not_found("Spec")
         return _spec_payload(row, detail=True)
@@ -1379,9 +1385,9 @@ def create_app(
         section_id: int | None = Query(
             None, description="Оставить указанный раздел характеристик."
         ),
-        session: Session = Depends(get_session),
+        session: AsyncSession = Depends(get_session),
     ):
-        if session.get(Spec, spec_id) is None:
+        if await session.get(Spec, spec_id) is None:
             raise _not_found("Spec")
         statement = (
             select(ParameterGroup, ParameterSection, ParameterDefinition, SpecParameter)
@@ -1407,11 +1413,12 @@ def create_app(
             statement = statement.where(ParameterGroup.id == group_id)
         if section_id is not None:
             statement = statement.where(ParameterSection.id == section_id)
-        subitems = session.execute(
+        subitems = await session.execute(
             select(ParameterSubitem)
             .where(ParameterSubitem.spec_id == spec_id)
             .order_by(ParameterSubitem.parameter_id, ParameterSubitem.position)
-        ).scalars()
+        )
+        subitems = subitems.scalars()
         subitems_by_parameter: dict[int, list] = {}
         for subitem in subitems:
             subitems_by_parameter.setdefault(subitem.parameter_id, []).append(
@@ -1423,7 +1430,8 @@ def create_app(
             )
         groups: dict[int, dict] = {}
         sections: dict[int, dict] = {}
-        for group, section, definition, value in session.execute(statement):
+        result = await session.execute(statement)
+        for group, section, definition, value in result:
             group_payload = groups.setdefault(
                 group.id, {"id": group.id, "name": group.name, "sections": []}
             )
@@ -1474,9 +1482,9 @@ def create_app(
             0, ge=0, description="Количество записей, которые нужно пропустить."
         ),
         include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
-        session: Session = Depends(get_session),
+        session: AsyncSession = Depends(get_session),
     ):
-        if session.get(Series, series_id) is None:
+        if await session.get(Series, series_id) is None:
             raise _not_found("Series")
         statement = select(SeriesPhoto).where(SeriesPhoto.series_id == series_id)
         if spec_id is not None:
@@ -1495,21 +1503,24 @@ def create_app(
                 color_match = color_match.where(SeriesPhotoColor.color_id == color_id)
             statement = statement.where(exists(color_match))
         statement = statement.order_by(SeriesPhoto.id)
-        rows, pagination = _page(session, statement, limit, offset, include_total)
+        rows, pagination = await _page(session, statement, limit, offset, include_total)
         photos_list = [row[0] for row in rows]
         ids = [photo.id for photo in photos_list]
         color_rows = (
-            session.execute(
-                select(SeriesPhotoColor, SeriesGalleryColor)
-                .join(
-                    SeriesGalleryColor,
-                    and_(
-                        SeriesGalleryColor.series_id == SeriesPhotoColor.series_id,
-                        SeriesGalleryColor.color_scope == SeriesPhotoColor.color_scope,
-                        SeriesGalleryColor.color_id == SeriesPhotoColor.color_id,
-                    ),
+            (
+                await session.execute(
+                    select(SeriesPhotoColor, SeriesGalleryColor)
+                    .join(
+                        SeriesGalleryColor,
+                        and_(
+                            SeriesGalleryColor.series_id == SeriesPhotoColor.series_id,
+                            SeriesGalleryColor.color_scope
+                            == SeriesPhotoColor.color_scope,
+                            SeriesGalleryColor.color_id == SeriesPhotoColor.color_id,
+                        ),
+                    )
+                    .where(SeriesPhotoColor.photo_id.in_(ids))
                 )
-                .where(SeriesPhotoColor.photo_id.in_(ids))
             ).all()
             if ids
             else []
@@ -1553,9 +1564,9 @@ def create_app(
         color_scope: str | None = Query(
             None, description="Область цвета: EXTERIOR или INTERIOR."
         ),
-        session: Session = Depends(get_session),
+        session: AsyncSession = Depends(get_session),
     ):
-        if session.get(Series, series_id) is None:
+        if await session.get(Series, series_id) is None:
             raise _not_found("Series")
         statement = select(SeriesGalleryColor).where(
             SeriesGalleryColor.series_id == series_id
@@ -1564,9 +1575,10 @@ def create_app(
             statement = statement.where(
                 func.lower(SeriesGalleryColor.color_scope) == color_scope.lower()
             )
-        values = session.execute(
+        values = await session.execute(
             statement.order_by(SeriesGalleryColor.color_scope, SeriesGalleryColor.name)
-        ).scalars()
+        )
+        values = values.scalars()
         return {
             "items": [
                 {
@@ -1582,12 +1594,16 @@ def create_app(
             ]
         }
 
-    def calculation_payload(session: Session, calculation: CustomsCalculation):
+    async def calculation_payload(
+        session: AsyncSession, calculation: CustomsCalculation
+    ):
         payments = list(
-            session.execute(
-                select(CustomsPaymentResult)
-                .where(CustomsPaymentResult.calculation_id == calculation.id)
-                .order_by(CustomsPaymentResult.payment_type)
+            (
+                await session.execute(
+                    select(CustomsPaymentResult)
+                    .where(CustomsPaymentResult.calculation_id == calculation.id)
+                    .order_by(CustomsPaymentResult.payment_type)
+                )
             ).scalars()
         )
         payment_types = {item.payment_type for item in payments}
@@ -1639,8 +1655,8 @@ def create_app(
             "is_total_complete": complete,
         }
 
-    def calculations_impl(
-        session: Session,
+    async def calculations_impl(
+        session: AsyncSession,
         limit: int,
         offset: int,
         include_total: bool,
@@ -1676,9 +1692,9 @@ def create_app(
         statement = statement.where(*filters).order_by(
             CustomsCalculation.calculation_date.desc(), CustomsCalculation.id.desc()
         )
-        rows, pagination = _page(session, statement, limit, offset, include_total)
+        rows, pagination = await _page(session, statement, limit, offset, include_total)
         return {
-            "items": [calculation_payload(session, row[0]) for row in rows],
+            "items": [await calculation_payload(session, row[0]) for row in rows],
             "pagination": pagination,
         }
 
@@ -1709,10 +1725,10 @@ def create_app(
             0, ge=0, description="Количество записей, которые нужно пропустить."
         ),
         include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
-        session: Session = Depends(get_session),
+        session: AsyncSession = Depends(get_session),
     ):
         _check_range(calculation_date_from, calculation_date_to, "calculation_date")
-        return calculations_impl(
+        return await calculations_impl(
             session,
             limit,
             offset,
@@ -1736,12 +1752,12 @@ def create_app(
         calculation_id: int = ApiPath(
             description="Идентификатор сценария таможенного расчёта."
         ),
-        session: Session = Depends(get_session),
+        session: AsyncSession = Depends(get_session),
     ):
-        item = session.get(CustomsCalculation, calculation_id)
+        item = await session.get(CustomsCalculation, calculation_id)
         if item is None:
             raise _not_found("Customs calculation")
-        return calculation_payload(session, item)
+        return await calculation_payload(session, item)
 
     @protected_router.get(
         "/api/v1/specs/{spec_id}/customs-calculations",
@@ -1762,11 +1778,11 @@ def create_app(
             0, ge=0, description="Количество записей, которые нужно пропустить."
         ),
         include_total: bool = Query(False, description=INCLUDE_TOTAL_DESCRIPTION),
-        session: Session = Depends(get_session),
+        session: AsyncSession = Depends(get_session),
     ):
-        if session.get(Spec, spec_id) is None:
+        if await session.get(Spec, spec_id) is None:
             raise _not_found("Spec")
-        return calculations_impl(
+        return await calculations_impl(
             session,
             limit,
             offset,
