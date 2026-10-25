@@ -423,7 +423,7 @@ make backfill-vehicle-attribute-inferences \
 `INFERRED_INPUTS_USED`. Эта же метка переносится в `warnings_json` таможенного
 расчёта и в его снимок входных данных.
 
-## Расчёт ввозной пошлины
+## Расчёт таможенных платежей
 
 Поддерживаемые категории транспорта, обязательные данные и границы будущего
 расширения на позиции 8702 и 8704 зафиксированы в
@@ -432,19 +432,19 @@ make backfill-vehicle-attribute-inferences \
 грузового отсека и специального назначения описаны в
 [`docs/indirect-vehicle-attributes-raw-audit.md`](docs/indirect-vehicle-attributes-raw-audit.md).
 
-Для нормализованных легковых автомобилей можно рассчитать ввозную пошлину при
-импорте из Китая в Россию для физического и юридического лица:
+Для нормализованных автомобилей можно рассчитать поддерживаемые таможенные
+платежи при импорте из Китая в Россию для физического и юридического лица:
 
 ```bash
-make calculate-import-duties
+make calculate-customs-payments
 ```
 
-Аргументы команды можно передать через `CALCULATE_IMPORT_DUTIES_ARGS`, например
+Аргументы команды можно передать через `CALCULATE_CUSTOMS_PAYMENTS_ARGS`, например
 для полного проверочного запуска без записи:
 
 ```bash
-make calculate-import-duties \
-  CALCULATE_IMPORT_DUTIES_ARGS="--date 2026-10-19 --dry-run"
+make calculate-customs-payments \
+  CALCULATE_CUSTOMS_PAYMENTS_ARGS="--date 2026-10-19 --dry-run"
 ```
 
 Команда сначала использует каталожную цену `guide_price_yuan`, а при её
@@ -464,7 +464,7 @@ make calculate-import-duties \
 Проверка небольшой выборки без записи в базу:
 
 ```bash
-DATABASE_URL="$DATABASE_URL" .venv/bin/python calculate_import_duties.py \
+DATABASE_URL="$DATABASE_URL" .venv/bin/python calculate_customs_payments.py \
   --date 2026-10-19 --limit 100 --dry-run
 ```
 

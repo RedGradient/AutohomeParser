@@ -77,7 +77,7 @@ CHASSIS_NAME_RE = re.compile(r"(?:底盘|\bшасси\b)", re.IGNORECASE)
 def parse_arguments() -> argparse.Namespace:
     """Разобрать параметры массового расчёта."""
     parser = argparse.ArgumentParser(
-        description="Рассчитать ввозную пошлину автомобилей Китай → Россия."
+        description="Рассчитать таможенные платежи для автомобилей Китай → Россия."
     )
     parser.add_argument(
         "--database-url",
@@ -781,8 +781,8 @@ def upsert_batch(engine, calculations: list[dict], payments: list[dict]) -> None
             )
 
 
-def main() -> int:
-    """Выполнить массовый расчёт пошлины."""
+def calculate_customs_payments() -> int:
+    """Выполнить массовый расчёт всех поддерживаемых таможенных платежей."""
     args = parse_arguments()
     if not args.database_url:
         raise SystemExit("Не задан DATABASE_URL или --database-url")
@@ -930,4 +930,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(calculate_customs_payments())

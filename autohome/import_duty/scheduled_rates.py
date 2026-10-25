@@ -41,7 +41,7 @@ def run_customs_recalculation(
     """Запустить существующую утилиту расчёта с уже полученными курсами."""
     command = [
         sys.executable,
-        str(PROJECT_ROOT / "calculate_import_duties.py"),
+        str(PROJECT_ROOT / "calculate_customs_payments.py"),
         "--database-url",
         database_url,
         "--date",

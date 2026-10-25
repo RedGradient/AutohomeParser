@@ -17,7 +17,7 @@ AUDIT_VEHICLE_CLASSIFICATIONS_ARGS ?=
 AUDIT_INDIRECT_VEHICLE_ATTRIBUTES_ARGS ?=
 AUDIT_RECYCLING_FEE_COMMERCIAL_CATEGORIES_ARGS ?=
 BACKFILL_VEHICLE_ATTRIBUTE_INFERENCES_ARGS ?=
-CALCULATE_IMPORT_DUTIES_ARGS ?=
+CALCULATE_CUSTOMS_PAYMENTS_ARGS ?=
 API_HOST ?= 0.0.0.0
 API_PORT ?= 8000
 API_USERNAME ?= autohome
@@ -36,7 +36,7 @@ ETH_TABLE := 10102
 WIFI_PRIORITY := 10101
 ETH_PRIORITY := 10102
 
-.PHONY: help lint lint-fix pre-commit-install network-up network-down network-status network-test postgres-up database-migrate api-up api-logs celery-logs parser-run parser-resume parser-logs api-run database-reset parameters-reset build-modifications normalize-vehicle-attributes audit-vehicle-classifications audit-indirect-vehicle-attributes audit-recycling-fee-commercial-categories backfill-vehicle-attribute-inferences translate-db calculate-import-duties docker-down
+.PHONY: help lint lint-fix pre-commit-install network-up network-down network-status network-test postgres-up database-migrate api-up api-logs celery-logs parser-run parser-resume parser-logs api-run database-reset parameters-reset build-modifications normalize-vehicle-attributes audit-vehicle-classifications audit-indirect-vehicle-attributes audit-recycling-fee-commercial-categories backfill-vehicle-attribute-inferences translate-db calculate-customs-payments docker-down
 
 help:
 	@echo "Доступные команды:"
@@ -64,7 +64,7 @@ help:
 	@echo "  make audit-recycling-fee-commercial-categories — проверить готовность M2/M3/N1/N2/N3"
 	@echo "  make backfill-vehicle-attribute-inferences — dry-run косвенных признаков"
 	@echo "  make translate-db    — перевести уже сохранённые данные"
-	@echo "  make calculate-import-duties — рассчитать ввозную пошлину"
+	@echo "  make calculate-customs-payments — рассчитать таможенные платежи"
 	@echo "  make docker-down     — остановить контейнеры"
 	@echo
 	@echo "Интерфейсы можно переопределить:"
@@ -217,10 +217,10 @@ translate-db: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
 		.venv/bin/python translate_database.py
 
-calculate-import-duties: postgres-up
+calculate-customs-payments: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
-		.venv/bin/python calculate_import_duties.py \
-		$(CALCULATE_IMPORT_DUTIES_ARGS)
+		.venv/bin/python calculate_customs_payments.py \
+		$(CALCULATE_CUSTOMS_PAYMENTS_ARGS)
 
 docker-down:
 	@docker compose -f '$(COMPOSE_FILE)' down

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from autohome.import_duty import ExchangeRate, ImporterType
 from autohome.import_duty.rates import RULES_VERSION
-from calculate_import_duties import classify_database_row, make_rows
+from calculate_customs_payments import classify_database_row, make_rows
 
 CALCULATION_DATE = date(2026, 10, 19)
 RATES = {
