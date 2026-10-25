@@ -27,6 +27,14 @@ class OpenApiSchemaTests(unittest.TestCase):
             schema["paths"]["/api/v1/customs-calculations"]["get"]["summary"],
             "Получить актуальные таможенные расчёты",
         )
+        customs_parameters = {
+            item["name"]: item
+            for item in schema["paths"]["/api/v1/customs-calculations"]["get"][
+                "parameters"
+            ]
+        }
+        self.assertIn("CALCULATED", customs_parameters["status"]["description"])
+        self.assertIn("MANUAL_REVIEW", customs_parameters["status"]["description"])
         calculation_schema = schema["components"]["schemas"][
             "CustomsCalculationResponse"
         ]

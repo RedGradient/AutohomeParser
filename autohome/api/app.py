@@ -1711,7 +1711,13 @@ def create_app(
         importer_type: str | None = Query(
             None, description="Тип импортёра: INDIVIDUAL или LEGAL_ENTITY."
         ),
-        status: str | None = Query(None, description="Итоговый статус расчёта."),
+        status: str | None = Query(
+            None,
+            description=(
+                "Итоговый статус расчёта: CALCULATED, NOT_APPLICABLE, "
+                "MISSING_DATA, UNSUPPORTED или MANUAL_REVIEW."
+            ),
+        ),
         calculation_date_from: date | None = Query(
             None, description="Начальная дата расчёта включительно."
         ),
