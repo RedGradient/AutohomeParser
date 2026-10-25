@@ -33,11 +33,11 @@ def calculation_row() -> dict:
     }
 
 
-def payment_rows() -> list[dict]:
+def payment_rows(calculation_id: int = 101) -> list[dict]:
     """Сформировать связанные результаты платежей для теста."""
     return [
         {
-            "calculation_id": 101,
+            "calculation_id": calculation_id,
             "payment_type": "EXCISE",
             "amount_rub": Decimal("9600.00"),
             "status": "CALCULATED",
@@ -45,7 +45,7 @@ def payment_rows() -> list[dict]:
             "details_json": {"rules_version": "excise-v1"},
         },
         {
-            "calculation_id": 101,
+            "calculation_id": calculation_id,
             "payment_type": "VAT",
             "amount_rub": Decimal("280412.00"),
             "status": "CALCULATED",
@@ -111,10 +111,17 @@ class CustomsRecalculationTests(unittest.TestCase):
                 [changed],
                 deepcopy(payments),
                 mode="stale",
-                dry_run=True,
+                dry_run=False,
             ),
             1,
         )
+        with self.engine.connect() as connection:
+            stored_rate = connection.scalar(select(CustomsCalculation.cny_rate_rub))
+            count = connection.scalar(
+                select(func.count()).select_from(CustomsCalculation)
+            )
+        self.assertEqual(stored_rate, Decimal("111.000000"))
+        self.assertEqual(count, 1)
 
     def test_stale_mode_selects_changed_price_or_vehicle_data(self):
         calculation = calculation_row()
@@ -132,6 +139,13 @@ class CustomsRecalculationTests(unittest.TestCase):
             ("input_snapshot_json", {"engine_power_kw": "120"}),
         ):
             with self.subTest(field=field):
+                process_batch(
+                    self.engine,
+                    [deepcopy(calculation)],
+                    deepcopy(payments),
+                    mode="full",
+                    dry_run=False,
+                )
                 changed = deepcopy(calculation)
                 changed[field] = value
                 self.assertEqual(
@@ -140,10 +154,15 @@ class CustomsRecalculationTests(unittest.TestCase):
                         [changed],
                         deepcopy(payments),
                         mode="stale",
-                        dry_run=True,
+                        dry_run=False,
                     ),
                     1,
                 )
+                with self.engine.connect() as connection:
+                    stored_value = connection.scalar(
+                        select(getattr(CustomsCalculation, field))
+                    )
+                self.assertEqual(stored_value, value)
 
     def test_stale_mode_selects_changed_payment_rule(self):
         calculation = calculation_row()
@@ -164,10 +183,17 @@ class CustomsRecalculationTests(unittest.TestCase):
                 [deepcopy(calculation)],
                 changed_payments,
                 mode="stale",
-                dry_run=True,
+                dry_run=False,
             ),
             1,
         )
+        with self.engine.connect() as connection:
+            stored_details = connection.scalar(
+                select(CustomsPaymentResult.details_json).where(
+                    CustomsPaymentResult.payment_type == "EXCISE"
+                )
+            )
+        self.assertEqual(stored_details["rules_version"], "excise-v2")
 
     def test_stale_mode_restores_missing_payment(self):
         calculation = calculation_row()
@@ -227,6 +253,33 @@ class CustomsRecalculationTests(unittest.TestCase):
             )
         self.assertEqual(stored_date, changed["calculation_date"])
         self.assertEqual(count, 1)
+
+    def test_stale_mode_creates_both_scenarios_for_new_spec(self):
+        individual = calculation_row()
+        individual["id"] = 201
+        individual["spec_id"] = 2001
+        individual["importer_type"] = "INDIVIDUAL"
+        legal_entity = deepcopy(individual)
+        legal_entity["id"] = 202
+        legal_entity["importer_type"] = "LEGAL_ENTITY"
+        payments = payment_rows(201) + payment_rows(202)
+
+        selected = process_batch(
+            self.engine,
+            [individual, legal_entity],
+            payments,
+            mode="stale",
+            dry_run=False,
+        )
+
+        with self.engine.connect() as connection:
+            importer_types = connection.scalars(
+                select(CustomsCalculation.importer_type).order_by(
+                    CustomsCalculation.importer_type
+                )
+            ).all()
+        self.assertEqual(selected, 2)
+        self.assertEqual(importer_types, ["INDIVIDUAL", "LEGAL_ENTITY"])
 
     def test_sqlite_run_connection_does_not_require_advisory_lock(self):
         with calculation_run_connection(self.engine) as connection:
