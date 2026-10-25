@@ -8,6 +8,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Security
 from fastapi import Path as ApiPath
 from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import and_, case, exists, func, or_, select
@@ -441,6 +442,10 @@ def create_app(
                 "model": ErrorResponse,
                 "description": "Запрошенная сущность не найдена.",
             },
+            422: {
+                "model": ErrorResponse,
+                "description": "Параметры или тело запроса не прошли валидацию.",
+            },
         },
     )
     application.state.database = database
@@ -474,6 +479,25 @@ def create_app(
             status_code=exc.status_code,
             content=jsonable_encoder(payload),
             headers=exc.headers,
+        )
+
+    @application.exception_handler(RequestValidationError)
+    async def validation_exception_handler(_, exc: RequestValidationError):
+        errors = [
+            {
+                "location": list(error["loc"]),
+                "message": error["msg"],
+                "type": error["type"],
+            }
+            for error in exc.errors()
+        ]
+        return JSONResponse(
+            status_code=422,
+            content={
+                "code": "VALIDATION_ERROR",
+                "message": "Request validation failed",
+                "details": {"errors": errors},
+            },
         )
 
     @application.post(

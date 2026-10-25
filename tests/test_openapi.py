@@ -63,6 +63,12 @@ class OpenApiSchemaTests(unittest.TestCase):
         )
         operation = schema["paths"]["/api/v1/specs"]["get"]
         self.assertEqual(
+            operation["responses"]["422"]["content"]["application/json"]["schema"][
+                "$ref"
+            ],
+            "#/components/schemas/ErrorResponse",
+        )
+        self.assertEqual(
             operation["responses"]["200"]["content"]["application/json"]["schema"][
                 "$ref"
             ],

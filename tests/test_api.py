@@ -478,6 +478,24 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["code"], "INVALID_RANGE")
 
+    async def test_validation_errors_use_public_error_schema(self):
+        cases = (
+            ("/api/v1/specs", {"limit": 0}, "query"),
+            ("/api/v1/series", {"state": "INVALID"}, "query"),
+            ("/api/v1/specs/not-an-integer", None, "path"),
+        )
+        for path, params, expected_location in cases:
+            with self.subTest(path=path, params=params):
+                response = await self.client.get(path, params=params)
+                self.assertEqual(response.status_code, 422)
+                payload = response.json()
+                self.assertEqual(payload["code"], "VALIDATION_ERROR")
+                self.assertEqual(payload["message"], "Request validation failed")
+                self.assertTrue(payload["details"]["errors"])
+                error = payload["details"]["errors"][0]
+                self.assertEqual(error["location"][0], expected_location)
+                self.assertEqual(set(error), {"location", "message", "type"})
+
     async def test_photo_color_scope_filter_maps_public_enum_to_database_value(self):
         response = await self.client.get(
             "/api/v1/series/10/photos", params={"color_scope": "EXTERIOR"}
