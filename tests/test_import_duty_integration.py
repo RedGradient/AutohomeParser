@@ -7,7 +7,11 @@ from types import SimpleNamespace
 
 from autohome.import_duty import ExchangeRate, ImporterType
 from autohome.import_duty.rates import RULES_VERSION
-from calculate_customs_payments import classify_database_row, make_rows
+from calculate_customs_payments import (
+    classify_database_row,
+    make_rows,
+    stable_calculation_id,
+)
 
 CALCULATION_DATE = date(2026, 10, 19)
 RATES = {
@@ -64,6 +68,18 @@ def database_row(**overrides):
 
 
 class ImportDutyClassificationIntegrationTests(unittest.TestCase):
+    def test_calculation_id_identifies_spec_and_importer_only(self):
+        individual_id = stable_calculation_id(101, ImporterType.INDIVIDUAL)
+
+        self.assertEqual(
+            individual_id,
+            stable_calculation_id(101, ImporterType.INDIVIDUAL),
+        )
+        self.assertNotEqual(
+            individual_id,
+            stable_calculation_id(101, ImporterType.LEGAL_ENTITY),
+        )
+
     def test_personal_use_marks_vat_not_applicable(self):
         _, payments = make_rows(
             database_row(),

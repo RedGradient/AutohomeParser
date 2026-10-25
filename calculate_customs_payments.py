@@ -149,19 +149,9 @@ def resolve_rates(args: argparse.Namespace) -> dict[str, ExchangeRate]:
 def stable_calculation_id(
     spec_id: int,
     importer_type: ImporterType,
-    calculation_date: date,
-    price_source: str,
 ) -> int:
-    """Получить воспроизводимый положительный BIGINT для сценария."""
-    value = "|".join(
-        (
-            str(spec_id),
-            importer_type.value,
-            calculation_date.isoformat(),
-            RULES_VERSION,
-            price_source,
-        )
-    )
+    """Получить постоянный BIGINT для актуального сценария комплектации."""
+    value = "|".join((str(spec_id), importer_type.value))
     return int.from_bytes(blake2b(value.encode(), digest_size=8).digest(), "big") >> 1
 
 
@@ -454,6 +444,7 @@ def make_rows(
     rates,
     classification=None,
     personal_use: bool | None = None,
+    calculation_id: int | None = None,
 ):
     """Рассчитать один сценарий и сериализовать его строки платежей."""
     if classification is None:
@@ -517,9 +508,8 @@ def make_rows(
         result,
         excise_result,
     )
-    calculation_id = stable_calculation_id(
-        row.id, importer, calculation_date, price_source
-    )
+    if calculation_id is None:
+        calculation_id = stable_calculation_id(row.id, importer)
     now = datetime.now(UTC)
     inference_flags = getattr(row, "inference_flags_json", None) or []
     inference_details = getattr(row, "inference_details_json", None) or {}
@@ -867,6 +857,20 @@ def calculate_customs_payments() -> int:
     processed_specs = 0
     try:
         with engine.connect() as connection:
+            existing_calculation_ids = {
+                (spec_id, importer_type): calculation_id
+                for calculation_id, spec_id, importer_type in connection.execute(
+                    select(
+                        CustomsCalculation.id,
+                        CustomsCalculation.spec_id,
+                        CustomsCalculation.importer_type,
+                    ).where(
+                        CustomsCalculation.importer_type.in_(
+                            importer.value for importer in importers
+                        )
+                    )
+                )
+            }
             rows = connection.execution_options(stream_results=True).execute(query)
             for row in rows:
                 processed_specs += 1
@@ -885,6 +889,9 @@ def calculate_customs_payments() -> int:
                             args.individual_personal_use
                             if importer == ImporterType.INDIVIDUAL
                             else False
+                        ),
+                        calculation_id=existing_calculation_ids.get(
+                            (row.id, importer.value)
                         ),
                     )
                     calculations.append(calculation)

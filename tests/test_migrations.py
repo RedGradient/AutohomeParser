@@ -6,6 +6,7 @@ from pathlib import Path
 
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import IntegrityError
 
 from alembic import command
 
@@ -80,7 +81,7 @@ class AlembicMigrationTests(unittest.TestCase):
                 revision = connection.scalar(
                     text("SELECT version_num FROM alembic_version")
                 )
-            self.assertEqual(revision, "0005_name_trigram_indexes")
+            self.assertEqual(revision, "0006_current_customs")
         finally:
             engine.dispose()
 
@@ -164,3 +165,71 @@ class AlembicMigrationTests(unittest.TestCase):
         command.upgrade(self.config, "head")
 
         command.check(self.config)
+
+    def test_customs_migration_keeps_only_latest_scenario(self):
+        command.upgrade(self.config, "0005_name_trigram_indexes")
+        engine = create_engine(self.database_url)
+        try:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "INSERT INTO specs (id, name, raw_json) "
+                        "VALUES (501, 'Test spec', '{}')"
+                    )
+                )
+                for calculation_id, calculation_date in (
+                    (1001, "2026-10-24"),
+                    (1002, "2026-10-25"),
+                ):
+                    connection.execute(
+                        text(
+                            "INSERT INTO customs_calculations "
+                            "(id, spec_id, importer_type, calculation_date, "
+                            "rules_version, price_source, classification_status, "
+                            "status, input_snapshot_json, warnings_json) VALUES "
+                            "(:id, 501, 'INDIVIDUAL', :date, 'rules', 'GUIDE', "
+                            "'CLASSIFIED', 'CALCULATED', '{}', '[]')"
+                        ),
+                        {"id": calculation_id, "date": calculation_date},
+                    )
+                    connection.execute(
+                        text(
+                            "INSERT INTO customs_payment_results "
+                            "(calculation_id, payment_type, status, details_json) "
+                            "VALUES (:id, 'IMPORT_DUTY', 'CALCULATED', '{}')"
+                        ),
+                        {"id": calculation_id},
+                    )
+        finally:
+            engine.dispose()
+
+        command.upgrade(self.config, "head")
+
+        engine = create_engine(self.database_url)
+        try:
+            with engine.connect() as connection:
+                calculation_ids = connection.scalars(
+                    text("SELECT id FROM customs_calculations ORDER BY id")
+                ).all()
+                payment_ids = connection.scalars(
+                    text(
+                        "SELECT calculation_id FROM customs_payment_results "
+                        "ORDER BY calculation_id"
+                    )
+                ).all()
+            self.assertEqual(calculation_ids, [1002])
+            self.assertEqual(payment_ids, [1002])
+
+            with self.assertRaises(IntegrityError), engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "INSERT INTO customs_calculations "
+                        "(id, spec_id, importer_type, calculation_date, "
+                        "rules_version, price_source, classification_status, "
+                        "status, input_snapshot_json, warnings_json) VALUES "
+                        "(1003, 501, 'INDIVIDUAL', '2026-10-26', 'rules', "
+                        "'GUIDE', 'CLASSIFIED', 'CALCULATED', '{}', '[]')"
+                    )
+                )
+        finally:
+            engine.dispose()

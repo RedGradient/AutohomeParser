@@ -397,9 +397,7 @@ class CustomsCalculation(Base):
         UniqueConstraint(
             "spec_id",
             "importer_type",
-            "calculation_date",
-            "rules_version",
-            "price_source",
+            name="uq_customs_calculations_spec_importer",
         ),
         Index(
             "ix_customs_calculations_calculation_date_id",
