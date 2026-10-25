@@ -1392,7 +1392,13 @@ class CarsSpider(scrapy.Spider):
             if retry is not None:
                 yield retry
                 return
-            raise
+            yield from self._config_failure_outputs(
+                requested_spec_id,
+                series_id,
+                attempts,
+                str(error),
+            )
+            return
 
         group_positions: dict[str, int] = {}
         section_positions: dict[str, int] = {}
@@ -1658,27 +1664,39 @@ class CarsSpider(scrapy.Spider):
         self.processed_spec_ids.update(returned_ids)
         yield from self._next_config_outputs(series_id)
 
+    def _config_failure_outputs(
+        self,
+        spec_id: int,
+        series_id: int,
+        attempts: int,
+        error: str,
+    ):
+        """Записать ошибку конфигурации и перейти к следующей комплектации."""
+        self.logger.error(
+            "Configuration request failed for spec %d: %s", spec_id, error
+        )
+        yield self._config_task_item(
+            spec_id,
+            series_id,
+            "failed",
+            attempts,
+            last_error=error,
+        )
+        self.processed_spec_ids.add(spec_id)
+        yield from self._next_config_outputs(series_id)
+
     def config_error(self, failure):
         """Записать ошибку конфигурации и продолжить обработку серии."""
         request = failure.request
         series_id = request.cb_kwargs["series_id"]
         requested_spec_id = request.cb_kwargs["requested_spec_id"]
         attempts = request.cb_kwargs["attempts"]
-        self.logger.error(
-            "Configuration request failed for spec %d: %s",
-            requested_spec_id,
-            failure.getErrorMessage(),
-        )
-        yield self._config_task_item(
+        yield from self._config_failure_outputs(
             requested_spec_id,
             series_id,
-            "failed",
             attempts,
-            last_error=failure.getErrorMessage(),
+            failure.getErrorMessage(),
         )
-        # Продолжаем серию после исчерпания стандартных повторов Scrapy.
-        self.processed_spec_ids.add(requested_spec_id)
-        yield from self._next_config_outputs(series_id)
 
     @staticmethod
     def _spec_has_price(obj: dict) -> bool:
