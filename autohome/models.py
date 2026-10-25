@@ -390,7 +390,7 @@ class Modification(Base):
 
 
 class CustomsCalculation(Base):
-    """Один воспроизводимый сценарий расчёта таможенных платежей."""
+    """Актуальный воспроизводимый расчёт для комплектации и типа импортёра."""
 
     __tablename__ = "customs_calculations"
     __table_args__ = (

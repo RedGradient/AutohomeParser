@@ -401,14 +401,16 @@ class CustomsPaymentResponse(ApiSchema):
 
 
 class CustomsCalculationResponse(ApiSchema):
-    """Сохранённый сценарий расчёта таможенных платежей."""
+    """Актуальный сценарий расчёта таможенных платежей."""
 
     id: int = Field(description="Идентификатор таможенного расчёта.")
     spec_id: int = Field(description="Идентификатор комплектации.")
     importer_type: str = Field(
         description="Тип импортёра: INDIVIDUAL или LEGAL_ENTITY."
     )
-    calculation_date: date = Field(description="Дата, на которую выполнен расчёт.")
+    calculation_date: date = Field(
+        description="Дата, на которую выполнен актуальный расчёт."
+    )
     rules_version: str = Field(description="Версия нормативных правил.")
     price_source: PriceSource = Field(description="Источник цены автомобиля.")
     vehicle_price_cny: Money | None = Field(description="Цена автомобиля в CNY.")

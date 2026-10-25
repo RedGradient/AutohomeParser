@@ -1702,7 +1702,7 @@ def create_app(
         "/api/v1/customs-calculations",
         response_model=CustomsCalculationPage,
         tags=["Customs"],
-        summary="Получить таможенные расчёты",
+        summary="Получить актуальные таможенные расчёты",
     )
     async def calculations(
         spec_id: int | None = Query(None, description="Идентификатор комплектации."),
@@ -1746,7 +1746,7 @@ def create_app(
         "/api/v1/customs-calculations/{calculation_id}",
         response_model=CustomsCalculationResponse,
         tags=["Customs"],
-        summary="Получить таможенный расчёт",
+        summary="Получить актуальный таможенный расчёт",
     )
     async def calculation_detail(
         calculation_id: int = ApiPath(
@@ -1763,7 +1763,7 @@ def create_app(
         "/api/v1/specs/{spec_id}/customs-calculations",
         response_model=CustomsCalculationPage,
         tags=["Customs"],
-        summary="Получить таможенные расчёты комплектации",
+        summary="Получить актуальные таможенные расчёты комплектации",
     )
     async def spec_calculations(
         spec_id: int = ApiPath(description="Идентификатор комплектации."),

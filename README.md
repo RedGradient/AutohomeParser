@@ -315,7 +315,7 @@ make network-down
 - `series_gallery_colors` — цвета кузова и салона в галереях серий;
 - `series_photos` — фотографии серий, категории и прямые URL изображений;
 - `series_photo_colors` — связь фотографий с цветами кузова и салона;
-- `customs_calculations` — входной снимок и статус сценария расчёта;
+- `customs_calculations` — актуальный расчёт для комплектации и типа импортёра;
 - `customs_payment_results` — суммы и детализация отдельных платежей.
 
 Пара `(spec_id, parameter_id)` является первичным ключом `spec_parameters`.
@@ -438,6 +438,20 @@ make backfill-vehicle-attribute-inferences \
 ```bash
 make calculate-customs-payments
 ```
+
+По умолчанию команда полностью обновляет текущие расчёты. Режим
+`--mode stale` записывает только отсутствующие или изменившиеся сценарии:
+
+```bash
+make calculate-customs-payments \
+  CALCULATE_CUSTOMS_PAYMENTS_ARGS="--mode stale"
+```
+
+Ежедневная задача Celery выполняет полный пересчёт после изменения курса ЦБ и
+инкрементальный — при неизменном курсе. После успешного завершения
+многопроцессного парсера инкрементальный пересчёт запускается автоматически.
+Его можно отключить аргументом `--skip-customs-recalculation` утилиты
+`run_multi.py`.
 
 Аргументы команды можно передать через `CALCULATE_CUSTOMS_PAYMENTS_ARGS`, например
 для полного проверочного запуска без записи:
