@@ -34,13 +34,13 @@ class ScheduledCbrRatesTests(unittest.TestCase):
             engine.dispose()
         self.today = date(2026, 10, 22)
         self.yesterday = date(2026, 10, 21)
-        self.calls: list[tuple[date, dict[str, ExchangeRate]]] = []
+        self.calls: list[tuple[date, dict[str, ExchangeRate], str]] = []
 
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def recalculator(self, _database_url, calculation_date, current_rates):
-        self.calls.append((calculation_date, current_rates))
+    def recalculator(self, _database_url, calculation_date, current_rates, mode):
+        self.calls.append((calculation_date, current_rates, mode))
 
     def test_first_run_saves_rates_and_starts_recalculation(self):
         values = {
@@ -57,6 +57,7 @@ class ScheduledCbrRatesTests(unittest.TestCase):
 
         self.assertTrue(result["changed"])
         self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][2], "full")
         engine = create_engine(self.database_url)
         try:
             with Session(engine) as session:
@@ -69,7 +70,7 @@ class ScheduledCbrRatesTests(unittest.TestCase):
         finally:
             engine.dispose()
 
-    def test_unchanged_rates_do_not_start_second_recalculation(self):
+    def test_unchanged_rates_start_stale_recalculation(self):
         values = {
             self.yesterday: rates(self.yesterday, "110.00", "91.00"),
             self.today: rates(self.today, "110.00", "91.00"),
@@ -82,7 +83,9 @@ class ScheduledCbrRatesTests(unittest.TestCase):
                 recalculator=self.recalculator,
             )
 
-        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(self.calls[0][2], "full")
+        self.assertEqual(self.calls[1][2], "stale")
 
     def test_changed_rate_is_saved_and_starts_recalculation(self):
         baseline = {
@@ -109,6 +112,7 @@ class ScheduledCbrRatesTests(unittest.TestCase):
 
         self.assertTrue(result["changed"])
         self.assertEqual(len(self.calls), 2)
+        self.assertEqual(self.calls[1][2], "full")
         engine = create_engine(self.database_url)
         try:
             with Session(engine) as session:

@@ -18,7 +18,7 @@ from autohome.import_duty.types import ExchangeRate
 from autohome.models import CbrExchangeRate
 
 RateFetcher = Callable[[date], dict[str, ExchangeRate]]
-Recalculator = Callable[[str, date, dict[str, ExchangeRate]], None]
+Recalculator = Callable[[str, date, dict[str, ExchangeRate], str], None]
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -37,6 +37,7 @@ def run_customs_recalculation(
     database_url: str,
     calculation_date: date,
     rates: dict[str, ExchangeRate],
+    mode: str,
 ) -> None:
     """Запустить существующую утилиту расчёта с уже полученными курсами."""
     command = [
@@ -54,6 +55,8 @@ def run_customs_recalculation(
         str(rates["EUR"].rate_rub),
         "--eur-nominal",
         str(rates["EUR"].nominal),
+        "--mode",
+        mode,
     ]
     subprocess.run(command, check=True, env=os.environ.copy())
 
@@ -82,8 +85,9 @@ def synchronize_cbr_rates(
                 for currency in ("CNY", "EUR")
             )
             changed = rates_differ(current, previous) or stored_is_stale
+        recalculation_mode = "full" if changed else "stale"
+        recalculator(database_url, calculation_date, current, recalculation_mode)
         if changed:
-            recalculator(database_url, calculation_date, current)
             with Session(engine) as session:
                 for currency in ("CNY", "EUR"):
                     rate = current[currency]
@@ -101,6 +105,7 @@ def synchronize_cbr_rates(
 
     return {
         "changed": changed,
+        "recalculation_mode": recalculation_mode,
         "calculation_date": calculation_date.isoformat(),
         "current": {
             currency: {

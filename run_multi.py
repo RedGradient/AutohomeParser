@@ -111,6 +111,11 @@ def parse_arguments() -> argparse.Namespace:
         default=Path("data/tree_menu.json"),
         help="Общий файл дерева каталога, подготовленный мастер-процессом.",
     )
+    parser.add_argument(
+        "--skip-customs-recalculation",
+        action="store_true",
+        help="Не досчитывать отсутствующие таможенные платежи после парсинга.",
+    )
     return parser.parse_args()
 
 
@@ -388,6 +393,22 @@ def wait_for_graceful_shutdown(
     return True
 
 
+def run_stale_customs_recalculation(database_url: str) -> None:
+    """Досчитать отсутствующие или изменившиеся таможенные платежи."""
+    environment = os.environ.copy()
+    environment["DATABASE_URL"] = database_url
+    subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).resolve().parent / "calculate_customs_payments.py"),
+            "--mode",
+            "stale",
+        ],
+        check=True,
+        env=environment,
+    )
+
+
 def main() -> int:
     """Проверить интерфейсы, запустить worker-процессы и дождаться завершения."""
     args = parse_arguments()
@@ -518,6 +539,18 @@ def main() -> int:
                 file=sys.stderr,
             )
         return 1
+    if not args.skip_customs_recalculation:
+        for database_url in sorted(unique_database_urls):
+            try:
+                run_stale_customs_recalculation(database_url)
+            except subprocess.CalledProcessError as error:
+                safe_url = database_display_name(database_url)
+                print(
+                    f"Не удалось досчитать таможенные платежи в {safe_url}: "
+                    f"код {error.returncode}",
+                    file=sys.stderr,
+                )
+                return 1
     return 0
 
 

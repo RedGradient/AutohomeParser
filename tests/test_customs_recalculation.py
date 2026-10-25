@@ -80,6 +80,7 @@ class CustomsRecalculationTests(unittest.TestCase):
         repeated = deepcopy(calculation)
         repeated["calculation_date"] += timedelta(days=1)
         repeated["calculated_at"] += timedelta(days=1)
+        repeated["cny_rate_date"] += timedelta(days=1)
         self.assertEqual(
             process_batch(
                 self.engine,

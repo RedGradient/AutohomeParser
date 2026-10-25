@@ -75,7 +75,14 @@ CHASSIS_NAME_RE = re.compile(r"(?:底盘|\bшасси\b)", re.IGNORECASE)
 CALCULATION_COMPARE_FIELDS = tuple(
     column.name
     for column in CustomsCalculation.__table__.columns
-    if column.name not in {"id", "calculation_date", "calculated_at"}
+    if column.name
+    not in {
+        "id",
+        "calculation_date",
+        "calculated_at",
+        "cny_rate_date",
+        "eur_rate_date",
+    }
 )
 PAYMENT_COMPARE_FIELDS = tuple(
     column.name
