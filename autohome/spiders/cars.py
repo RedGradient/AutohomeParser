@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import scrapy
+from scrapy.downloadermiddlewares.retry import get_retry_request
 from scrapy.http import TextResponse
 from sqlalchemy import create_engine, select
 
@@ -156,10 +157,16 @@ def walk_objects(value: Any) -> Iterable[dict]:
             yield from walk_objects(child)
 
 
+class InvalidApiResponse(ValueError):
+    """Ответ API, который нельзя безопасно обработать как JSON-объект."""
+
+
 class CarsSpider(scrapy.Spider):
     """Собирать каталог, параметры, продажи и фотогалереи Autohome."""
 
     name = "cars"
+    invalid_response_retry_times = 3
+    invalid_response_retry_delay = 2.0
     allowed_domains = [
         "www.autohome.com.cn",
         "car.app.autohome.com.cn",
@@ -1183,9 +1190,51 @@ class CarsSpider(scrapy.Spider):
             meta=self._network_meta(),
         )
 
+    @staticmethod
+    def _json_object(response, endpoint: str) -> dict:
+        """Прочитать JSON-объект или описать полученный невалидный ответ."""
+        try:
+            payload = response.json()
+        except (TypeError, ValueError) as error:
+            content_type = response.headers.get("Content-Type", b"").decode(
+                errors="replace"
+            )
+            preview = " ".join(response.text[:160].split())
+            raise InvalidApiResponse(
+                f"{endpoint} вернул невалидный JSON "
+                f"(Content-Type={content_type or 'не указан'}, начало={preview!r})"
+            ) from error
+        if not isinstance(payload, dict):
+            raise InvalidApiResponse(
+                f"{endpoint} вернул JSON типа {type(payload).__name__}, ожидался object"
+            )
+        return payload
+
+    def _invalid_response_retry(self, response, error: InvalidApiResponse):
+        """Создать ограниченный повтор запроса после невалидного ответа API."""
+        request = get_retry_request(
+            response.request,
+            spider=self,
+            reason=error,
+            max_retry_times=self.invalid_response_retry_times,
+            stats_base_key="invalid_response_retry",
+        )
+        if request is not None:
+            request.meta["retry_delay"] = self.invalid_response_retry_delay
+        return request
+
     def parse_spec_list(self, response, series_id: int):
         """Сохранить комплектации серии и запустить загрузку их параметров."""
-        payload = response.json()
+        try:
+            payload = self._json_object(
+                response, f"Список комплектаций series_id={series_id}"
+            )
+        except InvalidApiResponse as error:
+            retry = self._invalid_response_retry(response, error)
+            if retry is not None:
+                yield retry
+                return
+            raise
         specs: dict[int, dict] = {}
         for obj in walk_objects(payload.get("result", payload)):
             spec_id = as_int(first(obj, "specid", "specId"))
@@ -1324,17 +1373,26 @@ class CarsSpider(scrapy.Spider):
         attempts: int,
     ):
         """Разобрать определения и значения параметров комплектаций."""
-        payload = response.json()
-        result = payload.get("result")
-        if not isinstance(result, dict):
-            raise ValueError(
-                f"API конфигурации spec_id={requested_spec_id} не вернул result"
+        try:
+            payload = self._json_object(
+                response, f"Конфигурация spec_id={requested_spec_id}"
             )
-        datalist = result.get("datalist")
-        if not isinstance(datalist, list):
-            raise ValueError(
-                f"API конфигурации spec_id={requested_spec_id} не вернул datalist"
-            )
+            result = payload.get("result")
+            if not isinstance(result, dict):
+                raise InvalidApiResponse(
+                    f"API конфигурации spec_id={requested_spec_id} не вернул result"
+                )
+            datalist = result.get("datalist")
+            if not isinstance(datalist, list):
+                raise InvalidApiResponse(
+                    f"API конфигурации spec_id={requested_spec_id} не вернул datalist"
+                )
+        except InvalidApiResponse as error:
+            retry = self._invalid_response_retry(response, error)
+            if retry is not None:
+                yield retry
+                return
+            raise
 
         group_positions: dict[str, int] = {}
         section_positions: dict[str, int] = {}

@@ -42,6 +42,11 @@ RETRY_TIMES = 5
 # HTTP-коды, при которых запрос необходимо повторить.
 RETRY_HTTP_CODES = [408, 425, 429, 500, 502, 503, 504]
 
+# Задерживать повторы ответов, которые имеют HTTP 200, но не содержат ожидаемый JSON.
+DOWNLOADER_MIDDLEWARES = {
+    "autohome.middlewares.DelayedRetryMiddleware": 90,
+}
+
 # HTTP-заголовки, автоматически добавляемые ко всем запросам паука.
 DEFAULT_REQUEST_HEADERS = {
     # Запрашивать JSON, но разрешать серверу вернуть другой тип содержимого.
