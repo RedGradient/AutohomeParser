@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from sqlalchemy import create_engine, insert
+from sqlalchemy import insert
 
 from audit_indirect_vehicle_attributes import audit_inferences
 from autohome.models import (
@@ -13,11 +13,13 @@ from autohome.models import (
     SpecParameter,
     SpecVehicleAttributes,
 )
+from tests.postgresql import PostgreSQLTestSchema
 
 
 class IndirectVehicleAttributesAuditTests(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine("sqlite:///:memory:")
+        self.database = PostgreSQLTestSchema().create()
+        self.engine = self.database.create_engine()
         Base.metadata.create_all(self.engine)
         with self.engine.begin() as connection:
             connection.execute(
@@ -102,6 +104,7 @@ class IndirectVehicleAttributesAuditTests(unittest.TestCase):
 
     def tearDown(self):
         self.engine.dispose()
+        self.database.drop()
 
     def test_reports_parameter_and_purpose_inferences_without_writes(self):
         counters = audit_inferences(self.engine)

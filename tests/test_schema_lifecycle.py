@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -8,6 +7,7 @@ from sqlalchemy import create_engine, inspect
 
 from autohome.database_migrations import DatabaseSchemaError, upgrade_database
 from autohome.pipelines import SqlAlchemyPipeline
+from tests.postgresql import PostgreSQLTestSchema
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_SCHEMA_MUTATIONS = (
@@ -22,9 +22,9 @@ class SchemaLifecycleTests(unittest.TestCase):
     """Проверить, что рабочий код использует только готовую схему Alembic."""
 
     def test_pipeline_rejects_unversioned_database_without_creating_tables(self):
-        with tempfile.TemporaryDirectory() as directory:
-            database_path = Path(directory) / "empty.sqlite3"
-            database_url = f"sqlite:///{database_path}"
+        database = PostgreSQLTestSchema().create()
+        try:
+            database_url = database.database_url
             pipeline = SqlAlchemyPipeline(database_url, 100, 0, 0)
 
             with self.assertRaisesRegex(DatabaseSchemaError, "alembic upgrade head"):
@@ -35,16 +35,20 @@ class SchemaLifecycleTests(unittest.TestCase):
                 self.assertEqual(inspect(engine).get_table_names(), [])
             finally:
                 engine.dispose()
+        finally:
+            database.drop()
 
     def test_pipeline_accepts_database_at_head(self):
-        with tempfile.TemporaryDirectory() as directory:
-            database_path = Path(directory) / "current.sqlite3"
-            database_url = f"sqlite:///{database_path}"
+        database = PostgreSQLTestSchema().create()
+        try:
+            database_url = database.database_url
             upgrade_database(database_url)
             pipeline = SqlAlchemyPipeline(database_url, 100, 0, 0)
 
             pipeline.open_spider()
             pipeline.close_spider()
+        finally:
+            database.drop()
 
     def test_runtime_code_contains_no_direct_schema_mutations(self):
         excluded_directories = {".git", ".venv", "alembic", "tests"}

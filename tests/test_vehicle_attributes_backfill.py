@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from sqlalchemy import create_engine, func, insert, select
+from sqlalchemy import func, insert, select
 
 from autohome.models import Base, SpecVehicleAttributes
 from autohome.vehicle_attributes_normalizer import normalize_vehicle_attributes
@@ -11,6 +11,7 @@ from normalize_vehicle_attributes import (
     upsert_rows,
     validate_arguments,
 )
+from tests.postgresql import PostgreSQLTestSchema
 
 
 class VehicleAttributesBackfillTests(unittest.TestCase):
@@ -105,7 +106,7 @@ class VehicleAttributesBackfillTests(unittest.TestCase):
 
     def test_invalid_shard_configuration_is_rejected(self):
         class Args:
-            database_url = "sqlite://"
+            database_url = "postgresql://test"
             batch_size = 100
             limit = None
             min_spec_id = None
@@ -117,7 +118,8 @@ class VehicleAttributesBackfillTests(unittest.TestCase):
             validate_arguments(Args())
 
     def test_upsert_splits_large_input_into_safe_chunks(self):
-        engine = create_engine("sqlite:///:memory:")
+        database = PostgreSQLTestSchema().create()
+        engine = database.create_engine()
         Base.metadata.create_all(engine)
         rows = [
             normalize_vehicle_attributes(
@@ -133,10 +135,12 @@ class VehicleAttributesBackfillTests(unittest.TestCase):
             count = connection.scalar(select(func.count(SpecVehicleAttributes.spec_id)))
 
         engine.dispose()
+        database.drop()
         self.assertEqual(count, 501)
 
     def test_normalization_upsert_preserves_inference_metadata(self):
-        engine = create_engine("sqlite:///:memory:")
+        database = PostgreSQLTestSchema().create()
+        engine = database.create_engine()
         Base.metadata.create_all(engine)
         original = normalize_vehicle_attributes(
             1,
@@ -162,6 +166,7 @@ class VehicleAttributesBackfillTests(unittest.TestCase):
             row = connection.execute(select(SpecVehicleAttributes)).one()
 
         engine.dispose()
+        database.drop()
         self.assertIs(row.is_special_purpose, False)
         self.assertEqual(row.gross_mass_kg, 3260)
         self.assertEqual(row.inference_flags_json, ["INFERRED_INPUTS_USED"])

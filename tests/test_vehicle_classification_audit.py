@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import unittest
 
-from sqlalchemy import create_engine
-
 from audit_vehicle_classifications import audit_classifications
 from autohome.models import Base, SpecVehicleAttributes
+from tests.postgresql import PostgreSQLTestSchema
 
 
 class VehicleClassificationAuditTests(unittest.TestCase):
     def test_audit_counts_statuses_and_missing_fields_without_writes(self):
-        engine = create_engine("sqlite:///:memory:")
+        database = PostgreSQLTestSchema().create()
+        engine = database.create_engine()
         Base.metadata.create_all(engine)
         with engine.begin() as connection:
             connection.execute(
@@ -50,6 +50,7 @@ class VehicleClassificationAuditTests(unittest.TestCase):
         self.assertEqual(counters["heading"]["8703"], 1)
         self.assertEqual(counters["missing_field"]["is_special_purpose"], 1)
         engine.dispose()
+        database.drop()
 
 
 if __name__ == "__main__":

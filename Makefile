@@ -5,10 +5,16 @@ SHELL := /bin/bash
 -include .env
 
 COMPOSE_FILE ?= compose.dev.yaml
+TEST_COMPOSE_FILE ?= compose.test.yaml
+TEST_COMPOSE_PROJECT ?= autohomeparser-test
 POSTGRES_DB ?= autohome
 POSTGRES_USER ?= autohome
 POSTGRES_PASSWORD ?= autohome
 POSTGRES_PORT ?= 5432
+TEST_POSTGRES_DB ?= autohome_test
+TEST_POSTGRES_USER ?= autohome_test
+TEST_POSTGRES_PASSWORD ?= autohome_test
+TEST_POSTGRES_PORT ?= 55432
 DATABASE_BATCH_SIZE ?= 1000
 SHUTDOWN_TIMEOUT ?= 120
 NORMALIZE_VEHICLE_ATTRIBUTES_ARGS ?=
@@ -24,6 +30,7 @@ API_PASSWORD ?= autohome
 API_JWT_SECRET ?= development-only-autohome-jwt-secret-change-me
 API_JWT_TTL_SECONDS ?= 3600
 DATABASE_URL ?= postgresql+psycopg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@127.0.0.1:$(POSTGRES_PORT)/$(POSTGRES_DB)
+TEST_DATABASE_URL ?= postgresql+psycopg://$(TEST_POSTGRES_USER):$(TEST_POSTGRES_PASSWORD)@127.0.0.1:$(TEST_POSTGRES_PORT)/$(TEST_POSTGRES_DB)
 
 # Отдельные таблицы и приоритеты выбраны из редко используемого диапазона.
 WIFI_TABLE := 10101
@@ -31,13 +38,16 @@ ETH_TABLE := 10102
 WIFI_PRIORITY := 10101
 ETH_PRIORITY := 10102
 
-.PHONY: help lint lint-fix pre-commit-install network-up network-down network-status network-test postgres-up database-migrate api-up api-logs celery-logs parser-run parser-resume parser-logs api-run database-reset parameters-reset build-modifications normalize-vehicle-attributes audit-vehicle-classifications audit-indirect-vehicle-attributes audit-recycling-fee-commercial-categories backfill-vehicle-attribute-inferences translate-db calculate-customs-payments docker-down
+.PHONY: help lint lint-fix pre-commit-install test-db-up test test-db-down network-up network-down network-status network-test postgres-up database-migrate api-up api-logs celery-logs parser-run parser-resume parser-logs api-run database-reset parameters-reset build-modifications normalize-vehicle-attributes audit-vehicle-classifications audit-indirect-vehicle-attributes audit-recycling-fee-commercial-categories backfill-vehicle-attribute-inferences translate-db calculate-customs-payments docker-down
 
 help:
 	@echo "Доступные команды:"
 	@echo "  make lint            — проверить Python-код с помощью Ruff"
 	@echo "  make lint-fix        — исправить и отформатировать Python-код"
 	@echo "  make pre-commit-install — установить проверку Ruff перед коммитом"
+	@echo "  make test-db-up      — запустить отдельный PostgreSQL для тестов"
+	@echo "  make test            — выполнить тесты с отдельным PostgreSQL"
+	@echo "  make test-db-down    — удалить тестовый PostgreSQL"
 	@echo "  make network-up      — включить временную маршрутизацию"
 	@echo "  make network-down    — удалить временные правила"
 	@echo "  make network-status  — показать интерфейсы и правила"
@@ -76,6 +86,22 @@ lint-fix:
 
 pre-commit-install:
 	@.venv/bin/pre-commit install
+
+test-db-up:
+	@TEST_POSTGRES_DB='$(TEST_POSTGRES_DB)' \
+	TEST_POSTGRES_USER='$(TEST_POSTGRES_USER)' \
+	TEST_POSTGRES_PASSWORD='$(TEST_POSTGRES_PASSWORD)' \
+	TEST_POSTGRES_PORT='$(TEST_POSTGRES_PORT)' \
+	docker compose -p '$(TEST_COMPOSE_PROJECT)' -f '$(TEST_COMPOSE_FILE)' \
+		up -d --wait postgres
+
+test: test-db-up
+	@TEST_DATABASE_URL='$(TEST_DATABASE_URL)' \
+		.venv/bin/python -m unittest discover -s tests -v
+
+test-db-down:
+	@docker compose -p '$(TEST_COMPOSE_PROJECT)' -f '$(TEST_COMPOSE_FILE)' \
+		down --volumes --remove-orphans
 
 network-up:
 	@[ -n "$(WIFI_IF)" ] || { echo "Не задан WIFI_IF" >&2; exit 1; }

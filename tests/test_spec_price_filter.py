@@ -78,7 +78,7 @@ class SpecParsingTests(unittest.TestCase):
 
 class SpecPipelineTests(unittest.TestCase):
     def test_pipeline_rejects_priceless_spec_as_safety_net(self):
-        pipeline = SqlAlchemyPipeline("sqlite://", 100, 0, 0)
+        pipeline = SqlAlchemyPipeline("postgresql://test", 100, 0, 0)
 
         with self.assertRaises(DropItem):
             pipeline.process_item(spec_item())
@@ -86,7 +86,7 @@ class SpecPipelineTests(unittest.TestCase):
         self.assertEqual(pipeline.buffered, 0)
 
     def test_pipeline_accepts_dealer_price_without_guide_price(self):
-        pipeline = SqlAlchemyPipeline("sqlite://", 100, 0, 0)
+        pipeline = SqlAlchemyPipeline("postgresql://test", 100, 0, 0)
 
         pipeline.process_item(spec_item(dealer_price_yuan="11.8万"))
 

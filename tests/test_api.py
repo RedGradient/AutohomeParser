@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import tempfile
 import unittest
 from datetime import date
 from decimal import Decimal
-from pathlib import Path
 
 import httpx
 from sqlalchemy import event
@@ -26,16 +24,16 @@ from autohome.models import (
     Spec,
     SpecPowertrain,
 )
+from tests.postgresql import PostgreSQLTestSchema
 
 
 class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        database_path = Path(self.temp_dir.name) / "api.sqlite3"
+        self.database = PostgreSQLTestSchema().create()
         self.username = "test-user"
         self.password = "test-password"
         self.app = create_app(
-            f"sqlite:///{database_path}",
+            self.database.database_url,
             api_username=self.username,
             api_password=self.password,
             jwt_secret="test-jwt-secret-longer-than-thirty-two-bytes",
@@ -269,7 +267,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.client.aclose()
         await self.app.state.engine.dispose()
-        self.temp_dir.cleanup()
+        self.database.drop()
 
     async def test_protected_endpoint_rejects_missing_token(self):
         async with httpx.AsyncClient(

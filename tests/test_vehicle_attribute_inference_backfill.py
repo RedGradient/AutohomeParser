@@ -3,18 +3,20 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from sqlalchemy import create_engine, insert, select
+from sqlalchemy import insert, select
 
 from autohome.models import Base, Series, Spec, SpecVehicleAttributes
 from autohome.vehicle_attribute_inference import (
     VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION,
 )
 from backfill_vehicle_attribute_inferences import backfill
+from tests.postgresql import PostgreSQLTestSchema
 
 
 class VehicleAttributeInferenceBackfillTests(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine("sqlite:///:memory:")
+        self.database = PostgreSQLTestSchema().create()
+        self.engine = self.database.create_engine()
         Base.metadata.create_all(self.engine)
         with self.engine.begin() as connection:
             connection.execute(
@@ -55,6 +57,7 @@ class VehicleAttributeInferenceBackfillTests(unittest.TestCase):
 
     def tearDown(self):
         self.engine.dispose()
+        self.database.drop()
 
     @staticmethod
     def args(**overrides):

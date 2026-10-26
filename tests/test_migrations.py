@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -9,6 +8,7 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 
 from alembic import command
+from tests.postgresql import PostgreSQLTestSchema
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BTREE_INDEXES = {
@@ -52,15 +52,14 @@ class AlembicMigrationTests(unittest.TestCase):
     """Проверить создание и обновление схемы через Alembic."""
 
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        database_path = Path(self.temp_dir.name) / "migrations.sqlite3"
-        self.database_url = f"sqlite:///{database_path}"
+        self.database = PostgreSQLTestSchema().create()
+        self.database_url = self.database.database_url
         self.config = Config(str(PROJECT_ROOT / "alembic.ini"))
         self.config.set_main_option("sqlalchemy.url", self.database_url)
         self.config.attributes["database_url"] = self.database_url
 
     def tearDown(self):
-        self.temp_dir.cleanup()
+        self.database.drop()
 
     def test_upgrade_creates_current_schema(self):
         command.upgrade(self.config, "head")
@@ -102,7 +101,7 @@ class AlembicMigrationTests(unittest.TestCase):
         finally:
             engine.dispose()
 
-    def test_upgrade_creates_filter_indexes_without_postgresql_indexes(self):
+    def test_upgrade_creates_filter_indexes(self):
         command.upgrade(self.config, "head")
 
         engine = create_engine(self.database_url)
@@ -117,7 +116,7 @@ class AlembicMigrationTests(unittest.TestCase):
                 }
                 self.assertTrue(expected_names <= actual_names)
                 all_index_names.update(actual_names)
-            self.assertTrue(TRIGRAM_INDEXES.isdisjoint(all_index_names))
+            self.assertTrue(TRIGRAM_INDEXES <= all_index_names)
         finally:
             engine.dispose()
 
