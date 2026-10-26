@@ -7,7 +7,6 @@ from collections import Counter
 
 from sqlalchemy import create_engine, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from autohome.models import (
     ParameterDefinition,
@@ -194,12 +193,7 @@ def upsert_rows(connection, rows: list[dict]) -> None:
         return
     for start in range(0, len(rows), MAX_UPSERT_ROWS):
         batch = rows[start : start + MAX_UPSERT_ROWS]
-        if connection.dialect.name == "postgresql":
-            statement = postgresql_insert(SpecVehicleAttributes).values(batch)
-        elif connection.dialect.name == "sqlite":
-            statement = sqlite_insert(SpecVehicleAttributes).values(batch)
-        else:
-            raise RuntimeError(f"СУБД {connection.dialect.name} не поддерживается")
+        statement = postgresql_insert(SpecVehicleAttributes).values(batch)
         primary_keys = {
             column.name for column in SpecVehicleAttributes.__table__.primary_key
         }

@@ -7,12 +7,10 @@ import time
 from collections import defaultdict
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 
 from scrapy.exceptions import DropItem
-from sqlalchemy import bindparam, create_engine, event, func, select, update
+from sqlalchemy import bindparam, create_engine, func, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -249,28 +247,12 @@ class SqlAlchemyPipeline:
 
     def open_spider(self):
         """Подключиться к базе с уже применёнными миграциями."""
-        if self.database_url.startswith("sqlite:///"):
-            db_path = Path(self.database_url.removeprefix("sqlite:///"))
-            db_path.parent.mkdir(parents=True, exist_ok=True)
-
         self.engine = create_engine(self.database_url, pool_pre_ping=True)
-        if self.engine.dialect.name == "sqlite":
-            event.listen(self.engine, "connect", self._configure_sqlite)
         try:
             require_current_schema(self.engine)
         except Exception:
             self.engine.dispose()
             raise
-
-    @staticmethod
-    def _configure_sqlite(dbapi_connection, _):
-        """Настроить SQLite для пакетной записи и параллельного чтения."""
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL")
-        cursor.execute("PRAGMA synchronous=NORMAL")
-        cursor.execute("PRAGMA busy_timeout=30000")
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
 
     def process_item(self, item):
         """Добавить элемент в буфер и записать заполненный пакет."""
@@ -387,14 +369,8 @@ class SqlAlchemyPipeline:
                 )
 
     def _insert(self, model):
-        """Создать совместимый с текущей СУБД оператор INSERT с UPSERT."""
-        if self.engine.dialect.name == "postgresql":
-            return postgresql_insert(model)
-        if self.engine.dialect.name == "sqlite":
-            return sqlite_insert(model)
-        raise RuntimeError(
-            f"СУБД {self.engine.dialect.name} не поддерживается pipeline"
-        )
+        """Создать PostgreSQL INSERT с поддержкой UPSERT."""
+        return postgresql_insert(model)
 
     @staticmethod
     def _deduplicate_rows(model, rows: list[dict]) -> list[dict]:

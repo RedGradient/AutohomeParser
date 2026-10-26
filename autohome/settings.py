@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 
 # Имя Scrapy-проекта, используемое во внутренних компонентах и логах.
 BOT_NAME = "autohome"
@@ -63,10 +62,10 @@ DEFAULT_REQUEST_HEADERS = {
 
 # Подключить pipeline SQLAlchemy; число задаёт порядок его выполнения.
 ITEM_PIPELINES = {"autohome.pipelines.SqlAlchemyPipeline": 300}
-# Адрес базы из окружения; без переменной используется локальная SQLite.
+# Адрес базы из окружения; без переменной используется локальный PostgreSQL.
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    f"sqlite:///{Path('data/autohome.sqlite3').resolve()}",
+    "postgresql+psycopg://autohome:autohome@127.0.0.1:5432/autohome",
 )
 # Количество элементов, накапливаемых перед одной пакетной записью в БД.
 DATABASE_BATCH_SIZE = int(os.getenv("DATABASE_BATCH_SIZE", "1000"))
