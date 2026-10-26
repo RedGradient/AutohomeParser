@@ -13,6 +13,7 @@ from autohome.api.routers.auth import create_auth_router
 from autohome.api.routers.brands import create_brands_router
 from autohome.api.routers.customs import create_customs_router
 from autohome.api.routers.manufacturers import create_manufacturers_router
+from autohome.api.routers.metrics import create_metrics_router
 from autohome.api.routers.modifications import create_modifications_router
 from autohome.api.routers.photos import create_photos_router
 from autohome.api.routers.series import create_series_router
@@ -48,6 +49,10 @@ OPENAPI_TAGS = [
     {
         "name": "Customs",
         "description": "Сохранённые расчёты таможенных платежей.",
+    },
+    {
+        "name": "Metrics",
+        "description": "Агрегированные метрики каталога и таможенных расчётов.",
     },
 ]
 ERROR_RESPONSES = {
@@ -87,6 +92,7 @@ def _register_routers(
     """Подключить публичный и защищённые роутеры приложения."""
     require_authenticated_user = authenticated_user_dependency(auth_settings)
     application.include_router(create_auth_router(auth_settings))
+    application.include_router(create_metrics_router(database.get_session))
     for create_router in PROTECTED_ROUTER_FACTORIES:
         application.include_router(
             create_router(database.get_session, require_authenticated_user)

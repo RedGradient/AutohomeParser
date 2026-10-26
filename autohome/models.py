@@ -8,6 +8,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -445,6 +446,53 @@ class CustomsCalculation(Base):
     )
     calculated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class CustomsMetrics(Base):
+    """Актуальный агрегированный снимок метрик таможенных расчётов."""
+
+    __tablename__ = "customs_metrics"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_customs_metrics_singleton"),
+        CheckConstraint(
+            "brands_count >= 0 AND series_count >= 0 "
+            "AND specs_count >= 0 AND modifications_count >= 0 "
+            "AND customs_scenarios_count >= 0 "
+            "AND complete_scenarios_count >= 0 "
+            "AND partial_scenarios_count >= 0 "
+            "AND missing_data_scenarios_count >= 0 "
+            "AND manual_review_scenarios_count >= 0 "
+            "AND unsupported_scenarios_count >= 0 "
+            "AND specs_with_complete_scenario_count >= 0",
+            name="ck_customs_metrics_nonnegative_counts",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    brands_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    series_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    specs_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    modifications_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    customs_scenarios_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    complete_scenarios_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    partial_scenarios_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    missing_data_scenarios_count: Mapped[int] = mapped_column(
+        BigInteger, nullable=False
+    )
+    manual_review_scenarios_count: Mapped[int] = mapped_column(
+        BigInteger, nullable=False
+    )
+    unsupported_scenarios_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    specs_with_complete_scenario_count: Mapped[int] = mapped_column(
+        BigInteger, nullable=False
+    )
+    missing_data_statistics_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON_TYPE, nullable=False
     )
 
 

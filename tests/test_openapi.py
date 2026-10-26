@@ -26,6 +26,7 @@ class OpenApiSchemaTests(unittest.TestCase):
         ("GET", "/api/v1/customs-calculations"),
         ("GET", "/api/v1/customs-calculations/{calculation_id}"),
         ("GET", "/api/v1/specs/{spec_id}/customs-calculations"),
+        ("GET", "/api/v1/metrics/customs"),
     }
     EXPECTED_TAGS = {
         "/api/v1/auth/token": "Auth",
@@ -47,6 +48,7 @@ class OpenApiSchemaTests(unittest.TestCase):
         "/api/v1/customs-calculations": "Customs",
         "/api/v1/customs-calculations/{calculation_id}": "Customs",
         "/api/v1/specs/{spec_id}/customs-calculations": "Customs",
+        "/api/v1/metrics/customs": "Metrics",
     }
 
     @classmethod
@@ -192,7 +194,7 @@ class OpenApiSchemaTests(unittest.TestCase):
             self.assertIn(
                 "200", operation["responses"], f"{method} {path}: нет ответа 200"
             )
-            if path == "/api/v1/auth/token":
+            if path in {"/api/v1/auth/token", "/api/v1/metrics/customs"}:
                 self.assertNotIn("security", operation)
             else:
                 self.assertEqual(

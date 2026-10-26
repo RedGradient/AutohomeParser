@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import httpx
@@ -14,6 +14,7 @@ from autohome.models import (
     Brand,
     BrandManufacturer,
     CustomsCalculation,
+    CustomsMetrics,
     CustomsPaymentResult,
     Manufacturer,
     Modification,
@@ -138,6 +139,40 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
                         warnings_json=[],
                     ),
                 ]
+            )
+            session.add(
+                CustomsMetrics(
+                    id=1,
+                    schema_version=1,
+                    generated_at=datetime(2026, 10, 27, 8, 0, tzinfo=UTC),
+                    brands_count=1,
+                    series_count=1,
+                    specs_count=2,
+                    modifications_count=2,
+                    customs_scenarios_count=2,
+                    complete_scenarios_count=1,
+                    partial_scenarios_count=0,
+                    missing_data_scenarios_count=1,
+                    manual_review_scenarios_count=0,
+                    unsupported_scenarios_count=0,
+                    specs_with_complete_scenario_count=1,
+                    missing_data_statistics_json={
+                        "affected_scenarios_count": 1,
+                        "affected_specs_count": 1,
+                        "by_importer_type": {"INDIVIDUAL": 1},
+                        "by_payment_type": {"VAT": 1},
+                        "by_missing_field": {"engine_power_kw": 1},
+                        "by_invalid_field": {},
+                        "by_reason": {"ENGINE_POWER_MISSING": 1},
+                        "by_payment_and_field": [
+                            {
+                                "payment_type": "VAT",
+                                "missing_field": "engine_power_kw",
+                                "count": 1,
+                            }
+                        ],
+                    },
+                )
             )
             await session.flush()
             session.add_all(
@@ -437,6 +472,21 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
             response = await client.get("/health")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
+
+    async def test_customs_metrics_endpoint_is_public(self):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=self.app), base_url="http://test"
+        ) as client:
+            response = await client.get("/api/v1/metrics/customs")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["specs_count"], 2)
+        self.assertEqual(body["complete_scenarios_count"], 1)
+        self.assertEqual(
+            body["missing_data_statistics"]["by_missing_field"],
+            {"engine_power_kw": 1},
+        )
 
     async def test_search_treats_like_wildcards_as_literal_text(self):
         for path in (

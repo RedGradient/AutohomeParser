@@ -107,6 +107,19 @@ services:
     init: true
     restart: unless-stopped
 
+  metrics:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    entrypoint: ["python", "-m", "autohome.cli.customs_metrics"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-autohome}:${POSTGRES_PASSWORD:-autohome}@postgres:5432/${POSTGRES_DB:-autohome}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+    profiles: ["tools"]
+
   parser:
     build:
       context: .

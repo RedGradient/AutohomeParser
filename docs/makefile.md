@@ -68,12 +68,27 @@ make WIFI_IF=wlan0 ETH_IF=eth0 network-up
 - `make normalize-vehicle-attributes` — обновить кузовные и массовые признаки.
 - `make translate-db` — перевести существующие нормализованные поля.
 - `make calculate-customs-payments` — пересчитать таможенные платежи.
+- `make calculate-customs-metrics` — пересчитать и сохранить агрегированные
+  метрики каталога и таможенных сценариев.
 
 Дополнительные аргументы передаются переменными:
 
 ```bash
 make calculate-customs-payments \
   CALCULATE_CUSTOMS_PAYMENTS_ARGS="--mode stale --limit 100"
+```
+
+Для расчёта метрик дополнительные параметры обычно не нужны:
+
+```bash
+make calculate-customs-metrics
+```
+
+Цель запускает одноразовый Compose-сервис `metrics`. Для production укажите
+нужный Compose-файл:
+
+```bash
+make COMPOSE_FILE=compose.prod.yaml calculate-customs-metrics
 ```
 
 ## Аудит классификации
@@ -92,8 +107,9 @@ make backfill-vehicle-attribute-inferences \
 
 ## Важное различие локального и Docker-запуска
 
-Цели постобработки используют `.venv/bin/python`. На сервере без `.venv`
-запускайте утилиту отдельным контейнером, например:
+Большинство целей постобработки используют `.venv/bin/python`; цель
+`calculate-customs-metrics` уже запускает одноразовый Compose-сервис. На сервере
+без `.venv` остальные утилиты запускайте отдельным контейнером, например:
 
 ```bash
 docker compose -f compose.prod.yaml run --rm api \

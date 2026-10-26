@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -525,3 +525,79 @@ class CustomsCalculationPage(ApiSchema):
         description="Таможенные расчёты текущей страницы."
     )
     pagination: Pagination = Field(description="Метаданные пагинации.")
+
+
+class MissingDataFieldMetric(ApiSchema):
+    """Число пропусков конкретного поля для вида платежа."""
+
+    payment_type: str = Field(description="Вид таможенного платежа.")
+    missing_field: str = Field(description="Отсутствующее исходное поле.")
+    count: int = Field(description="Число обнаруженных пропусков.", ge=0)
+
+
+class MissingDataStatistics(ApiSchema):
+    """Статистика причин, из-за которых расчётам не хватает данных."""
+
+    affected_scenarios_count: int = Field(
+        description="Число сценариев с хотя бы одним результатом MISSING_DATA.",
+        ge=0,
+    )
+    affected_specs_count: int = Field(
+        description="Число комплектаций, затронутых статусом MISSING_DATA.",
+        ge=0,
+    )
+    by_importer_type: dict[str, int] = Field(
+        description="Число проблемных сценариев по типу импортёра."
+    )
+    by_payment_type: dict[str, int] = Field(
+        description="Число результатов MISSING_DATA по виду платежа."
+    )
+    by_missing_field: dict[str, int] = Field(
+        description="Частота отсутствующих исходных полей."
+    )
+    by_invalid_field: dict[str, int] = Field(
+        description="Частота некорректных исходных полей."
+    )
+    by_reason: dict[str, int] = Field(
+        description="Частота причин MISSING_DATA, возвращённых расчётами."
+    )
+    by_payment_and_field: list[MissingDataFieldMetric] = Field(
+        description="Пропуски полей с разделением по виду платежа."
+    )
+
+
+class CustomsMetricsResponse(ApiSchema):
+    """Последний сохранённый снимок метрик каталога и таможенных расчётов."""
+
+    schema_version: int = Field(description="Версия структуры снимка.", ge=1)
+    generated_at: datetime = Field(
+        description="Дата и время формирования снимка в UTC."
+    )
+    brands_count: int = Field(description="Количество брендов.", ge=0)
+    series_count: int = Field(description="Количество серий.", ge=0)
+    specs_count: int = Field(description="Количество комплектаций.", ge=0)
+    modifications_count: int = Field(description="Количество модификаций.", ge=0)
+    customs_scenarios_count: int = Field(
+        description="Общее число сценариев таможенного расчёта.", ge=0
+    )
+    complete_scenarios_count: int = Field(
+        description="Число полностью рассчитанных сценариев.", ge=0
+    )
+    partial_scenarios_count: int = Field(
+        description="Число частично рассчитанных сценариев.", ge=0
+    )
+    missing_data_scenarios_count: int = Field(
+        description="Число сценариев, которым не хватает исходных данных.", ge=0
+    )
+    manual_review_scenarios_count: int = Field(
+        description="Число сценариев, требующих ручной проверки.", ge=0
+    )
+    unsupported_scenarios_count: int = Field(
+        description="Число сценариев, не поддерживаемых правилами расчёта.", ge=0
+    )
+    specs_with_complete_scenario_count: int = Field(
+        description="Число комплектаций хотя бы с одним полным сценарием.", ge=0
+    )
+    missing_data_statistics: MissingDataStatistics = Field(
+        description="Распределение причин нехватки исходных данных."
+    )
