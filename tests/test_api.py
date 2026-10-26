@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import tempfile
 import unittest
 from datetime import date
 from decimal import Decimal
-from pathlib import Path
 
 import httpx
 from sqlalchemy import event
@@ -26,16 +24,16 @@ from autohome.models import (
     Spec,
     SpecPowertrain,
 )
+from tests.postgresql import PostgreSQLTestSchema
 
 
 class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        database_path = Path(self.temp_dir.name) / "api.sqlite3"
+        self.database = PostgreSQLTestSchema().create()
         self.username = "test-user"
         self.password = "test-password"
         self.app = create_app(
-            f"sqlite:///{database_path}",
+            self.database.database_url,
             api_username=self.username,
             api_password=self.password,
             jwt_secret="test-jwt-secret-longer-than-thirty-two-bytes",
@@ -45,6 +43,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
         async with self.app.state.session_factory() as session:
             session.add(Brand(id=1, name="Test Brand", raw_json={}))
             session.add(Manufacturer(id=2, name="Test Manufacturer", raw_json={}))
+            await session.flush()
             session.add(BrandManufacturer(brand_id=1, manufacturer_id=2, position=0))
             session.add(
                 Series(
@@ -57,6 +56,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
                     raw_json={},
                 )
             )
+            await session.flush()
             session.add_all(
                 [
                     Modification(
@@ -85,6 +85,32 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
                     ),
                 ]
             )
+            await session.flush()
+            session.add_all(
+                [
+                    Spec(
+                        id=1000,
+                        series_id=10,
+                        modification_id=100,
+                        name="Premium",
+                        year=2026,
+                        state=20,
+                        guide_price_yuan=Decimal(200000),
+                        raw_json={},
+                    ),
+                    Spec(
+                        id=1001,
+                        series_id=10,
+                        modification_id=101,
+                        name="Comfort",
+                        year=2025,
+                        state=40,
+                        guide_price_yuan=Decimal(120000),
+                        raw_json={},
+                    ),
+                ]
+            )
+            await session.flush()
             session.add_all(
                 [
                     CustomsCalculation(
@@ -113,6 +139,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
                     ),
                 ]
             )
+            await session.flush()
             session.add_all(
                 [
                     CustomsPaymentResult(
@@ -165,30 +192,6 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
                         status="CALCULATED",
                         rule_code="TEST_RULE",
                         details_json={},
-                    ),
-                ]
-            )
-            session.add_all(
-                [
-                    Spec(
-                        id=1000,
-                        series_id=10,
-                        modification_id=100,
-                        name="Premium",
-                        year=2026,
-                        state=20,
-                        guide_price_yuan=Decimal(200000),
-                        raw_json={},
-                    ),
-                    Spec(
-                        id=1001,
-                        series_id=10,
-                        modification_id=101,
-                        name="Comfort",
-                        year=2025,
-                        state=40,
-                        guide_price_yuan=Decimal(120000),
-                        raw_json={},
                     ),
                 ]
             )
@@ -269,7 +272,7 @@ class CatalogApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.client.aclose()
         await self.app.state.engine.dispose()
-        self.temp_dir.cleanup()
+        self.database.drop()
 
     async def test_protected_endpoint_rejects_missing_token(self):
         async with httpx.AsyncClient(

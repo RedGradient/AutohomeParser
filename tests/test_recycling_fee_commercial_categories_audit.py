@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import unittest
 
-from sqlalchemy import create_engine
-
 from audit_recycling_fee_commercial_categories import audit_commercial_categories
 from autohome.models import Base, Series, Spec, SpecPowertrain, SpecVehicleAttributes
+from tests.postgresql import PostgreSQLTestSchema
 
 
 class RecyclingFeeCommercialCategoriesAuditTests(unittest.TestCase):
     def test_audit_splits_groups_and_reports_missing_inputs_without_writes(self):
-        engine = create_engine("sqlite:///:memory:")
+        database = PostgreSQLTestSchema().create()
+        engine = database.create_engine()
         Base.metadata.create_all(engine)
         with engine.begin() as connection:
             connection.execute(
@@ -155,6 +155,7 @@ class RecyclingFeeCommercialCategoriesAuditTests(unittest.TestCase):
         self.assertEqual(counters["purpose_type"]["FIRE_FIGHTING"], 1)
         self.assertEqual(counters["category_provenance"]["INFERRED"], 2)
         engine.dispose()
+        database.drop()
 
 
 if __name__ == "__main__":

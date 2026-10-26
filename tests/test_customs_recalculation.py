@@ -5,10 +5,11 @@ from copy import deepcopy
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import func, select
 
 from autohome.models import Base, CustomsCalculation, CustomsPaymentResult
 from calculate_customs_payments import calculation_run_connection, process_batch
+from tests.postgresql import PostgreSQLTestSchema, seed_specs
 
 
 def calculation_row() -> dict:
@@ -57,11 +58,14 @@ def payment_rows(calculation_id: int = 101) -> list[dict]:
 
 class CustomsRecalculationTests(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine("sqlite:///:memory:")
+        self.database = PostgreSQLTestSchema().create()
+        self.engine = self.database.create_engine()
         Base.metadata.create_all(self.engine)
+        seed_specs(self.engine, (1001, 2001))
 
     def tearDown(self):
         self.engine.dispose()
+        self.database.drop()
 
     def test_stale_mode_skips_unchanged_calculation_on_another_date(self):
         calculation = calculation_row()
@@ -281,7 +285,7 @@ class CustomsRecalculationTests(unittest.TestCase):
         self.assertEqual(selected, 2)
         self.assertEqual(importer_types, ["INDIVIDUAL", "LEGAL_ENTITY"])
 
-    def test_sqlite_run_connection_does_not_require_advisory_lock(self):
+    def test_run_connection_acquires_advisory_lock(self):
         with calculation_run_connection(self.engine) as connection:
             self.assertEqual(connection.scalar(select(1)), 1)
 

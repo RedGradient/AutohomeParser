@@ -23,9 +23,6 @@ OLD_UNIQUE_COLUMNS = (
 )
 NEW_UNIQUE_NAME = "uq_customs_calculations_spec_importer"
 NEW_UNIQUE_COLUMNS = ("spec_id", "importer_type")
-SQLITE_NAMING_CONVENTION = {
-    "uq": "uq_%(table_name)s_%(column_0_name)s",
-}
 
 STALE_CALCULATION_IDS = """
     SELECT id
@@ -55,15 +52,9 @@ def _replace_unique_constraint(
     new_name: str,
     new_columns: tuple[str, ...],
 ) -> None:
-    """Заменить уникальность с поддержкой безымянного ограничения SQLite."""
+    """Заменить ограничение уникальности сценария расчёта."""
     old_name = _unique_constraint_name(old_columns)
-    if old_name is None and op.get_bind().dialect.name == "sqlite":
-        old_name = f"uq_{TABLE_NAME}_{old_columns[0]}"
-
-    with op.batch_alter_table(
-        TABLE_NAME,
-        naming_convention=SQLITE_NAMING_CONVENTION,
-    ) as batch_op:
+    with op.batch_alter_table(TABLE_NAME) as batch_op:
         if old_name is not None:
             batch_op.drop_constraint(old_name, type_="unique")
         batch_op.create_unique_constraint(new_name, list(new_columns))

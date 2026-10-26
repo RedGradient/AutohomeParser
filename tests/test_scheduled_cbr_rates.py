@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import tempfile
 import unittest
 from datetime import date
 from decimal import Decimal
-from pathlib import Path
 
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
@@ -13,6 +11,7 @@ from autohome.import_duty.scheduled_rates import synchronize_cbr_rates
 from autohome.import_duty.types import ExchangeRate
 from autohome.models import Base, CbrExchangeRate, CustomsCalculation
 from calculate_customs_payments import process_batch
+from tests.postgresql import PostgreSQLTestSchema, seed_specs
 from tests.test_customs_recalculation import calculation_row, payment_rows
 
 
@@ -26,12 +25,12 @@ def rates(rate_date: date, cny: str, eur: str) -> dict[str, ExchangeRate]:
 
 class ScheduledCbrRatesTests(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        database_path = Path(self.temp_dir.name) / "rates.sqlite3"
-        self.database_url = f"sqlite:///{database_path}"
+        self.database = PostgreSQLTestSchema().create()
+        self.database_url = self.database.database_url
         engine = create_engine(self.database_url)
         try:
             Base.metadata.create_all(engine)
+            seed_specs(engine, (1001, 2001, 3001))
         finally:
             engine.dispose()
         self.today = date(2026, 10, 22)
@@ -39,7 +38,7 @@ class ScheduledCbrRatesTests(unittest.TestCase):
         self.calls: list[tuple[date, dict[str, ExchangeRate], str]] = []
 
     def tearDown(self):
-        self.temp_dir.cleanup()
+        self.database.drop()
 
     def recalculator(self, _database_url, calculation_date, current_rates, mode):
         self.calls.append((calculation_date, current_rates, mode))

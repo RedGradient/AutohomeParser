@@ -2,20 +2,23 @@ from __future__ import annotations
 
 import unittest
 
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import inspect
 
 from autohome.items import SpecVehicleAttributesItem
 from autohome.models import Base, SpecVehicleAttributes
 from autohome.pipelines import SqlAlchemyPipeline
+from tests.postgresql import PostgreSQLTestSchema
 
 
 class SpecVehicleAttributesModelTests(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine("sqlite:///:memory:")
+        self.database = PostgreSQLTestSchema().create()
+        self.engine = self.database.create_engine()
         Base.metadata.create_all(self.engine)
 
     def tearDown(self):
         self.engine.dispose()
+        self.database.drop()
 
     def test_table_contains_classification_inputs(self):
         columns = {

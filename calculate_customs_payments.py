@@ -11,7 +11,6 @@ from hashlib import blake2b
 
 from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from autohome.import_duty import (
     CLASSIFICATION_RULES_VERSION,
@@ -99,7 +98,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--database-url",
         default=os.getenv("DATABASE_URL"),
-        help="URL PostgreSQL или SQLite; по умолчанию DATABASE_URL.",
+        help="URL базы данных; по умолчанию DATABASE_URL.",
     )
     parser.add_argument(
         "--date",
@@ -752,21 +751,12 @@ def make_rows(
     return calculation, payments
 
 
-def dialect_insert(engine, model):
-    """Выбрать INSERT с поддержкой UPSERT для PostgreSQL или SQLite."""
-    if engine.dialect.name == "postgresql":
-        return postgresql_insert(model)
-    if engine.dialect.name == "sqlite":
-        return sqlite_insert(model)
-    raise RuntimeError(f"Неподдерживаемая БД: {engine.dialect.name}")
-
-
 def upsert_batch(engine, calculations: list[dict], payments: list[dict]) -> None:
     """Атомарно записать пакет сценариев и связанных платежей."""
     with engine.begin() as connection:
         for start in range(0, len(calculations), MAX_UPSERT_ROWS):
             calculation_chunk = calculations[start : start + MAX_UPSERT_ROWS]
-            calculation_insert = dialect_insert(engine, CustomsCalculation).values(
+            calculation_insert = postgresql_insert(CustomsCalculation).values(
                 calculation_chunk
             )
             calculation_update = {
@@ -781,7 +771,7 @@ def upsert_batch(engine, calculations: list[dict], payments: list[dict]) -> None
             )
         for start in range(0, len(payments), MAX_UPSERT_ROWS):
             payment_chunk = payments[start : start + MAX_UPSERT_ROWS]
-            payment_insert = dialect_insert(engine, CustomsPaymentResult).values(
+            payment_insert = postgresql_insert(CustomsPaymentResult).values(
                 payment_chunk
             )
             payment_update = {
@@ -874,17 +864,16 @@ def calculation_run_connection(engine):
     connection = engine.connect()
     lock_acquired = False
     try:
-        if engine.dialect.name == "postgresql":
-            lock_acquired = bool(
-                connection.scalar(
-                    text("SELECT pg_try_advisory_lock(:lock_id)"),
-                    {"lock_id": CALCULATION_LOCK_ID},
-                )
+        lock_acquired = bool(
+            connection.scalar(
+                text("SELECT pg_try_advisory_lock(:lock_id)"),
+                {"lock_id": CALCULATION_LOCK_ID},
             )
-            if not lock_acquired:
-                raise RuntimeError(
-                    "Другой процесс уже выполняет расчёт таможенных платежей"
-                )
+        )
+        if not lock_acquired:
+            raise RuntimeError(
+                "Другой процесс уже выполняет расчёт таможенных платежей"
+            )
         yield connection
     finally:
         if lock_acquired:
