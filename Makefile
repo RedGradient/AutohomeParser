@@ -21,6 +21,7 @@ NORMALIZE_VEHICLE_ATTRIBUTES_ARGS ?=
 AUDIT_VEHICLE_CLASSIFICATIONS_ARGS ?=
 BACKFILL_VEHICLE_ATTRIBUTE_INFERENCES_ARGS ?=
 CALCULATE_CUSTOMS_PAYMENTS_ARGS ?=
+CALCULATE_CUSTOMS_METRICS_ARGS ?=
 API_HOST ?= 0.0.0.0
 API_PORT ?= 8000
 API_USERNAME ?= autohome
@@ -36,7 +37,7 @@ ETH_TABLE := 10102
 WIFI_PRIORITY := 10101
 ETH_PRIORITY := 10102
 
-.PHONY: help lint lint-fix pre-commit-install test-db-up test test-db-down network-up network-down network-status network-test postgres-up database-migrate api-up api-logs celery-logs parser-run parser-resume parser-logs api-run database-reset parameters-reset build-modifications normalize-vehicle-attributes audit-vehicle-classifications backfill-vehicle-attribute-inferences translate-db calculate-customs-payments docker-down
+.PHONY: help lint lint-fix pre-commit-install test-db-up test test-db-down network-up network-down network-status network-test postgres-up database-migrate api-up api-logs celery-logs parser-run parser-resume parser-logs api-run database-reset parameters-reset build-modifications normalize-vehicle-attributes audit-vehicle-classifications backfill-vehicle-attribute-inferences translate-db calculate-customs-payments calculate-customs-metrics docker-down
 
 help:
 	@echo "Доступные команды:"
@@ -66,6 +67,7 @@ help:
 	@echo "  make backfill-vehicle-attribute-inferences — dry-run косвенных признаков"
 	@echo "  make translate-db    — перевести уже сохранённые данные"
 	@echo "  make calculate-customs-payments — рассчитать таможенные платежи"
+	@echo "  make calculate-customs-metrics — обновить таможенные метрики"
 	@echo "  make docker-down     — остановить контейнеры"
 	@echo
 	@echo "Интерфейсы можно переопределить:"
@@ -236,6 +238,10 @@ calculate-customs-payments: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
 		.venv/bin/python -m autohome.cli.calculate_customs_payments \
 		$(CALCULATE_CUSTOMS_PAYMENTS_ARGS)
+
+calculate-customs-metrics: postgres-up
+	@docker compose -f '$(COMPOSE_FILE)' run --rm --build metrics \
+		$(CALCULATE_CUSTOMS_METRICS_ARGS)
 
 docker-down:
 	@docker compose -f '$(COMPOSE_FILE)' down
