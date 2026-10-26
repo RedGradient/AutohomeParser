@@ -69,6 +69,30 @@ class AlembicMigrationTests(unittest.TestCase):
         engine = create_engine(self.database_url)
         try:
             inspector = inspect(engine)
+            self.assertIn("customs_metrics", inspector.get_table_names())
+            metrics_columns = {
+                column["name"] for column in inspector.get_columns("customs_metrics")
+            }
+            self.assertEqual(
+                metrics_columns,
+                {
+                    "id",
+                    "schema_version",
+                    "generated_at",
+                    "brands_count",
+                    "series_count",
+                    "specs_count",
+                    "modifications_count",
+                    "customs_scenarios_count",
+                    "complete_scenarios_count",
+                    "partial_scenarios_count",
+                    "missing_data_scenarios_count",
+                    "manual_review_scenarios_count",
+                    "unsupported_scenarios_count",
+                    "specs_with_complete_scenario_count",
+                    "missing_data_statistics_json",
+                },
+            )
             for table_name in (
                 "series_gallery_colors",
                 "series_photo_colors",
@@ -83,7 +107,7 @@ class AlembicMigrationTests(unittest.TestCase):
                 revision = connection.scalar(
                     text("SELECT version_num FROM alembic_version")
                 )
-            self.assertEqual(revision, "0006_current_customs")
+            self.assertEqual(revision, "0007_customs_metrics")
         finally:
             engine.dispose()
 
