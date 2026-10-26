@@ -4,7 +4,6 @@ import argparse
 import json
 import multiprocessing
 import os
-import re
 import socket
 import subprocess
 import sys
@@ -47,15 +46,9 @@ def parse_arguments() -> argparse.Namespace:
         help="Максимум серий на один worker; 0 означает без ограничения.",
     )
     parser.add_argument(
-        "--database-dir",
-        type=Path,
-        default=Path("data/workers"),
-        help="Каталог отдельных SQLite-баз worker-процессов.",
-    )
-    parser.add_argument(
         "--database-url",
         default=os.getenv("DATABASE_URL"),
-        help="Общая база PostgreSQL; по умолчанию берётся из DATABASE_URL.",
+        help="Общая база workers; по умолчанию берётся из DATABASE_URL.",
     )
     parser.add_argument(
         "--resume-configs",
@@ -214,18 +207,11 @@ def check_autohome_dns(interface: str, source_ip: str) -> None:
             )
 
 
-def worker_database_url(directory: Path, interface: str) -> str:
-    """Сформировать URL отдельной SQLite-базы worker-процесса."""
-    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", interface)
-    path = (directory / f"autohome_{safe_name}.sqlite3").resolve()
-    return f"sqlite:///{path}"
-
-
-def database_url_for_worker(
-    configured_url: str | None, directory: Path, interface: str
-) -> str:
-    """Вернуть общую PostgreSQL либо отдельную SQLite для worker-процесса."""
-    return configured_url or worker_database_url(directory, interface)
+def require_database_url(configured_url: str | None) -> str:
+    """Вернуть общий URL базы или завершить запуск с понятной ошибкой."""
+    if not configured_url:
+        raise SystemExit("Не задан DATABASE_URL или --database-url")
+    return configured_url
 
 
 def database_display_name(database_url: str) -> str:
@@ -418,9 +404,8 @@ def main() -> int:
     if len(set(interfaces)) != len(interfaces):
         raise SystemExit("Имена сетевых интерфейсов не должны повторяться")
 
-    if not args.database_url:
-        args.database_dir.mkdir(parents=True, exist_ok=True)
-    workers: list[tuple[str, str, str]] = []
+    database_url = require_database_url(args.database_url)
+    workers: list[tuple[str, str]] = []
     for interface in interfaces:
         address = interface_ipv4(interface)
         if not args.skip_route_check:
@@ -437,26 +422,19 @@ def main() -> int:
                 raise SystemExit(
                     f"Проверка DNS завершилась ошибкой: {error}"
                 ) from error
-        database_url = database_url_for_worker(
-            args.database_url,
-            args.database_dir,
-            interface,
-        )
-        workers.append((interface, address, database_url))
+        workers.append((interface, address))
 
-    unique_database_urls = {database_url for _, _, database_url in workers}
-    for database_url in unique_database_urls:
-        try:
-            validate_database(database_url)
-        except Exception as error:
-            safe_url = database_display_name(database_url)
-            raise SystemExit(f"База {safe_url} не готова к запуску: {error}") from error
+    try:
+        validate_database(database_url)
+    except Exception as error:
+        safe_url = database_display_name(database_url)
+        raise SystemExit(f"База {safe_url} не готова к запуску: {error}") from error
 
     catalog_path = args.catalog_path.resolve()
     try:
         download_catalog(
             catalog_path,
-            [address for _, address, _ in workers],
+            [address for _, address in workers],
             force_refresh=args.resume_configs,
         )
     except Exception as error:
@@ -464,9 +442,9 @@ def main() -> int:
 
     context = multiprocessing.get_context("spawn")
     processes: list[multiprocessing.Process] = []
-    for index, (interface, address, database_url) in enumerate(workers):
+    safe_database_url = database_display_name(database_url)
+    for index, (interface, address) in enumerate(workers):
         color = worker_color(index)
-        safe_database_url = database_display_name(database_url)
         print(
             f"{color}Worker {index}: интерфейс={interface}, IP={address}, "
             f"БД={safe_database_url}{LOG_COLOR_RESET}",
@@ -540,17 +518,15 @@ def main() -> int:
             )
         return 1
     if not args.skip_customs_recalculation:
-        for database_url in sorted(unique_database_urls):
-            try:
-                run_stale_customs_recalculation(database_url)
-            except subprocess.CalledProcessError as error:
-                safe_url = database_display_name(database_url)
-                print(
-                    f"Не удалось досчитать таможенные платежи в {safe_url}: "
-                    f"код {error.returncode}",
-                    file=sys.stderr,
-                )
-                return 1
+        try:
+            run_stale_customs_recalculation(database_url)
+        except subprocess.CalledProcessError as error:
+            print(
+                f"Не удалось досчитать таможенные платежи в {safe_database_url}: "
+                f"код {error.returncode}",
+                file=sys.stderr,
+            )
+            return 1
     return 0
 
 
