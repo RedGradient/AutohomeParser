@@ -46,11 +46,15 @@ docker compose -f compose.prod.yaml run --rm api \
 Подробности расчётов приведены в
 [`docs/customs-calculations.md`](docs/customs-calculations.md).
 
+Проект также формирует агрегированный снимок состояния каталога и таможенных
+расчётов. Готовый отчёт доступен на странице
+`http://localhost:8000/metrics/customs`.
+
 ## API
 
 FastAPI предоставляет версионированный read-only API `/api/v1`. Прикладные
-эндпоинты требуют JWT; `/health`, Swagger, ReDoc, OpenAPI и выдача токена
-остаются публичными.
+эндпоинты требуют JWT; `/health`, страница и API агрегированных метрик, Swagger,
+ReDoc, OpenAPI и выдача токена остаются публичными.
 
 Основные эндпоинты:
 
@@ -69,14 +73,16 @@ FastAPI предоставляет версионированный read-only AP
 - `/api/v1/series/{series_id}/photos` — фотографии и цвета;
 - `/api/v1/series/{series_id}/gallery-colors` — доступные цвета галереи;
 - `/api/v1/customs-calculations` — рассчитанные таможенные платежи;
-- `/api/v1/specs/{spec_id}/customs-calculations` — расчёты комплектации.
+- `/api/v1/specs/{spec_id}/customs-calculations` — расчёты комплектации;
+- `/api/v1/metrics/customs` — последний снимок метрик каталога и расчётов.
 
 После запуска доступны:
 
 - Swagger UI: `http://localhost:8000/docs`;
 - ReDoc: `http://localhost:8000/redoc`;
 - OpenAPI JSON: `http://localhost:8000/openapi.json`;
-- healthcheck: `http://localhost:8000/health`.
+- healthcheck: `http://localhost:8000/health`;
+- отчёт по таможенным расчётам: `http://localhost:8000/metrics/customs`.
 
 Пример получения токена:
 
@@ -130,6 +136,7 @@ Manufacturer ── Brand ── Series ── Spec
 - `series_photos` — прямые ссылки на фотографии серий;
 - `customs_calculations` — актуальные сценарии таможенного расчёта;
 - `customs_payment_results` — отдельные виды платежей сценария.
+- `customs_metrics` — последний агрегированный снимок состояния расчётов.
 
 `modifications` не приходит из Autohome как готовая сущность. Проект формирует
 таблицу самостоятельно, объединяя комплектации одной серии и модельного года с
@@ -185,12 +192,12 @@ python -m venv .venv
 [`docs/scrapy.md`](docs/scrapy.md), команды проекта — в
 [`docs/makefile.md`](docs/makefile.md).
 
-
 ## Документация
 
 - [Полная схема данных](docs/database-schema.md)
 - [Команды Makefile](docs/makefile.md)
 - [Scrapy и режимы загрузки](docs/scrapy.md)
 - [Таможенные расчёты](docs/customs-calculations.md)
+- [Метрики таможенных расчётов](docs/customs-metrics.md)
 - [Production deployment](docs/deployment.md)
 - [Переводы и нормализация](docs/translations.md)
