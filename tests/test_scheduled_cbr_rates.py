@@ -11,7 +11,7 @@ from autohome.import_duty.scheduled_rates import synchronize_cbr_rates
 from autohome.import_duty.types import ExchangeRate
 from autohome.models import Base, CbrExchangeRate, CustomsCalculation
 from calculate_customs_payments import process_batch
-from tests.postgresql import PostgreSQLTestSchema
+from tests.postgresql import PostgreSQLTestSchema, seed_specs
 from tests.test_customs_recalculation import calculation_row, payment_rows
 
 
@@ -30,6 +30,7 @@ class ScheduledCbrRatesTests(unittest.TestCase):
         engine = create_engine(self.database_url)
         try:
             Base.metadata.create_all(engine)
+            seed_specs(engine, (1001, 2001, 3001))
         finally:
             engine.dispose()
         self.today = date(2026, 10, 22)

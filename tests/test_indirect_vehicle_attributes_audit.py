@@ -8,6 +8,8 @@ from audit_indirect_vehicle_attributes import audit_inferences
 from autohome.models import (
     Base,
     ParameterDefinition,
+    ParameterGroup,
+    ParameterSection,
     Series,
     Spec,
     SpecParameter,
@@ -79,6 +81,14 @@ class IndirectVehicleAttributesAuditTests(unittest.TestCase):
                         "normalization_version": 1,
                     },
                 ],
+            )
+            connection.execute(
+                insert(ParameterGroup),
+                {"id": 1, "name": "Test group", "position": 0},
+            )
+            connection.execute(
+                insert(ParameterSection),
+                {"id": 1, "group_id": 1, "name": "Test section", "position": 0},
             )
             connection.execute(
                 insert(ParameterDefinition),

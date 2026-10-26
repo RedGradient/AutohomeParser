@@ -4,7 +4,7 @@ import unittest
 
 from audit_vehicle_classifications import audit_classifications
 from autohome.models import Base, SpecVehicleAttributes
-from tests.postgresql import PostgreSQLTestSchema
+from tests.postgresql import PostgreSQLTestSchema, seed_specs
 
 
 class VehicleClassificationAuditTests(unittest.TestCase):
@@ -12,6 +12,7 @@ class VehicleClassificationAuditTests(unittest.TestCase):
         database = PostgreSQLTestSchema().create()
         engine = database.create_engine()
         Base.metadata.create_all(engine)
+        seed_specs(engine, (1, 2))
         with engine.begin() as connection:
             connection.execute(
                 SpecVehicleAttributes.__table__.insert(),

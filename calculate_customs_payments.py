@@ -98,7 +98,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--database-url",
         default=os.getenv("DATABASE_URL"),
-        help="URL PostgreSQL или SQLite; по умолчанию DATABASE_URL.",
+        help="URL базы данных; по умолчанию DATABASE_URL.",
     )
     parser.add_argument(
         "--date",

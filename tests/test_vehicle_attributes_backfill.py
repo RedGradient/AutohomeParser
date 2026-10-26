@@ -11,7 +11,7 @@ from normalize_vehicle_attributes import (
     upsert_rows,
     validate_arguments,
 )
-from tests.postgresql import PostgreSQLTestSchema
+from tests.postgresql import PostgreSQLTestSchema, seed_specs
 
 
 class VehicleAttributesBackfillTests(unittest.TestCase):
@@ -121,6 +121,7 @@ class VehicleAttributesBackfillTests(unittest.TestCase):
         database = PostgreSQLTestSchema().create()
         engine = database.create_engine()
         Base.metadata.create_all(engine)
+        seed_specs(engine, range(1, 502))
         rows = [
             normalize_vehicle_attributes(
                 spec_id,
@@ -142,6 +143,7 @@ class VehicleAttributesBackfillTests(unittest.TestCase):
         database = PostgreSQLTestSchema().create()
         engine = database.create_engine()
         Base.metadata.create_all(engine)
+        seed_specs(engine, (1,))
         original = normalize_vehicle_attributes(
             1,
             10,

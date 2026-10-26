@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 
 from autohome.models import Base, CustomsCalculation, CustomsPaymentResult
 from calculate_customs_payments import calculation_run_connection, process_batch
-from tests.postgresql import PostgreSQLTestSchema
+from tests.postgresql import PostgreSQLTestSchema, seed_specs
 
 
 def calculation_row() -> dict:
@@ -61,6 +61,7 @@ class CustomsRecalculationTests(unittest.TestCase):
         self.database = PostgreSQLTestSchema().create()
         self.engine = self.database.create_engine()
         Base.metadata.create_all(self.engine)
+        seed_specs(self.engine, (1001, 2001))
 
     def tearDown(self):
         self.engine.dispose()

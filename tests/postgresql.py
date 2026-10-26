@@ -8,6 +8,8 @@ import uuid
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
+from autohome.models import Series, Spec
+
 DEFAULT_TEST_DATABASE_URL = (
     "postgresql+psycopg://autohome:autohome@127.0.0.1:5432/autohome"
 )
@@ -51,3 +53,24 @@ class PostgreSQLTestSchema:
     def create_engine(self):
         """Создать синхронный engine внутри тестовой схемы."""
         return create_engine(self.database_url)
+
+
+def seed_specs(engine, spec_ids, *, series_id: int = 10) -> None:
+    """Добавить минимальные родительские series/specs для тестовых строк."""
+    with engine.begin() as connection:
+        connection.execute(
+            Series.__table__.insert(),
+            {"id": series_id, "name": "Test series", "raw_json": {}},
+        )
+        connection.execute(
+            Spec.__table__.insert(),
+            [
+                {
+                    "id": spec_id,
+                    "series_id": series_id,
+                    "name": f"Test spec {spec_id}",
+                    "raw_json": {},
+                }
+                for spec_id in spec_ids
+            ],
+        )

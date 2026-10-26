@@ -55,7 +55,9 @@ class AlembicMigrationTests(unittest.TestCase):
         self.database = PostgreSQLTestSchema().create()
         self.database_url = self.database.database_url
         self.config = Config(str(PROJECT_ROOT / "alembic.ini"))
-        self.config.set_main_option("sqlalchemy.url", self.database_url)
+        self.config.set_main_option(
+            "sqlalchemy.url", self.database_url.replace("%", "%%")
+        )
         self.config.attributes["database_url"] = self.database_url
 
     def tearDown(self):
@@ -116,6 +118,12 @@ class AlembicMigrationTests(unittest.TestCase):
                 }
                 self.assertTrue(expected_names <= actual_names)
                 all_index_names.update(actual_names)
+            for table_name in ("brands", "manufacturers", "series", "specs"):
+                all_index_names.update(
+                    index["name"]
+                    for index in inspector.get_indexes(table_name)
+                    if index["name"]
+                )
             self.assertTrue(TRIGRAM_INDEXES <= all_index_names)
         finally:
             engine.dispose()
