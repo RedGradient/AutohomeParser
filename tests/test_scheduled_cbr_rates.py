@@ -7,10 +7,10 @@ from decimal import Decimal
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
+from autohome.cli.calculate_customs_payments import process_batch
 from autohome.import_duty.scheduled_rates import synchronize_cbr_rates
 from autohome.import_duty.types import ExchangeRate
 from autohome.models import Base, CbrExchangeRate, CustomsCalculation
-from calculate_customs_payments import process_batch
 from tests.postgresql import PostgreSQLTestSchema, seed_specs
 from tests.test_customs_recalculation import calculation_row, payment_rows
 

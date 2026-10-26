@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from run_multi import require_database_url, run_stale_customs_recalculation
+from autohome.cli.run_multi import require_database_url, run_stale_customs_recalculation
 
 
 class RunMultiTests(unittest.TestCase):
@@ -18,7 +18,7 @@ class RunMultiTests(unittest.TestCase):
 
         self.assertEqual(require_database_url(database_url), database_url)
 
-    @patch("run_multi.subprocess.run")
+    @patch("autohome.cli.run_multi.subprocess.run")
     def test_stale_recalculation_uses_database_url_from_environment(self, run):
         database_url = "postgresql+psycopg://user:password@postgres/catalog"
 

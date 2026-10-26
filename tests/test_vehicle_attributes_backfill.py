@@ -4,13 +4,13 @@ import unittest
 
 from sqlalchemy import func, insert, select
 
-from autohome.models import Base, SpecVehicleAttributes
-from autohome.vehicle_attributes_normalizer import normalize_vehicle_attributes
-from normalize_vehicle_attributes import (
+from autohome.cli.normalize_vehicle_attributes import (
     build_normalized_rows,
     upsert_rows,
     validate_arguments,
 )
+from autohome.models import Base, SpecVehicleAttributes
+from autohome.vehicle_attributes_normalizer import normalize_vehicle_attributes
 from tests.postgresql import PostgreSQLTestSchema, seed_specs
 
 

@@ -7,7 +7,6 @@ import subprocess
 import sys
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import create_engine, select
@@ -19,7 +18,6 @@ from autohome.models import CbrExchangeRate
 
 RateFetcher = Callable[[date], dict[str, ExchangeRate]]
 Recalculator = Callable[[str, date, dict[str, ExchangeRate], str], None]
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def rates_differ(
@@ -42,7 +40,8 @@ def run_customs_recalculation(
     """Запустить существующую утилиту расчёта с уже полученными курсами."""
     command = [
         sys.executable,
-        str(PROJECT_ROOT / "calculate_customs_payments.py"),
+        "-m",
+        "autohome.cli.calculate_customs_payments",
         "--database-url",
         database_url,
         "--date",

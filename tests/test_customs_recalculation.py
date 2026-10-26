@@ -7,8 +7,11 @@ from decimal import Decimal
 
 from sqlalchemy import func, select
 
+from autohome.cli.calculate_customs_payments import (
+    calculation_run_connection,
+    process_batch,
+)
 from autohome.models import Base, CustomsCalculation, CustomsPaymentResult
-from calculate_customs_payments import calculation_run_connection, process_batch
 from tests.postgresql import PostgreSQLTestSchema, seed_specs
 
 
