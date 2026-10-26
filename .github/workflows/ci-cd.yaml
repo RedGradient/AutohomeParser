@@ -121,4 +121,4 @@ jobs:
           : "${DEPLOY_PATH:?GitHub secret DEPLOY_PATH is required}"
           port="${DEPLOY_PORT:-22}"
           ssh -i ~/.ssh/deploy_key -p "$port" "$DEPLOY_USER@$DEPLOY_HOST" \
-            "cd '$DEPLOY_PATH' && git fetch origin master && git checkout master && git pull --ff-only origin master && docker compose -f compose.prod.yaml up -d --build --wait --wait-timeout 180 --remove-orphans && docker compose -f compose.prod.yaml ps"
+            "cd '$DEPLOY_PATH' && git fetch origin master && git checkout master && git pull --ff-only origin master && docker compose -f compose.prod.yaml up -d --build --wait --wait-timeout 1800 --remove-orphans && docker compose -f compose.prod.yaml ps"
