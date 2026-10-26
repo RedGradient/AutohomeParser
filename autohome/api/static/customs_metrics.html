@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Метрики таможенных расчётов</title>
+  <style>
+    :root {
+      --ink: #18201d;
+      --muted: #68736e;
+      --paper: #f5f1e8;
+      --surface: rgba(255, 255, 255, .86);
+      --line: #dcd6c9;
+      --accent: #075b4c;
+      --accent-soft: #dcebe5;
+      --warning: #bc6b2c;
+      --danger: #a9453d;
+      --shadow: 0 18px 48px rgba(45, 48, 42, .08);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 8% 4%, #dfece5 0, transparent 28rem),
+        radial-gradient(circle at 90% 0, #efe0cb 0, transparent 25rem),
+        var(--paper);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
+
+    main { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 56px 0 72px; }
+    header { display: flex; justify-content: space-between; gap: 24px; align-items: end; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-weight: 750; letter-spacing: .08em; text-transform: uppercase; font-size: 12px; }
+    h1 { max-width: 780px; margin: 0; font-family: Georgia, serif; font-size: clamp(34px, 5vw, 62px); line-height: .98; letter-spacing: -.035em; }
+    .updated { color: var(--muted); white-space: nowrap; font-size: 14px; }
+    .updated strong { display: block; margin-top: 4px; color: var(--ink); font-size: 15px; }
+    section { margin-top: 42px; }
+    h2 { margin: 0 0 16px; font-size: 18px; }
+    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+    .card, .panel {
+      border: 1px solid rgba(133, 128, 115, .25);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+    .card { min-height: 136px; padding: 20px; border-radius: 18px; }
+    .card .label { color: var(--muted); font-size: 13px; line-height: 1.35; }
+    .card .value { margin-top: 18px; font-family: Georgia, serif; font-size: 36px; line-height: 1; }
+    .card.accent { background: var(--accent); color: #fff; }
+    .card.accent .label { color: #c9ded7; }
+    .panel { padding: 24px; border-radius: 22px; }
+    .coverage { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .status-list { display: grid; gap: 18px; }
+    .status-head { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 8px; font-size: 14px; }
+    .status-head strong { font-variant-numeric: tabular-nums; }
+    .track { height: 8px; overflow: hidden; border-radius: 99px; background: #ebe7de; }
+    .track span { display: block; height: 100%; min-width: 2px; border-radius: inherit; background: var(--accent); }
+    .status.warning .track span { background: var(--warning); }
+    .status.danger .track span { background: var(--danger); }
+    .tables { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { padding: 11px 0; border-bottom: 1px solid var(--line); text-align: left; }
+    th:last-child, td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+    th { color: var(--muted); font-size: 12px; font-weight: 650; }
+    tr:last-child td { border-bottom: 0; }
+    .empty { color: var(--muted); }
+    .state { margin: 80px auto; max-width: 620px; padding: 28px; text-align: center; }
+    .state h2 { font-family: Georgia, serif; font-size: 28px; }
+    .state p { color: var(--muted); line-height: 1.6; }
+    button { border: 0; border-radius: 10px; padding: 10px 15px; color: #fff; background: var(--accent); cursor: pointer; font: inherit; font-weight: 650; }
+    footer { margin-top: 36px; color: var(--muted); font-size: 12px; }
+    [hidden] { display: none !important; }
+
+    @media (max-width: 850px) {
+      header { align-items: start; flex-direction: column; }
+      .grid { grid-template-columns: repeat(2, 1fr); }
+      .coverage, .tables { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 480px) {
+      main { width: min(100% - 20px, 1180px); padding-top: 32px; }
+      .grid { grid-template-columns: 1fr; }
+      .card { min-height: 116px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div id="loading" class="state panel"><p>Загружаем актуальные метрики…</p></div>
+    <div id="error" class="state panel" hidden>
+      <h2>Метрики пока недоступны</h2>
+      <p id="error-message">Снимок ещё не рассчитан или сервис временно недоступен.</p>
+      <button type="button" onclick="loadMetrics()">Повторить</button>
+    </div>
+
+    <div id="content" hidden>
+      <header>
+        <div>
+          <p class="eyebrow">Autohome · обзор данных</p>
+          <h1>Таможенные расчёты в цифрах</h1>
+        </div>
+        <div class="updated">Снимок сформирован<strong id="generated-at">—</strong></div>
+      </header>
+
+      <section aria-labelledby="catalog-title">
+        <h2 id="catalog-title">Размер каталога</h2>
+        <div class="grid">
+          <article class="card"><div class="label">Бренды</div><div class="value" data-value="brands_count">—</div></article>
+          <article class="card"><div class="label">Серии</div><div class="value" data-value="series_count">—</div></article>
+          <article class="card"><div class="label">Комплектации</div><div class="value" data-value="specs_count">—</div></article>
+          <article class="card"><div class="label">Модификации</div><div class="value" data-value="modifications_count">—</div></article>
+        </div>
+      </section>
+
+      <section aria-labelledby="coverage-title">
+        <h2 id="coverage-title">Покрытие расчётами</h2>
+        <div class="coverage">
+          <article class="card accent">
+            <div class="label">Комплектации хотя бы с одним полным расчётом</div>
+            <div class="value" data-value="specs_with_complete_scenario_count">—</div>
+          </article>
+          <div class="panel status-list" id="statuses"></div>
+        </div>
+      </section>
+
+      <section aria-labelledby="reasons-title">
+        <h2 id="reasons-title">Почему не хватает данных</h2>
+        <div class="tables">
+          <article class="panel"><h2>По исходным полям</h2><table><thead><tr><th>Поле</th><th>Случаи</th></tr></thead><tbody id="missing-fields"></tbody></table></article>
+          <article class="panel"><h2>По видам платежей</h2><table><thead><tr><th>Платёж</th><th>Случаи</th></tr></thead><tbody id="payment-types"></tbody></table></article>
+          <article class="panel"><h2>По причинам</h2><table><thead><tr><th>Причина</th><th>Случаи</th></tr></thead><tbody id="reasons"></tbody></table></article>
+          <article class="panel"><h2>По типам импортёров</h2><table><thead><tr><th>Тип</th><th>Сценарии</th></tr></thead><tbody id="importers"></tbody></table></article>
+        </div>
+      </section>
+      <footer>Версия структуры снимка: <span id="schema-version">—</span></footer>
+    </div>
+  </main>
+
+  <script>
+    const number = new Intl.NumberFormat("ru-RU");
+    const labels = {
+      COMPLETE: "Полностью рассчитаны",
+      PARTIAL: "Рассчитаны частично",
+      MISSING_DATA: "Недостаточно данных",
+      MANUAL_REVIEW: "Нужна ручная проверка",
+      UNSUPPORTED: "Не поддерживаются"
+    };
+
+    function fillTable(id, values) {
+      const body = document.getElementById(id);
+      body.replaceChildren();
+      const rows = Object.entries(values || {}).sort((a, b) => b[1] - a[1]);
+      if (!rows.length) {
+        const row = body.insertRow();
+        const cell = row.insertCell();
+        cell.colSpan = 2;
+        cell.className = "empty";
+        cell.textContent = "Нет данных";
+        return;
+      }
+      for (const [name, count] of rows) {
+        const row = body.insertRow();
+        row.insertCell().textContent = name;
+        row.insertCell().textContent = number.format(count);
+      }
+    }
+
+    function renderStatuses(data) {
+      const statuses = [
+        ["COMPLETE", data.complete_scenarios_count, ""],
+        ["PARTIAL", data.partial_scenarios_count, "warning"],
+        ["MISSING_DATA", data.missing_data_scenarios_count, "danger"],
+        ["MANUAL_REVIEW", data.manual_review_scenarios_count, "warning"],
+        ["UNSUPPORTED", data.unsupported_scenarios_count, "danger"]
+      ];
+      const total = Math.max(data.customs_scenarios_count, 1);
+      const container = document.getElementById("statuses");
+      container.replaceChildren();
+      for (const [status, count, cssClass] of statuses) {
+        const item = document.createElement("div");
+        item.className = `status ${cssClass}`;
+        const percent = Math.round((count / total) * 1000) / 10;
+        item.innerHTML = `<div class="status-head"><span>${labels[status]}</span><strong>${number.format(count)} · ${percent}%</strong></div><div class="track"><span style="width:${percent}%"></span></div>`;
+        container.append(item);
+      }
+    }
+
+    function render(data) {
+      document.querySelectorAll("[data-value]").forEach((element) => {
+        element.textContent = number.format(data[element.dataset.value]);
+      });
+      document.getElementById("generated-at").textContent = new Intl.DateTimeFormat("ru-RU", { dateStyle: "long", timeStyle: "short", timeZone: "Europe/Moscow" }).format(new Date(data.generated_at)) + " МСК";
+      document.getElementById("schema-version").textContent = data.schema_version;
+      renderStatuses(data);
+      const missing = data.missing_data_statistics;
+      fillTable("missing-fields", missing.by_missing_field);
+      fillTable("payment-types", missing.by_payment_type);
+      fillTable("reasons", missing.by_reason);
+      fillTable("importers", missing.by_importer_type);
+    }
+
+    async function loadMetrics() {
+      document.getElementById("loading").hidden = false;
+      document.getElementById("error").hidden = true;
+      document.getElementById("content").hidden = true;
+      try {
+        const response = await fetch("/api/v1/metrics/customs", { headers: { Accept: "application/json" } });
+        if (!response.ok) throw new Error(response.status === 404 ? "Сначала запустите расчёт метрик." : `Сервис ответил с кодом ${response.status}.`);
+        render(await response.json());
+        document.getElementById("loading").hidden = true;
+        document.getElementById("content").hidden = false;
+      } catch (error) {
+        document.getElementById("loading").hidden = true;
+        document.getElementById("error-message").textContent = error.message;
+        document.getElementById("error").hidden = false;
+      }
+    }
+
+    loadMetrics();
+  </script>
+</body>
+</html>

@@ -1,21 +1,35 @@
 """Публичные маршруты сохранённых метрик проекта."""
 
 from collections.abc import Callable
+from pathlib import Path
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from autohome.api.errors import not_found
 from autohome.api.schemas import CustomsMetricsResponse
 from autohome.models import CustomsMetrics
 
+CUSTOMS_METRICS_PAGE = Path(__file__).parents[1] / "static" / "customs_metrics.html"
+CUSTOMS_METRICS_HTML = CUSTOMS_METRICS_PAGE.read_text(encoding="utf-8")
+
 
 def create_metrics_router(get_session: Callable) -> APIRouter:
     """Создать публичный роутер готовых снимков метрик."""
-    router = APIRouter(prefix="/api/v1/metrics", tags=["Metrics"])
+    router = APIRouter(tags=["Metrics"])
 
     @router.get(
-        "/customs",
+        "/metrics/customs",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def customs_metrics_page() -> HTMLResponse:
+        """Открыть страницу с последним снимком таможенных метрик."""
+        return HTMLResponse(CUSTOMS_METRICS_HTML)
+
+    @router.get(
+        "/api/v1/metrics/customs",
         response_model=CustomsMetricsResponse,
         summary="Получить метрики таможенных расчётов",
         description=(

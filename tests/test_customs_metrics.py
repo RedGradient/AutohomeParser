@@ -159,12 +159,12 @@ class CustomsMetricsTests(unittest.TestCase):
         self.assertEqual(snapshot.specs_count, 3)
         self.assertEqual(snapshot.modifications_count, 1)
         self.assertEqual(snapshot.customs_scenarios_count, 5)
-        self.assertEqual(snapshot.complete_scenarios_count, 1)
-        self.assertEqual(snapshot.partial_scenarios_count, 1)
+        self.assertEqual(snapshot.complete_scenarios_count, 2)
+        self.assertEqual(snapshot.partial_scenarios_count, 0)
         self.assertEqual(snapshot.missing_data_scenarios_count, 1)
         self.assertEqual(snapshot.manual_review_scenarios_count, 1)
         self.assertEqual(snapshot.unsupported_scenarios_count, 1)
-        self.assertEqual(snapshot.specs_with_complete_scenario_count, 1)
+        self.assertEqual(snapshot.specs_with_complete_scenario_count, 2)
 
         statistics = snapshot.missing_data_statistics_json
         self.assertEqual(statistics["affected_scenarios_count"], 1)

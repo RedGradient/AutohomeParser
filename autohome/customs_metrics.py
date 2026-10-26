@@ -145,7 +145,7 @@ def collect_customs_metrics(connection: Connection) -> CustomsMetricsSnapshot:
         )
         .order_by(CustomsCalculation.id, CustomsPaymentResult.payment_type)
     )
-    rows = connection.execution_options(stream_results=True).execute(statement)
+    rows = connection.execute(statement.execution_options(stream_results=True))
     try:
         for _, grouped_rows in groupby(rows, key=lambda row: row.calculation_id):
             payments = list(grouped_rows)

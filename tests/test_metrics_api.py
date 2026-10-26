@@ -34,6 +34,18 @@ def metrics_app(snapshot) -> FastAPI:
 
 
 class CustomsMetricsApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_metrics_page_is_public(self):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=metrics_app(None)),
+            base_url="http://test",
+        ) as client:
+            response = await client.get("/metrics/customs")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "text/html; charset=utf-8")
+        self.assertIn("Таможенные расчёты в цифрах", response.text)
+        self.assertIn('fetch("/api/v1/metrics/customs"', response.text)
+
     async def test_returns_saved_snapshot(self):
         snapshot = SimpleNamespace(
             schema_version=1,
