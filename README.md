@@ -1,5 +1,8 @@
 # Парсер Autohome
 
+[![CI/CD](https://github.com/RedGradient/AutohomeParser/actions/workflows/ci-cd.yaml/badge.svg)](https://github.com/RedGradient/AutohomeParser/actions/workflows/ci-cd.yaml)
+[![codecov](https://codecov.io/gh/RedGradient/AutohomeParser/graph/badge.svg)](https://codecov.io/gh/RedGradient/AutohomeParser)
+
 Scrapy-паук получает данные из JSON-эндпоинтов Autohome, нормализует их и
 сохраняет через SQLAlchemy в PostgreSQL.
 
@@ -14,6 +17,25 @@ Twisted, который использует Scrapy. Полученный отв
 python -m pip install -r requirements.txt
 scrapy crawl cars
 ```
+
+## CI/CD
+
+GitHub Actions проверяет Ruff и запускает тесты с PostgreSQL для каждого PR в
+`master`, а также после каждого push в `master`. Отчёт о покрытии публикуется в
+Codecov.
+
+После успешных проверок push в `master` автоматически обновляет приложение на
+сервере и пересобирает production-контейнеры. В GitHub Environment
+`production` должны быть заданы секреты:
+
+- `DEPLOY_HOST` — IP-адрес или имя сервера;
+- `DEPLOY_USER` — пользователь SSH;
+- `DEPLOY_PORT` — порт SSH; можно не задавать для порта 22;
+- `DEPLOY_PATH` — каталог уже клонированного проекта на сервере;
+- `DEPLOY_SSH_PRIVATE_KEY` — закрытый ключ для подключения;
+- `DEPLOY_KNOWN_HOSTS` — проверенная строка сервера из `known_hosts`.
+
+Файл `.env` остаётся только на сервере и не передаётся через GitHub Actions.
 
 ## HTTP API и Swagger
 
