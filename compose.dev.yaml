@@ -111,7 +111,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    entrypoint: ["python", "run_multi.py"]
+    entrypoint: ["python", "-m", "autohome.cli.run_multi"]
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-autohome}:${POSTGRES_PASSWORD:-autohome}@127.0.0.1:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-autohome}
       DATABASE_BATCH_SIZE: ${DATABASE_BATCH_SIZE:-1000}

@@ -5,10 +5,10 @@ from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
+from autohome.cli.calculate_customs_payments import select_vehicle_price
 from autohome.import_duty import DutyContext, ExchangeRate, ImporterType
 from autohome.import_duty.calculator import calculate_import_duty
 from autohome.import_duty.types import CalculationStatus
-from calculate_customs_payments import select_vehicle_price
 
 
 def context(

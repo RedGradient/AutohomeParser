@@ -40,7 +40,7 @@ Celery worker пересчитывает таможенные платежи, а
 
 ```bash
 docker compose -f compose.prod.yaml run --rm api \
-  python calculate_customs_payments.py
+  python -m autohome.cli.calculate_customs_payments
 ```
 
 Подробности расчётов приведены в

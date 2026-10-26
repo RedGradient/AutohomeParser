@@ -5,11 +5,11 @@ from types import SimpleNamespace
 
 from sqlalchemy import insert, select
 
+from autohome.cli.backfill_vehicle_attribute_inferences import backfill
 from autohome.models import Base, Series, Spec, SpecVehicleAttributes
 from autohome.vehicle_attribute_inference import (
     VEHICLE_ATTRIBUTE_INFERENCE_RULES_VERSION,
 )
-from backfill_vehicle_attribute_inferences import backfill
 from tests.postgresql import PostgreSQLTestSchema
 
 

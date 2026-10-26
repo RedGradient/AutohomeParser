@@ -80,10 +80,6 @@ make calculate-customs-payments \
 
 - `make audit-vehicle-classifications` — проверить готовность к классификации
   8702–8704.
-- `make audit-indirect-vehicle-attributes` — показать косвенные признаки без
-  записи.
-- `make audit-recycling-fee-commercial-categories` — проверить готовность
-  M2/M3/N1/N2/N3.
 - `make backfill-vehicle-attribute-inferences` — выполнить dry-run восстановления
   признаков.
 
@@ -101,5 +97,5 @@ make backfill-vehicle-attribute-inferences \
 
 ```bash
 docker compose -f compose.prod.yaml run --rm api \
-  python calculate_customs_payments.py
+  python -m autohome.cli.calculate_customs_payments
 ```

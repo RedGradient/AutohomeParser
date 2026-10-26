@@ -5,13 +5,13 @@ from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 
-from autohome.import_duty import ExchangeRate, ImporterType
-from autohome.import_duty.rates import RULES_VERSION
-from calculate_customs_payments import (
+from autohome.cli.calculate_customs_payments import (
     classify_database_row,
     make_rows,
     stable_calculation_id,
 )
+from autohome.import_duty import ExchangeRate, ImporterType
+from autohome.import_duty.rates import RULES_VERSION
 
 CALCULATION_DATE = date(2026, 10, 19)
 RATES = {

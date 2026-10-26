@@ -79,11 +79,11 @@ Autohome некорректно завершают ответ в Twisted. Вал
 ## Многопроцессный запуск
 
 ```bash
-.venv/bin/python run_multi.py \
+.venv/bin/python -m autohome.cli.run_multi \
   --interfaces wlp0s20f3,enp0s20f0u1c4i2
 ```
 
-Основные аргументы `run_multi.py`:
+Основные аргументы `autohome.cli.run_multi`:
 
 - `--interfaces` — обязательный список интерфейсов;
 - `--database-url` — общая PostgreSQL, обычно из `DATABASE_URL`;

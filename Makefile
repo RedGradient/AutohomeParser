@@ -19,8 +19,6 @@ DATABASE_BATCH_SIZE ?= 1000
 SHUTDOWN_TIMEOUT ?= 120
 NORMALIZE_VEHICLE_ATTRIBUTES_ARGS ?=
 AUDIT_VEHICLE_CLASSIFICATIONS_ARGS ?=
-AUDIT_INDIRECT_VEHICLE_ATTRIBUTES_ARGS ?=
-AUDIT_RECYCLING_FEE_COMMERCIAL_CATEGORIES_ARGS ?=
 BACKFILL_VEHICLE_ATTRIBUTE_INFERENCES_ARGS ?=
 CALCULATE_CUSTOMS_PAYMENTS_ARGS ?=
 API_HOST ?= 0.0.0.0
@@ -38,7 +36,7 @@ ETH_TABLE := 10102
 WIFI_PRIORITY := 10101
 ETH_PRIORITY := 10102
 
-.PHONY: help lint lint-fix pre-commit-install test-db-up test test-db-down network-up network-down network-status network-test postgres-up database-migrate api-up api-logs celery-logs parser-run parser-resume parser-logs api-run database-reset parameters-reset build-modifications normalize-vehicle-attributes audit-vehicle-classifications audit-indirect-vehicle-attributes audit-recycling-fee-commercial-categories backfill-vehicle-attribute-inferences translate-db calculate-customs-payments docker-down
+.PHONY: help lint lint-fix pre-commit-install test-db-up test test-db-down network-up network-down network-status network-test postgres-up database-migrate api-up api-logs celery-logs parser-run parser-resume parser-logs api-run database-reset parameters-reset build-modifications normalize-vehicle-attributes audit-vehicle-classifications backfill-vehicle-attribute-inferences translate-db calculate-customs-payments docker-down
 
 help:
 	@echo "Доступные команды:"
@@ -65,8 +63,6 @@ help:
 	@echo "  make build-modifications — нормализовать параметры и собрать модификации"
 	@echo "  make normalize-vehicle-attributes — нормализовать кузовные характеристики"
 	@echo "  make audit-vehicle-classifications — проверить классификацию 8702–8704"
-	@echo "  make audit-indirect-vehicle-attributes — проверить косвенные признаки без записи"
-	@echo "  make audit-recycling-fee-commercial-categories — проверить готовность M2/M3/N1/N2/N3"
 	@echo "  make backfill-vehicle-attribute-inferences — dry-run косвенных признаков"
 	@echo "  make translate-db    — перевести уже сохранённые данные"
 	@echo "  make calculate-customs-payments — рассчитать таможенные платежи"
@@ -207,48 +203,38 @@ api-run: postgres-up
 
 database-reset: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
-		.venv/bin/python reset_database.py
+		.venv/bin/python -m autohome.cli.reset_database
 
 parameters-reset: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
-		.venv/bin/python reset_parameters.py --yes
+		.venv/bin/python -m autohome.cli.reset_parameters --yes
 
 build-modifications: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
-		.venv/bin/python build_modifications.py
+		.venv/bin/python -m autohome.cli.build_modifications
 
 normalize-vehicle-attributes: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
-		.venv/bin/python normalize_vehicle_attributes.py \
+		.venv/bin/python -m autohome.cli.normalize_vehicle_attributes \
 		$(NORMALIZE_VEHICLE_ATTRIBUTES_ARGS)
 
 audit-vehicle-classifications: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
-		.venv/bin/python audit_vehicle_classifications.py \
+		.venv/bin/python -m autohome.cli.audits.audit_vehicle_classifications \
 		$(AUDIT_VEHICLE_CLASSIFICATIONS_ARGS)
-
-audit-indirect-vehicle-attributes: postgres-up
-	@DATABASE_URL='$(DATABASE_URL)' \
-		.venv/bin/python audit_indirect_vehicle_attributes.py \
-		$(AUDIT_INDIRECT_VEHICLE_ATTRIBUTES_ARGS)
-
-audit-recycling-fee-commercial-categories: postgres-up
-	@DATABASE_URL='$(DATABASE_URL)' \
-		.venv/bin/python audit_recycling_fee_commercial_categories.py \
-		$(AUDIT_RECYCLING_FEE_COMMERCIAL_CATEGORIES_ARGS)
 
 backfill-vehicle-attribute-inferences: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
-		.venv/bin/python backfill_vehicle_attribute_inferences.py \
+		.venv/bin/python -m autohome.cli.backfill_vehicle_attribute_inferences \
 		$(BACKFILL_VEHICLE_ATTRIBUTE_INFERENCES_ARGS)
 
 translate-db: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
-		.venv/bin/python translate_database.py
+		.venv/bin/python -m autohome.cli.translate_database
 
 calculate-customs-payments: postgres-up
 	@DATABASE_URL='$(DATABASE_URL)' \
-		.venv/bin/python calculate_customs_payments.py \
+		.venv/bin/python -m autohome.cli.calculate_customs_payments \
 		$(CALCULATE_CUSTOMS_PAYMENTS_ARGS)
 
 docker-down:

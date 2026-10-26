@@ -20,7 +20,7 @@ RUN python -m pip install --upgrade pip \
 COPY autohome ./autohome
 COPY alembic ./alembic
 COPY alembic.ini ./
-COPY scrapy.cfg run_multi.py calculate_customs_payments.py ./
+COPY scrapy.cfg ./
 
 USER autohome
 

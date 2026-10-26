@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from audit_vehicle_classifications import audit_classifications
+from autohome.cli.audits.audit_vehicle_classifications import audit_classifications
 from autohome.models import Base, SpecVehicleAttributes
 from tests.postgresql import PostgreSQLTestSchema, seed_specs
 

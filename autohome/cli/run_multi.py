@@ -386,7 +386,8 @@ def run_stale_customs_recalculation(database_url: str) -> None:
     subprocess.run(
         [
             sys.executable,
-            str(Path(__file__).resolve().parent / "calculate_customs_payments.py"),
+            "-m",
+            "autohome.cli.calculate_customs_payments",
             "--mode",
             "stale",
         ],

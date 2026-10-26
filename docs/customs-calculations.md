@@ -54,7 +54,7 @@ Production Docker:
 
 ```bash
 docker compose -f compose.prod.yaml run --rm api \
-  python calculate_customs_payments.py
+  python -m autohome.cli.calculate_customs_payments
 ```
 
 ## Автоматическое обновление
@@ -67,7 +67,8 @@ Celery beat ежедневно в 08:00 `Europe/Moscow` проверяет CNY �
 отсутствующие или устаревшие сценарии. Неуспешный полный перерасчёт не помечает
 курс как применённый.
 
-После успешного `run_multi.py` также запускается инкрементальный перерасчёт. Его
+После успешного `autohome.cli.run_multi` также запускается инкрементальный
+перерасчёт. Его
 можно отключить аргументом `--skip-customs-recalculation`.
 
 ## Ограничения
