@@ -52,6 +52,7 @@
     .card.accent { background: var(--accent); color: #fff; }
     .card.accent .label { color: #c9ded7; }
     .panel { padding: 24px; border-radius: 22px; }
+    .panel-note { min-height: 42px; margin: -6px 0 14px; color: var(--muted); font-size: 13px; line-height: 1.5; }
     .coverage { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     .status-list { display: grid; gap: 18px; }
     .status-head { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 8px; font-size: 14px; }
@@ -128,10 +129,26 @@
       <section aria-labelledby="reasons-title">
         <h2 id="reasons-title">Почему не хватает данных</h2>
         <div class="tables">
-          <article class="panel"><h2>По исходным полям</h2><table><thead><tr><th>Поле</th><th>Случаи</th></tr></thead><tbody id="missing-fields"></tbody></table></article>
-          <article class="panel"><h2>По видам платежей</h2><table><thead><tr><th>Платёж</th><th>Случаи</th></tr></thead><tbody id="payment-types"></tbody></table></article>
-          <article class="panel"><h2>По причинам</h2><table><thead><tr><th>Причина</th><th>Случаи</th></tr></thead><tbody id="reasons"></tbody></table></article>
-          <article class="panel"><h2>По типам импортёров</h2><table><thead><tr><th>Тип</th><th>Сценарии</th></tr></thead><tbody id="importers"></tbody></table></article>
+          <article class="panel">
+            <h2>По исходным полям</h2>
+            <p class="panel-note">Характеристики автомобиля или расчёта, которых не хватило для определения платежа.</p>
+            <table><thead><tr><th>Поле</th><th>Случаи</th></tr></thead><tbody id="missing-fields"></tbody></table>
+          </article>
+          <article class="panel">
+            <h2>По видам платежей</h2>
+            <p class="panel-note">Платежи, для которых хотя бы один результат получил статус MISSING_DATA.</p>
+            <table><thead><tr><th>Платёж</th><th>Случаи</th></tr></thead><tbody id="payment-types"></tbody></table>
+          </article>
+          <article class="panel">
+            <h2>По причинам</h2>
+            <p class="panel-note">Машинные коды причин, записанные калькулятором при невозможности расчёта.</p>
+            <table><thead><tr><th>Причина</th><th>Случаи</th></tr></thead><tbody id="reasons"></tbody></table>
+          </article>
+          <article class="panel">
+            <h2>По типам импортёров</h2>
+            <p class="panel-note">Проблемные сценарии для физических и юридических лиц; каждый сценарий учитывается один раз.</p>
+            <table><thead><tr><th>Тип</th><th>Сценарии</th></tr></thead><tbody id="importers"></tbody></table>
+          </article>
         </div>
       </section>
       <footer>Версия структуры снимка: <span id="schema-version">—</span></footer>

@@ -44,6 +44,7 @@ class CustomsMetricsApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["content-type"], "text/html; charset=utf-8")
         self.assertIn("Таможенные расчёты в цифрах", response.text)
+        self.assertIn("каждый сценарий учитывается один раз", response.text)
         self.assertIn('fetch("/api/v1/metrics/customs"', response.text)
 
     async def test_returns_saved_snapshot(self):
